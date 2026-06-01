@@ -189,7 +189,7 @@ export async function attachContactCollaboratorByUser(args: {
     if (!user) return;
 
     // Idempotent upsert — giữ role primary nếu đã có
-    await prisma.contactAccess.upsert({
+    const result = await prisma.contactAccess.upsert({
       where: { contactId_userId: { contactId: args.contactId, userId: args.userId } },
       update: {}, // no-op
       create: {
@@ -200,6 +200,19 @@ export async function attachContactCollaboratorByUser(args: {
         source: args.source,
       },
     });
+
+    // M57 v2 2026-06-01: trigger recompute auto-tag "Cùng chăm" sau khi
+    // ContactAccess count có thể đổi. Fire-and-forget, không block flow.
+    if (result) {
+      void (async () => {
+        try {
+          const { recomputeCungChamTag } = await import('../tags/cung-cham-tag-service.js');
+          await recomputeCungChamTag(args.contactId);
+        } catch {
+          /* best-effort */
+        }
+      })();
+    }
   } catch {
     // best-effort
   }
