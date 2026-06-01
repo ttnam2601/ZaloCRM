@@ -1,14 +1,27 @@
 /**
  * zalo-label-queue.ts — BullMQ serial enqueue per zaloAccountId.
  *
- * T-D Codex /plan-eng-review M57. Zalo SDK `updateLabels({labelData, version})`
- * REPLACE WHOLE structure. 2 concurrent assign cùng nick → 1 mất. DB
- * $transaction KHÔNG protect remote replace race. Cần serial queue dedup theo
- * jobId = `${zaloAccountId}:${labelId}:${threadId}` để 1 nick chỉ 1 SDK call
- * tại 1 thời điểm.
+ * ╔═══════════════════════════════════════════════════════════════════╗
+ * ║ STATUS: DEFER 2026-06-01 — CODE GIỮ DẰN DÀNH, CHƯA WIRE VÀO ROUTE ║
+ * ╚═══════════════════════════════════════════════════════════════════╝
  *
- * Fallback: nếu REDIS_URL không có → log warning, skip queue (xử lý trực tiếp,
- * vẫn race). Production deploy cần Redis.
+ * Lý do defer:
+ * Anh review T-D 2026-06-01 verify lại race scenario:
+ *   - HS Holding model: mỗi sale chăm nick riêng, KHÔNG share nick chăm KH
+ *   - Race chỉ xảy ra khi 2+ sale CÙNG share quyền 1 nick + CÙNG assign tag
+ *     cho 2 KH KHÁC NHAU trong window ~1-2s
+ *   - Tần suất thực tế: 0 (chỉ internal/notify nick share, không chăm KH)
+ *
+ * Khi nào wire vào assign-thread:
+ *   - Future scale có share-nick scenario (chia ca chăm KH chung)
+ *   - Hoặc detect zaloAccountAccess.userId count > 1 ở runtime
+ *
+ * Logic ban đầu (T-D Codex /plan-eng-review M57):
+ * Zalo SDK `updateLabels({labelData, version})` REPLACE WHOLE structure.
+ * 2 concurrent assign cùng nick → 1 mất. DB $transaction KHÔNG protect remote.
+ * Serial queue dedup jobId = `${zaloAccountId}:${labelId}:${threadId}`.
+ *
+ * Fallback: nếu REDIS_URL không có → log warning, skip queue.
  */
 
 import { Queue, Worker, type Job } from 'bullmq';
