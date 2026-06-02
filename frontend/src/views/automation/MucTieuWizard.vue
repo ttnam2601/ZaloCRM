@@ -792,6 +792,69 @@
           </div>
         </div>
 
+        <!-- M12 — Preview Quy tắc gửi an toàn (read-only, luôn hiển thị kể cả khi preview API fail) -->
+        <div class="preview-card preview-card-safety">
+          <h3>🔧 Quy tắc gửi an toàn (đã cấu hình ở Bước 3)</h3>
+          <div class="time-list safety-list">
+            <div class="time-row">
+              <span class="lbl">Giờ hoạt động (giờ VN)</span>
+              <span class="val">
+                {{ form.safetyRules.quietHoursStart }} – {{ form.safetyRules.quietHoursEnd }}
+                <span class="hint-badge safety-badge">{{ workingHoursLabel }}</span>
+              </span>
+            </div>
+            <div class="time-row">
+              <span class="lbl">Khoảng cách giữa các lần gửi</span>
+              <span class="val">
+                {{ formatNum(form.safetyRules.sendIntervalSeconds) }} giây
+                <span class="hint-badge safety-badge">
+                  ~ {{ (form.safetyRules.sendIntervalSeconds / 60).toFixed(form.safetyRules.sendIntervalSeconds % 60 === 0 ? 0 : 1) }} phút
+                </span>
+              </span>
+            </div>
+            <div class="time-row">
+              <span class="lbl">Bỏ qua KH gần đây (cross-nick)</span>
+              <span class="val">
+                <template v-if="form.safetyRules.recencyDays > 0">
+                  {{ form.safetyRules.recencyDays }} ngày
+                </template>
+                <template v-else>
+                  <span class="safety-off">— Không lọc</span>
+                </template>
+              </span>
+            </div>
+            <div class="time-row">
+              <span class="lbl">Bỏ qua KH nhiều nick</span>
+              <span class="val">
+                <template v-if="form.safetyRules.multinickThreshold > 0">
+                  ≥ {{ form.safetyRules.multinickThreshold }} nick → bỏ qua
+                </template>
+                <template v-else>
+                  <span class="safety-off">— Tắt (không filter)</span>
+                </template>
+              </span>
+            </div>
+            <div class="time-row">
+              <span class="lbl">Delay sau khi gửi kết bạn</span>
+              <span class="val">
+                {{ formatNum(form.safetyRules.delayAfterFriendRequestMin) }} phút
+                <span class="hint-badge safety-badge">
+                  ~ {{ (form.safetyRules.delayAfterFriendRequestMin / 60).toFixed(form.safetyRules.delayAfterFriendRequestMin % 60 === 0 ? 0 : 1) }} giờ
+                </span>
+              </span>
+            </div>
+            <div class="time-row">
+              <span class="lbl">Tạm dừng khi KH reply</span>
+              <span class="val">
+                {{ form.safetyRules.pauseHoursOnReply }} giờ
+              </span>
+            </div>
+          </div>
+          <div class="info-banner sm safety-info">
+            ℹ Các giá trị này chỉ áp dụng cho Mục tiêu hiện tại — sửa ở Bước 3 nếu cần đổi.
+          </div>
+        </div>
+
         <!-- Thời điểm bắt đầu -->
         <div class="section start-mode-section">
           <div class="section-title">🚀 Thời điểm bắt đầu <span class="req">*</span></div>
@@ -2131,6 +2194,36 @@ textarea.ta:focus { border-color: var(--primary); outline: none; box-shadow: 0 0
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* M12 — Safety rules preview card (standalone, full-width row sau preview-grid) */
+.preview-card-safety {
+  margin-top: 16px;
+}
+.preview-card-safety .safety-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 24px;
+}
+@media (max-width: 1366px) {
+  .preview-card-safety .safety-list { grid-template-columns: 1fr; }
+}
+.preview-card-safety .safety-badge {
+  background: #EEF2FF;
+  color: #4F46E5;
+  border-color: #C7D2FE;
+  margin-left: 8px;
+}
+.preview-card-safety .safety-off {
+  color: var(--text-mute);
+  font-weight: 500;
+  font-style: italic;
+}
+.preview-card-safety .safety-info {
+  margin-top: 12px;
+  background: var(--bg-soft);
+  color: var(--text-2);
+  border: 1px dashed var(--border);
 }
 
 .alloc-table { width: 100%; border-collapse: collapse; }
