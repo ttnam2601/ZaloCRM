@@ -396,17 +396,21 @@ async function tryCompleteCampaign(input: {
 }): Promise<void> {
   try {
     const queue = getSequenceStepQueue();
-    // Đếm jobs còn pending của trigger này (delayed + waiting + active)
-    const [delayed, waiting, active] = await Promise.all([
-      queue.getDelayedCount(),
-      queue.getWaitingCount(),
-      queue.getActiveCount(),
-    ]);
-    if (delayed + waiting + active > 0) {
-      // Còn jobs khác đang chạy — chưa thể chắc chắn campaign xong. Để sweeper kiểm tra
-      // chính xác hơn qua DB scan ở lần tick tiếp.
+    // Đếm jobs PENDING CỦA RIÊNG TRIGGER NÀY (delayed + waiting + active).
+    // P2 fix: getDelayedCount/getWaitingCount/getActiveCount KHÔNG filter triggerId
+    // → đếm queue toàn cục → campaign bị "kẹt" active vĩnh viễn khi org có nhiều
+    // trigger chạy song song. Dùng getJobs + filter jobId.startsWith(triggerId + '-')
+    // (jobId pattern = `${triggerId}-${contactId}-${stepIdx}` — xem buildSequenceStepJobId).
+    // Tradeoff: getJobs scan toàn queue (có thể chậm với 10k+ jobs) nhưng
+    // tryCompleteCampaign chỉ chạy sau step cuối, tần suất rất thấp → chấp nhận được.
+    const jobs = await queue.getJobs(['delayed', 'waiting', 'active']);
+    const prefix = `${input.triggerId}-`;
+    const pendingForTrigger = jobs.filter((j) => j.id?.startsWith(prefix)).length;
+    if (pendingForTrigger > 0) {
+      // Còn jobs của trigger này đang chạy — chưa thể chắc chắn campaign xong.
+      // Để sweeper kiểm tra chính xác hơn qua DB scan ở lần tick tiếp.
       logger.debug(
-        `[sequence-step-worker] tryCompleteCampaign trigger=${input.triggerId} contact=${input.contactId} — còn ${delayed + waiting + active} jobs pending in queue`,
+        `[sequence-step-worker] tryCompleteCampaign trigger=${input.triggerId} contact=${input.contactId} — còn ${pendingForTrigger} jobs pending in queue (scanned ${jobs.length} total)`,
       );
       return;
     }
