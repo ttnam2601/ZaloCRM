@@ -894,6 +894,35 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
         })
       : 0;
 
+    // Wave 4 2026-06-03 — P2 thêm 2 counter campaign-level (sequence-aware).
+    // - enrollingSequence: KH đang trong sequence bám đuổi (AutomationCampaign.state='active')
+    // - completedSequence: KH đã chạy xong toàn bộ chuỗi (state='completed')
+    // Index @@index([triggerId, state]) đã cover → composite seek, không seq scan.
+    // Defense-in-depth: filter orgId thêm dù route đã verify trigger.orgId.
+    const campaignStateGroups = await prisma.automationCampaign.groupBy({
+      by: ['state'],
+      where: { orgId: user.orgId, triggerId: trigger.id },
+      _count: { id: true },
+    });
+    const campaignByState = new Map(
+      campaignStateGroups.map((g) => [g.state, g._count.id]),
+    );
+    const enrollingSequence = campaignByState.get('active') ?? 0;
+    const completedSequence = campaignByState.get('completed') ?? 0;
+
+    // Wave 4 2026-06-03 — P1 fix counter "Còn X KH" semantic-aware.
+    // Semantic mới: "Còn X KH" = KH ĐANG XỬ LÝ thực sự, bao gồm cả 2 phase:
+    //   (a) Phase 1: entry chờ gửi friend-request (queueStatus='queued_for_pickup')
+    //                hoặc đang được nick pickup (queueStatus='processing')
+    //   (b) Phase 2: KH đã accept friend-request, đang trong sequence bám đuổi
+    //                (AutomationCampaign.state='active')
+    // Trước đây UI dùng (total - processed) → KHÔNG đếm KH phase 2 → khi tất cả
+    // entry đều processed nhưng campaign vẫn active → hiển thị "Còn 0 KH" sai.
+    // Phase 1 lấy từ counters đã groupBy ở trên (không thêm query mới).
+    const stillRunningPhase1 =
+      (counters.queued_for_pickup ?? 0) + (counters.processing ?? 0);
+    const stillRunning = stillRunningPhase1 + enrollingSequence;
+
     // Nick load — per nick stats
     const spec = trigger.segmentSpec as { nickIds?: string[] } | null;
     const nickIds = spec?.nickIds ?? [];
@@ -1208,6 +1237,14 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
         customer_reply: Math.max(counters.customer_reply, customerReply),
         customer_block: Math.max(counters.customer_block, customerBlock),
         converted_lead: Math.max(counters.converted_lead, convertedLead),
+        // Wave 4 2026-06-03 — P2 campaign-level counters (sequence bám đuổi).
+        // Additive, backward-compat: FE cũ vẫn đọc các key cũ qua `...counters` spread.
+        enrollingSequence,
+        completedSequence,
+        // Wave 4 2026-06-03 — P1 sequence-aware "Còn X KH" semantic.
+        // FE etaInfo dùng key này thay (total - processed) để đếm cả KH phase 2.
+        stillRunning,
+        stillRunningPhase1,
       },
       nicks: nickStats,
       // Task B Nick offline 2026-05-30 — health rollup cho banner FE.

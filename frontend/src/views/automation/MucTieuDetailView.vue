@@ -162,14 +162,27 @@
         </div>
 
         <!-- ============ ETA BAR ============ -->
+        <!-- Wave 4 2026-06-03 — P1 sequence-aware "Còn X KH":
+             - isDone=true  → "✅ Đã xử lý hết KH"
+             - hasBreakdown → "Còn N KH đang xử lý (M bám đuổi + K chờ gửi) ~ Y giờ"
+             - fallback     → "Còn X KH ~ Y giờ" (BE cũ chưa rebuild) -->
         <div class="eta-bar">
-          <span class="eta-icon">⏱</span>
-          <span>
+          <span class="eta-icon">{{ etaInfo.isDone ? '✅' : '⏱' }}</span>
+          <span v-if="etaInfo.isDone">
+            <strong>Đã xử lý hết KH</strong>
+          </span>
+          <span v-else-if="etaInfo.hasBreakdown">
+            Còn <strong>{{ formatNum(etaInfo.remaining) }} KH đang xử lý</strong>
+            (<strong>{{ formatNum(etaInfo.phase2Running) }}</strong> bám đuổi
+            + <strong>{{ formatNum(etaInfo.phase1Pending) }}</strong> chờ gửi)
+            ~ <strong>{{ etaInfo.daysText }}</strong>
+          </span>
+          <span v-else>
             Còn <strong>{{ formatNum(etaInfo.remaining) }} KH</strong>
             ~ <strong>{{ etaInfo.daysText }}</strong>
           </span>
-          <span class="eta-sep">·</span>
-          <span>
+          <span v-if="!etaInfo.isDone" class="eta-sep">·</span>
+          <span v-if="!etaInfo.isDone">
             Dự kiến xong <strong>{{ etaInfo.finishLabel }}</strong>
           </span>
         </div>
@@ -265,7 +278,11 @@
           </div>
         </section>
 
-        <!-- ============ 4 BIG STAT CARDS ============ -->
+        <!-- ============ 6 BIG STAT CARDS ============ -->
+        <!-- Wave 4 2026-06-03 — P2 thêm 2 ô campaign-level sau "Đã xử lý":
+             - ô 3: 🎯 Đang bám đuổi (enrollingSequence) — KH đang chăm sóc qua sequence
+             - ô 4: ✅ Hoàn tất sequence (completedSequence) — KH đã xong toàn bộ chuỗi
+             Grid 6 cột (HD-first 1366px): ~210px/card, gap 10px, vẫn dày đặc OK. -->
         <div class="stats-row">
           <div class="stat-card accent-blue">
             <div class="stat-label">Trong tệp</div>
@@ -278,6 +295,16 @@
             <div class="stat-hint">
               {{ pct(stats.processed, stats.total) }}% — đã qua bước kiểm Zalo
             </div>
+          </div>
+          <div class="stat-card accent-orange">
+            <div class="stat-label">🎯 Đang bám đuổi</div>
+            <div class="stat-value">{{ formatNum(stats.enrollingSequence) }}</div>
+            <div class="stat-hint">KH đang chăm sóc qua sequence</div>
+          </div>
+          <div class="stat-card accent-teal">
+            <div class="stat-label">✅ Hoàn tất sequence</div>
+            <div class="stat-value">{{ formatNum(stats.completedSequence) }}</div>
+            <div class="stat-hint">KH đã xong toàn bộ chuỗi</div>
           </div>
           <div class="stat-card accent-purple">
             <div class="stat-label">Có Zalo</div>
@@ -963,11 +990,18 @@ const stats = computed(() => {
     (c.skipped_recency ?? 0) +
     (c.failed_permanent ?? 0) +
     (c.failed_stuck ?? 0);
+  // Wave 4 2026-06-03 — P2 campaign-level (sequence bám đuổi).
+  // BE trả `enrollingSequence` + `completedSequence` qua spread counters. Fallback 0
+  // khi BE chưa rebuild (deploy lệch FE/BE).
+  const enrollingSequence = c.enrollingSequence ?? 0;
+  const completedSequence = c.completedSequence ?? 0;
   return {
     total,
     processed: Math.min(processed, total),
     hasZalo,
     noZalo,
+    enrollingSequence,
+    completedSequence,
   };
 });
 
@@ -992,16 +1026,38 @@ const phase2 = computed(() => {
   return { welcome, running, done, stopped, reply, block, lead };
 });
 
+// Wave 4 2026-06-03 — P1 fix counter "Còn X KH" semantic.
+// BE giờ trả `stillRunning` = phase1 (queued_for_pickup + processing) + phase2
+// (campaign state='active'). Đây là số KH thực sự ĐANG trong workflow (gửi friend-req
+// HOẶC bám đuổi sequence). Trước đây dùng (total - processed) → khi tất cả entry
+// đều processed nhưng campaign vẫn active → "Còn 0 KH" SAI. Giờ split rõ:
+//   - phase1Pending = stillRunningPhase1 (chờ gửi)
+//   - phase2Running = enrollingSequence (bám đuổi)
+//   - remaining     = stillRunning (tổng 2 phase)
+// Fallback (BE chưa rebuild): trả về (total - processed) như cũ.
 const etaInfo = computed(() => {
   const c = data.value?.counters ?? {};
   const total = stats.value.total;
   const processed = stats.value.processed;
-  const remaining = Math.max(0, total - processed);
+  const phase1Pending = c.stillRunningPhase1 ?? 0;
+  const phase2Running = c.enrollingSequence ?? 0;
+  const beStillRunning = c.stillRunning;
+  const remaining =
+    typeof beStillRunning === 'number'
+      ? beStillRunning
+      : Math.max(0, total - processed);
   // BE may expose etaSeconds / etaDays — fall back to crude estimate
   const etaDays = c.eta_days ?? estimateDays(remaining, data.value?.nicks ?? []);
   const finish = new Date(Date.now() + etaDays * 86400000);
+  // "Còn N KH đang xử lý (M bám đuổi + K chờ gửi)" — chỉ render khi có data phân tách.
+  const hasBreakdown =
+    typeof beStillRunning === 'number' && (phase1Pending > 0 || phase2Running > 0);
   return {
     remaining,
+    phase1Pending,
+    phase2Running,
+    hasBreakdown,
+    isDone: remaining === 0,
     daysText: etaDays >= 1 ? `${etaDays.toFixed(1)} ngày` : `${Math.round(etaDays * 24)} giờ`,
     finishLabel: formatInOrgTz(finish.toISOString()),
   };
@@ -2141,27 +2197,31 @@ onUnmounted(() => {
 .safety-empty a { color: var(--primary); text-decoration: none; font-weight: 600; }
 .safety-empty a:hover { text-decoration: underline; }
 
-/* stats */
+/* stats — Wave 4 2026-06-03 grid 4→6 cột (HD-first 1366px: ~210px/card). */
 .stats-row {
   margin-top: 14px;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
 }
 .stat-card {
   background: white;
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   box-shadow: var(--shadow-1);
+  min-width: 0;
 }
 .stat-card .stat-label {
   font-size: 11px; font-weight: 600; color: var(--text-3);
   text-transform: uppercase; letter-spacing: 0.04em;
   margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .stat-card .stat-value {
-  font-size: 24px; font-weight: 700; color: var(--text-1);
+  font-size: 22px; font-weight: 700; color: var(--text-1);
   line-height: 1.1;
   letter-spacing: -0.02em;
 }
@@ -2170,6 +2230,9 @@ onUnmounted(() => {
 .stat-card.accent-green { border-top: 3px solid var(--success); }
 .stat-card.accent-purple { border-top: 3px solid var(--purple); }
 .stat-card.accent-red { border-top: 3px solid var(--danger); }
+/* Wave 4 2026-06-03 — orange (đang bám đuổi) + teal (hoàn tất sequence). */
+.stat-card.accent-orange { border-top: 3px solid var(--warning); }
+.stat-card.accent-teal { border-top: 3px solid #00b8d9; }
 
 /* CTA red */
 .cta-red {
