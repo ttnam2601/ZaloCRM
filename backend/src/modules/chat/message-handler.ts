@@ -236,7 +236,14 @@ export async function handleIncomingMessage(
   try {
     const account = await prisma.zaloAccount.findUnique({
       where: { id: msg.accountId },
-      select: { orgId: true, ownerUserId: true },
+      // 2026-06-03 — fix M11 writer: thêm displayName + owner.fullName để
+      // set Source Badge "👤 Sale CRM · {tên} 🔄" cho tin sync từ Zalo Real.
+      select: {
+        orgId: true,
+        ownerUserId: true,
+        displayName: true,
+        owner: { select: { fullName: true } },
+      },
     });
     if (!account) return null;
 
@@ -304,6 +311,23 @@ export async function handleIncomingMessage(
       const zaloMsgIdNum = msg.msgId && /^\d+$/.test(msg.msgId) ? BigInt(msg.msgId) : null;
       // v3.3 mirror Zalo CDN → object storage (image/video/voice/file/gif)
       const storedContent = await mirrorInboundMediaContent(msg);
+      // ── M11 Source Badge writer (Anh chốt 2026-06-02) ──
+      // Tin sale gõ trên app Zalo (mobile/web) → SDK echo về CRM ở đây.
+      // Set sentVia='user_native' + metadata.sender.syncedFromNative=true
+      // để FE MessageSourceBadge.vue hiển thị "👤 Sale CRM · {tên} 🔄".
+      // Tên sale = owner.fullName (chủ nick), fallback displayName của nick.
+      // Tin từ KH (msg.isSelf=false) KHÔNG set sender — badge chỉ áp tin outbound.
+      const m11SenderMeta = msg.isSelf
+        ? {
+            kind: 'user_native' as const,
+            name:
+              account.owner?.fullName ||
+              account.displayName ||
+              msg.senderName ||
+              'Sale',
+            syncedFromNative: true,
+          }
+        : undefined;
       message = await prisma.message.create({
         data: {
           id: randomUUID(),
@@ -323,6 +347,13 @@ export async function handleIncomingMessage(
           albumIndex: msg.albumIndex ?? null,
           albumTotal: msg.albumTotal ?? null,
           sentAt,
+          // M11 writer (Anh chốt 2026-06-02): sentVia='user_native' cho tin
+          // sale gõ trên Zalo Real sync về. Mặc định sentVia='user' (legacy),
+          // KH inbound KHÔNG cần set vì FE badge chỉ render tin outbound.
+          ...(msg.isSelf && {
+            sentVia: 'user_native',
+            metadata: { sender: m11SenderMeta },
+          }),
         },
       });
     } catch (err: any) {

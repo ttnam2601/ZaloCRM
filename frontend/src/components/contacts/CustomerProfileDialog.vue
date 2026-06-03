@@ -437,6 +437,16 @@ async function loadTimeline() {
   finally { loadingTimeline.value = false; }
 }
 
+// Dịch enum status legacy sang tiếng Việt (activity-log lưu mã enum).
+function statusLabel(s: string | null | undefined): string {
+  if (!s) return '—';
+  const map: Record<string, string> = {
+    new: 'Mới', contacted: 'Đã liên hệ', interested: 'Quan tâm', negotiating: 'Đang đàm phán',
+    converted: 'Đã chốt', closed: 'Đã chốt', lost: 'Đã mất', following: 'Đang follow',
+  };
+  return map[s] || s;
+}
+
 // Timeline item từ /customers/:id/timeline. Có 2 dạng:
 //  - type='message'/'call': data có preview/content
 //  - type='activity': activity-log (data.action + data.details) — map sang câu tiếng Việt.
@@ -463,8 +473,8 @@ function describeTimelineItem(x: any, idx: number): { id: string; icon: string; 
     tag_add_zalo:    () => ({ icon: '🏷', text: `Gắn nhãn Zalo "${tagName}"` }),
     tag_remove_zalo: () => ({ icon: '🏷', text: `Gỡ nhãn Zalo "${tagName}"` }),
     auto_tag_change: () => ({ icon: '🤖', text: `Tự động cập nhật nhãn${det.to ? ` → "${det.to}"` : ''}` }),
-    status_change:   () => ({ icon: '🎯', text: `${actor} đổi trạng thái → "${det.to || det.status}"` }),
-    contact_status_changed: () => ({ icon: '🎯', text: `${actor} đổi trạng thái KH → "${det.to || det.status}"` }),
+    status_change:   () => ({ icon: '🎯', text: `${actor} đổi trạng thái → "${statusLabel(det.new ?? det.to ?? det.status)}"` }),
+    contact_status_changed: () => ({ icon: '🎯', text: `${actor} đổi trạng thái KH → "${statusLabel(det.new ?? det.to ?? det.status)}"` }),
     friend_added:    () => ({ icon: '🤝', text: `Kết bạn Zalo thành công` }),
     friend_request:  () => ({ icon: '📨', text: `Đã gửi lời mời kết bạn` }),
     alias_change:    () => ({ icon: '✏️', text: `${actor} đổi tên gợi nhớ → "${det.to}"` }),
