@@ -371,7 +371,11 @@ export async function zinstantProxyRoutes(app: FastifyInstance): Promise<void> {
   // ── POST /api/v1/zalo-user-info/batch — bulk lookup tránh N+1 HTTP request từ FE
   // Body: { uids: string[] } → trả { users: { [uid]: profile|null } }
   // Hit cache trước, miss thì fetch song song qua tất cả connected accounts.
-  app.post('/api/v1/zalo-user-info/batch', async (request: FastifyRequest, reply: FastifyReply) => {
+  // ── Fix 2026-06-03 (Anh báo: nhóm chat "máy chủ đang lỗi", click user không load) ──
+  // Route đọc request.user!.id NHƯNG thiếu preHandler authMiddleware → request.user=null
+  // → TypeError 500 silent → FE toast "Máy chủ lỗi". Pattern bẫy đã ghi memory
+  // reference_zalocrm_auth_missing_trap.md.
+  app.post('/api/v1/zalo-user-info/batch', { preHandler: authMiddleware }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { uids } = (request.body || {}) as { uids?: string[] };
     if (!Array.isArray(uids) || uids.length === 0) return { users: {} };
 
@@ -420,7 +424,8 @@ export async function zinstantProxyRoutes(app: FastifyInstance): Promise<void> {
     return reply.header('Cache-Control', 'private, max-age=60').send({ users });
   });
 
-  app.get('/api/v1/zalo-user-info/:uid', async (request: FastifyRequest, reply: FastifyReply) => {
+  // Fix 2026-06-03: cùng bug như batch — thêm preHandler authMiddleware
+  app.get('/api/v1/zalo-user-info/:uid', { preHandler: authMiddleware }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { uid } = request.params as { uid: string };
     if (!uid) return reply.status(400).send({ error: 'uid required' });
 

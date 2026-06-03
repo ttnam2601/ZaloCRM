@@ -511,11 +511,14 @@ function escapeHtml(s: string): string {
 function highlightText(raw: string): string {
   if (!raw) return '';
   let s = escapeHtml(raw);
-  // Mention regex: match @ + 1-2 words capitalized only (tên người VN phổ biến).
-  // Trước đây {0,2} → 3 words max → bôi lố từ thường vào tên (vd "@Đại Khánh thể").
-  // {0,1} → max 2 words. Word phải BẮT ĐẦU BẰNG CHỮ HOA để loại từ thường tiếng Việt.
+  // Fix 2026-06-03 (Anh báo): tên có separator " - " bị cắt cho mention.
+  //   "@Trung Trường - Hs Holding" trước fix chỉ bôi "@Trung Trường", phần
+  //   " - Hs Holding" rớt plain. Regex mới hỗ trợ separator dash/en-dash/em-dash.
+  // Pattern: @ + 1-3 chữ hoa + (optional " - " + 1-3 chữ hoa nữa).
+  //   Vẫn ràng buộc bắt đầu chữ hoa để loại từ thường tiếng Việt (vd "thể"/"ơi").
+  // Character class bỏ '-' vì giờ '-' chỉ dùng làm separator.
   s = s.replace(
-    /@(\p{Lu}[\p{L}0-9._-]*(?:\s\p{Lu}[\p{L}0-9._-]*){0,1})/gu,
+    /@(\p{Lu}[\p{L}0-9._]*(?:\s\p{Lu}[\p{L}0-9._]*){0,2}(?:\s[-–—]\s\p{Lu}[\p{L}0-9._]*(?:\s\p{Lu}[\p{L}0-9._]*){0,2})?)/gu,
     '<span class="mention">@$1</span>',
   );
   s = s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" class="link">$1</a>');
