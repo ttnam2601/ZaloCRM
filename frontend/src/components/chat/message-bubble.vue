@@ -1129,12 +1129,15 @@ function openFile(href: string) {
   background: var(--smax-primary-soft, #e3f2fd);
   padding: 0 4px;
   border-radius: 3px;
-  /* Anh chốt 2026-06-03: mention click được như avatar/tên sender.
-     Cursor pointer + hover effect để user biết click được. */
-  cursor: pointer;
   transition: background 0.15s ease;
 }
-:deep(.mention:hover) {
+/* Anh chốt 2026-06-03: cursor pointer + hover CHỈ áp cho mention CÓ data-uid
+   (tin mới có metadata từ SDK). Tin cũ regex fallback KHÔNG có data-uid →
+   không click được → không show cursor pointer (tránh user click hụt). */
+:deep(.mention[data-uid]) {
+  cursor: pointer;
+}
+:deep(.mention[data-uid]:hover) {
   background: var(--smax-primary, #2962ff);
   color: white;
 }

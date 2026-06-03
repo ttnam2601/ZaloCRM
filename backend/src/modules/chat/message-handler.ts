@@ -725,8 +725,52 @@ export async function handleIncomingMessage(
       })();
     }
 
+    // ── Fix 2026-06-03 (Anh báo): socket realtime thiếu senderResolved ──
+    // Trước fix: socket emit chỉ có message raw (senderName, senderUid) →
+    // FE pill tím KHÔNG render → đợi reload page mới gọi GET /messages có
+    // resolver mới có pill. Giờ resolve ngay khi handle inbound message.
+    // Chỉ resolve cho tin INBOUND (contact). Self-messages không cần pill.
+    let senderResolved: any = null;
+    if (!msg.isSelf && msg.senderUid) {
+      try {
+        const [internalNick, contactByUid, friend] = await Promise.all([
+          prisma.zaloAccount.findFirst({
+            where: { orgId: account.orgId, zaloUid: msg.senderUid },
+            select: {
+              displayName: true,
+              ownerUserId: true,
+              owner: { select: { id: true, fullName: true } },
+            },
+          }),
+          prisma.contact.findFirst({
+            where: { orgId: account.orgId, zaloUid: msg.senderUid },
+            select: { crmName: true, fullName: true },
+          }),
+          prisma.friend.findFirst({
+            where: { orgId: account.orgId, zaloUidInNick: msg.senderUid },
+            select: { aliasInNick: true, zaloDisplayName: true },
+          }),
+        ]);
+        const crmName = contactByUid?.crmName ?? friend?.aliasInNick ?? null;
+        const zaloName = msg.senderName ?? friend?.zaloDisplayName ?? contactByUid?.fullName ?? null;
+        const displayName = crmName ?? zaloName ?? 'Người lạ';
+        senderResolved = {
+          senderDisplayName: displayName,
+          senderCrmName: crmName,
+          senderZaloName: zaloName,
+          senderIsInternalNick: !!internalNick,
+          senderInternalNickLabel: internalNick?.displayName ?? null,
+          senderInternalNickOwner: internalNick?.owner?.fullName ?? null,
+          senderInternalNickOwnerId: internalNick?.owner?.id ?? internalNick?.ownerUserId ?? null,
+          senderCase: internalNick ? 'B' : 'A',
+        };
+      } catch (resolveErr) {
+        logger.warn('[message-handler] senderResolved lookup failed:', resolveErr);
+      }
+    }
+
     return {
-      message,
+      message: { ...message, senderResolved } as any,
       conversationId: conversation.id,
       orgId: account.orgId,
       contactId,
