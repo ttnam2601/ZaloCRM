@@ -855,14 +855,13 @@ function openFile(href: string) {
   position: relative;
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.06);
 }
-/* INBOUND bubble — Anh chốt 2026-06-03: tím pastel để phân biệt với
-   OUTBOUND xanh nhạt. Skeptic verify FIX 2: border bán trong suốt để
-   tránh "ladder effect" khi 5+ bubble stack liên tiếp. */
+/* INBOUND bubble — GIỮ NGUYÊN trắng như cũ (Anh chốt lại 2026-06-03:
+   chỉ nền tím PHẦN TÊN người gửi, không nhuộm cả bubble) */
 .message-bubble.is-other {
-  background: #ede9fe; /* violet-100 pastel */
-  color: #1f1147;       /* deep violet near-black, contrast 14.4:1 AAA */
+  background: var(--smax-bg, #ffffff);
+  color: var(--smax-text, #212121);
   border-radius: 4px 15px 15px 15px;
-  border: 1px solid rgba(196, 181, 253, 0.45); /* fix ladder stack */
+  border: 1px solid var(--smax-grey-200, #ebedf0);
 }
 .message-bubble.is-self {
   background: var(--smax-bubble-self, #d0e6ff);
@@ -870,20 +869,26 @@ function openFile(href: string) {
   border-radius: 15px 15px 4px 15px;
 }
 
-/* INBOUND sender name row (Anh chốt 2026-06-03 - 3 case) */
+/* INBOUND sender name row (Anh chốt 2026-06-03 - 3 case):
+   Pill tím pastel BAO QUANH TÊN người gửi để phân biệt với OUTBOUND.
+   Bubble nội dung giữ TRẮNG nguyên — chỉ tên ở trên có nền tím. */
 .message-bubble.is-other .sender-name {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 2px;
-  margin-bottom: 3px;
+  gap: 0;
+  margin-bottom: 4px;
   cursor: pointer;
+  background: #ede9fe; /* violet-100 pastel — nền chỉ ÔM tên */
+  border: 1px solid rgba(196, 181, 253, 0.55);
+  border-radius: 10px;
+  padding: 2px 8px;
+  line-height: 1.4;
 }
 .message-bubble.is-other .sender-name-primary {
-  color: #5b21b6; /* violet-700, contrast 7.6:1 AAA với bg */
+  color: #5b21b6; /* violet-700, contrast 7.6:1 AAA với bg pastel */
   font-size: 12px;
   font-weight: 600;
-  line-height: 1.4;
 }
 .message-bubble.is-other .sender-name:hover .sender-name-primary {
   text-decoration: underline;
@@ -893,7 +898,7 @@ function openFile(href: string) {
   color: #6d28d9; /* violet-700 nhạt, contrast 6.1:1 (skeptic FIX 3) */
   font-size: 11px;
   font-weight: 400;
-  margin-left: 2px;
+  margin-left: 3px;
 }
 /* CASE B chip "Sale: {owner}" — solid violet để chip rõ ràng (skeptic FIX 1) */
 .message-bubble.is-other .sender-internal-chip {
@@ -904,13 +909,16 @@ function openFile(href: string) {
   font-size: 10.5px;
   font-weight: 600;
   padding: 1px 7px;
-  border-radius: 9px;
-  margin-left: 6px;
+  border-radius: 8px;
+  margin-left: 5px;
   line-height: 1.45;
   letter-spacing: 0.02em;
 }
+.message-bubble.is-other .sender-name.is-internal {
+  background: #f5f3ff; /* nhạt hơn 1 cấp khi có chip Sale đặc */
+}
 .message-bubble.is-other .sender-name.is-internal .sender-name-primary {
-  color: #4c1d95; /* violet-800 hơn để sender chính nổi với chip phụ */
+  color: #4c1d95; /* violet-800 sẫm hơn để sender chính nổi với chip phụ */
 }
 
 .bubble-time {
