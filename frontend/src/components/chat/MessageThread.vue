@@ -233,9 +233,9 @@
             <span class="ic">+</span> Kết bạn
           </button>
 
-          <button class="btn-action btn-webhook" :disabled="webhookLoading" @click="fireWebhook">
-            {{ webhookLoading ? '⏳ Đang bắn…' : '🚀 Webhook' }}
-          </button>
+          <!-- 2026-06-03 Anh chốt: ẩn Webhook button khỏi header (chưa cần).
+               Function fireWebhook() + state webhookLoading vẫn giữ trong file
+               để bật lại sau bằng cách un-comment block button trên. -->
 
           <!-- More dropdown: gộp Lịch sử / Tìm / Note -->
           <v-menu>
@@ -1767,6 +1767,9 @@ function onDealStageUpdated(newStatusId: string | null) {
  * 2026-05-30). CareStatusBadge + persist enum legacy vẫn sống trong
  * ChatContactPanel.vue nếu sale cần thao tác status enum cũ. */
 
+// @ts-expect-error TS6133 — Webhook button bị ẩn 2026-06-03 (Anh chốt), giữ
+// function để bật lại nhanh khi cần. Xem template trong header section.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function fireWebhook() {
   if (!props.conversation?.contact?.id) return;
   webhookLoading.value = true;
@@ -2431,9 +2434,36 @@ watch(() => props.editingMessage?.id, async (id) => {
         ch-row-2 1 dòng
      3. Rút label phụ (cnt-scope, sub-meta btn) → giữ icon
      4. Buttons action compact: icon-only ở 1366, full text ở 1920+ */
-/* 2026-06-03: BỎ @media compact @1440/1300 cũ vì ChatView đã auto-shrink
-   sidebar 56px + conv list 280px ở ≤1366 → cột 3 chat = ~750px thoáng đủ
-   cho header 2 dòng full feature. Compact riêng header gây vỡ 4 dòng. */
+/* 2026-06-03: User giữ quyền toggle sidebar 240/56. Khi sale mở rộng sidebar
+   ở 1366 → cột 3 còn ~506px → header compact để không vỡ.
+   Đã bỏ button Webhook (~95px) nhẹ thêm. */
+@media (max-width: 1440px) {
+  .chat-header { padding: 8px 12px; gap: 10px; }
+  .ch-info { gap: 3px; }
+  .ch-row-1 { flex-wrap: wrap; gap: 6px; overflow: visible; }
+  .ch-name { font-size: 15px; max-width: 200px; }
+  .ch-cung-cham-chip { font-size: 10.5px; padding: 1px 6px; }
+  .ch-gender-chip { font-size: 11px; padding: 2px 7px 2px 4px; }
+  .ch-gender-chip .gender-svg { width: 14px; height: 14px; }
+  .ch-gender-chip .gender-label { display: none; }
+  .ch-row-2 { font-size: 11px; gap: 5px; }
+  .nick-name { max-width: 120px; font-size: 11.5px; }
+  .msg-counts .cnt-scope { display: none; }
+  .msg-counts { gap: 5px; font-size: 11px; }
+  .ch-actions { gap: 4px; }
+  .btn-action { padding: 5px 8px; font-size: 11px; gap: 3px; }
+  .btn-action .sub-meta { display: none; }
+  .zlbl-trigger { padding: 3px 7px !important; font-size: 11px !important; }
+  .zlbl-current-name, .zlbl-empty { max-width: 90px; }
+}
+@media (max-width: 1300px) {
+  .chat-header { padding: 7px 10px; gap: 8px; }
+  .ch-name { font-size: 14px; max-width: 160px; }
+  .chat-header > :first-child { transform: scale(0.92); transform-origin: left center; }
+  .ch-row-2 :deep(.nick-avatar-lock) { display: none; }
+  .nick-name { max-width: 80px; }
+  .btn-action { padding: 5px 7px; }
+}
 
 /* Row 1: Name | Gender icon | Care status */
 .ch-row-1 {

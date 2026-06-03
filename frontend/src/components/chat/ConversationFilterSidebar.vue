@@ -783,21 +783,10 @@ async function onLockBadgeClick(_wasUnlocked: boolean) {
 }
 
 // ─── Collapse state ──────────────────────────────────────
-// 2026-06-03: viewport ≤1366 force collapsed để cột 3 chat thoáng (~750px).
-// User vẫn có thể toggle ở >1366 và localStorage được respect ở viewport rộng.
-const userCollapsed = ref(localStorage.getItem('filter-sidebar-collapsed') === '1');
-const isNarrowViewport = ref(typeof window !== 'undefined' && window.innerWidth <= 1366);
-if (typeof window !== 'undefined') {
-  window.addEventListener('resize', () => {
-    isNarrowViewport.value = window.innerWidth <= 1366;
-  });
-}
-const collapsed = computed(() => isNarrowViewport.value || userCollapsed.value);
+const collapsed = ref(localStorage.getItem('filter-sidebar-collapsed') === '1');
 function toggleCollapsed() {
-  // Ở viewport hẹp, force collapsed → bỏ qua toggle (nút collapse vẫn render nhưng no-op)
-  if (isNarrowViewport.value) return;
-  userCollapsed.value = !userCollapsed.value;
-  localStorage.setItem('filter-sidebar-collapsed', userCollapsed.value ? '1' : '0');
+  collapsed.value = !collapsed.value;
+  localStorage.setItem('filter-sidebar-collapsed', collapsed.value ? '1' : '0');
   // Close any open popover when toggling collapse
   openPopover.value = null;
 }

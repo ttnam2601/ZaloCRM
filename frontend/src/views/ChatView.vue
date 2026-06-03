@@ -503,20 +503,6 @@ watch(searchQuery, () => {
     grid-template-columns: 56px 320px 1fr;
   }
 }
-/* ≤1366: HD laptop sale (35-40% user VN). Sidebar force collapse 56px,
-   conv list 280px, info panel 260px → cột 3 chat = 1366-56-280-260-20 ≈ 750px
-   đủ thoáng cho header 2 dòng full feature mà KHÔNG cần compact. */
-@media (max-width: 1366px) {
-  .smax-chat-grid { grid-template-columns: 56px 280px 1fr 260px; }
-  .smax-chat-grid:not(:has(.smax-info-col)) {
-    grid-template-columns: 56px 280px 1fr;
-  }
-  /* User toggle bị ignore ở viewport này — luôn 56px (xem ConversationFilterSidebar.vue) */
-  .smax-chat-grid:has(.filter-sidebar.collapsed) { grid-template-columns: 56px 280px 1fr 260px; }
-  .smax-chat-grid:has(.filter-sidebar.collapsed):not(:has(.smax-info-col)) {
-    grid-template-columns: 56px 280px 1fr;
-  }
-}
 /* < 1200: drop filter rail */
 @media (max-width: 1200px) {
   .smax-chat-grid { grid-template-columns: 0 320px 1fr 280px; }
