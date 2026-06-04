@@ -113,8 +113,8 @@
       <slot />
     </v-main>
 
-    <!-- Phase Onboarding v1 2026-05-24 — floating indicator khi sale dismiss checklist hoặc 4/4 -->
-    <MiniOnboardingIndicator />
+    <!-- 2026-06-04: Anh chốt gỡ MiniOnboardingIndicator — badge 4/4 hiện đè
+         mọi UI gây rối mắt sau khi sale hoàn tất. Sẽ code lại setup 4 bước. -->
 
     <!-- 2026-06-01: LeadFloatingButton moved → ConversationFilterSidebar (chỉ render trong /chat).
          Floating bottom-right bị bỏ. Sale thấy nút "Nhận khách" trong sidebar cột 1 (expanded card / collapsed icon hộp quà pulse). -->
@@ -133,7 +133,7 @@ import { useRouter } from 'vue-router';
 import NotificationBell from '@/components/NotificationBell.vue';
 import GlobalSearch from '@/components/GlobalSearch.vue';
 import ToastContainer from '@/components/ui/ToastContainer.vue';
-import MiniOnboardingIndicator from '@/components/onboarding/MiniOnboardingIndicator.vue';
+// 2026-06-04: gỡ MiniOnboardingIndicator (Anh chốt code lại setup 4 bước sau)
 // LeadFloatingButton moved to ConversationFilterSidebar 2026-06-01
 import { api } from '@/api/index';
 const theme = useTheme();
