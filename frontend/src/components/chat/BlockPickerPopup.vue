@@ -1,109 +1,123 @@
+<!--
+  BlockPickerPopup — Phase 1 MVP 2026-06-04 (Mockup 3 approved)
+  Upgrade M14 cũ: thay vì chỉ chèn text, giờ resolve full components → emit array.
+  - Tabs: ⚡ Gần đây / 📋 Tất cả
+  - Tag chip filter row
+  - Mỗi item: 👁 Xem trước (mở Preview dialog) + 📤 Gửi luôn (bỏ qua preview)
+  - Hỗ trợ multi-component (text + image + album + file + video)
+-->
 <template>
-  <!-- M14 — Popup "Chèn Khối tin nhắn" (Block content picker) — ship 2026-06-02.
-       Sale bấm nút 🧩 trong toolbar chat → mở popup → pick 1 Block (action_type=send_message)
-       → FE render template vars {gender}/{name}/{sale} dựa trên contact + currentUser
-       → emit('select', rendered) → MessageThread fill vào composer textbox (KHÔNG auto-send).
-       Pattern follow quick-template-popup.vue. -->
   <v-dialog
     :model-value="visible"
-    max-width="560"
+    max-width="720"
     scrollable
     @update:model-value="(v) => { if (!v) emit('close'); }"
   >
-    <v-card class="block-picker-card" rounded="lg">
+    <v-card class="bp-card" rounded="lg">
+      <!-- Header -->
       <div class="bp-header">
-        <div class="bp-title">
-          <span class="bp-icon">🧩</span>
-          <span>Chèn Khối tin nhắn</span>
-        </div>
-        <button class="bp-close" title="Đóng (Esc)" @click="emit('close')">
-          <v-icon size="20">mdi-close</v-icon>
-        </button>
+        <span class="bp-icon">📂</span>
+        <span class="bp-title">Chọn Khối để gửi</span>
+        <button class="bp-close" @click="emit('close')">✕</button>
       </div>
 
+      <!-- Tabs -->
+      <div class="bp-tabs">
+        <button
+          class="bp-tab"
+          :class="{ active: activeTab === 'recent' }"
+          @click="activeTab = 'recent'"
+        >⚡ Gần đây <span class="bp-tab-badge">{{ recentBlocks.length }}</span></button>
+        <button
+          class="bp-tab"
+          :class="{ active: activeTab === 'all' }"
+          @click="activeTab = 'all'"
+        >📋 Tất cả <span class="bp-tab-badge">{{ allBlocks.length }}</span></button>
+      </div>
+
+      <!-- Search -->
       <div class="bp-search">
-        <v-icon size="18" color="grey">mdi-magnify</v-icon>
+        <span class="bp-search-icon">🔍</span>
         <input
           ref="searchRef"
           v-model="searchQuery"
           type="text"
           class="bp-search-input"
-          placeholder="Tìm Khối theo tên..."
+          placeholder="Tìm Khối theo tên, nội dung, tag..."
           @keydown="onKey"
         />
       </div>
 
-      <v-divider />
+      <!-- Tag filter row -->
+      <div v-if="availableTags.length > 0" class="bp-tag-row">
+        <span class="bp-tag-label">🏷</span>
+        <button
+          v-for="tag in availableTags.slice(0, 8)"
+          :key="tag"
+          class="bp-tag-chip"
+          :class="{ active: selectedTags.includes(tag) }"
+          @click="toggleTag(tag)"
+        >{{ tag }}</button>
+        <span v-if="selectedTags.length > 0" class="bp-tag-status">
+          ✓ Đang lọc {{ selectedTags.length }} tag · {{ filtered.length }} Khối
+        </span>
+      </div>
 
-      <div class="bp-list-wrap">
+      <!-- Body -->
+      <div class="bp-body">
         <div v-if="loading" class="bp-empty">
-          <v-icon class="mdi mdi-loading mdi-spin" size="24" color="grey" />
-          <div class="bp-empty-text">Đang tải danh sách Khối…</div>
+          <v-progress-circular indeterminate size="28" color="primary" />
+          <div class="bp-empty-text">Đang tải Khối...</div>
         </div>
-
         <div v-else-if="loadError" class="bp-empty">
-          <v-icon size="24" color="error">mdi-alert-circle-outline</v-icon>
-          <div class="bp-empty-text">Không tải được danh sách Khối: {{ loadError }}</div>
+          ⚠️ {{ loadError }}
         </div>
-
-        <div v-else-if="!filtered.length" class="bp-empty">
-          <v-icon size="24" color="grey">mdi-package-variant</v-icon>
+        <div v-else-if="filtered.length === 0" class="bp-empty">
+          📭
           <div class="bp-empty-text">
-            {{ blocks.length === 0
-              ? 'Chưa có Khối "Gửi tin nhắn" nào. Tạo tại /automation/blocks.'
-              : 'Không tìm thấy Khối phù hợp.' }}
+            {{ allBlocks.length === 0 ? 'Chưa có Khối nào. Tạo tại /marketing/blocks.' : 'Không tìm thấy Khối phù hợp.' }}
           </div>
         </div>
 
-        <ul v-else class="bp-list" role="listbox">
-          <li
-            v-for="(block, i) in filtered"
+        <div v-else class="bp-list">
+          <article
+            v-for="block in filtered"
             :key="block.id"
             class="bp-item"
-            :class="{ active: i === selectedIndex }"
-            role="option"
-            :aria-selected="i === selectedIndex"
-            @click="selectBlock(block)"
-            @mouseenter="selectedIndex = i"
+            :class="{ 'kind-friend': block.actionType === 'request_friend' }"
           >
-            <div class="bp-item-icon">📦</div>
-            <div class="bp-item-body">
+            <div class="bp-item-icon">{{ blockIcon(block) }}</div>
+            <div class="bp-item-info">
               <div class="bp-item-name">{{ block.name }}</div>
-              <div class="bp-item-preview">{{ truncate(firstVariant(block), 80) || '(Khối chưa có nội dung)' }}</div>
               <div class="bp-item-meta">
-                <span v-if="variantCount(block) > 1" class="bp-meta-chip" title="Số biến thể nội dung — random 1 khi chèn">
-                  🎲 {{ variantCount(block) }} biến thể
-                </span>
-                <span v-if="block.folder?.name" class="bp-meta-chip bp-meta-folder">
-                  📁 {{ block.folder.name }}
-                </span>
-                <span v-if="block.ownerNick?.displayName" class="bp-meta-chip bp-meta-owner">
-                  👤 {{ block.ownerNick.displayName }}
-                </span>
+                <span v-if="block.folder?.visibility === 'private'" class="bp-vis private">🔒</span>
+                <span v-else class="bp-vis public">🔓</span>
+                {{ block.folder?.visibility === 'private' ? 'Riêng tư' : 'Công khai' }}
+                <span v-if="block.folder"> · 📁 {{ block.folder.name }}</span>
+                <span
+                  v-for="tag in (block.tagIds || []).slice(0, 2)"
+                  :key="tag"
+                  class="bp-tag-mini"
+                >{{ tag }}</span>
+                <span v-if="variantCount(block) > 0"> · 🎲 {{ variantCount(block) }} biến thể</span>
+                <span v-if="block.lastUsedAt"> · {{ timeAgo(block.lastUsedAt) }}</span>
               </div>
             </div>
-          </li>
-        </ul>
+            <div class="bp-item-actions">
+              <button class="bp-btn-small" @click="onPreview(block)" title="Xem trước trước khi gửi">
+                👁 Xem trước
+              </button>
+              <button class="bp-btn-small bp-btn-primary" :disabled="sendingId === block.id" @click="onSendDirect(block)" title="Gửi thẳng, bỏ qua xem trước">
+                {{ sendingId === block.id ? '⏳' : '📤' }} Gửi luôn
+              </button>
+            </div>
+          </article>
+        </div>
       </div>
 
-      <v-divider v-if="previewText" />
-
-      <div v-if="previewText" class="bp-preview">
-        <div class="bp-preview-label">Xem trước (đã render biến):</div>
-        <div class="bp-preview-text">{{ previewText }}</div>
-      </div>
-
-      <v-divider />
-
+      <!-- Footer -->
       <div class="bp-footer">
-        <span class="bp-hint">↑↓ chọn · Enter chèn · Esc đóng</span>
-        <v-btn
-          color="primary"
-          variant="flat"
-          size="small"
-          :disabled="!currentBlock"
-          @click="currentBlock && selectBlock(currentBlock)"
-        >Chèn vào ô soạn tin</v-btn>
+        <span class="bp-hint">⌨️ ↑↓ chọn · Enter Xem trước · Esc đóng</span>
       </div>
     </v-card>
   </v-dialog>
@@ -111,63 +125,83 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import { listBlocks } from '@/api/automation/blocks';
+import { listBlocks, listRecentBlocks } from '@/api/automation/blocks';
 import type { Block } from '@/api/automation/types';
-
-interface ContactCtx {
-  fullName?: string | null;
-  gender?: string | null;
-  phone?: string | null;
-}
 
 const props = defineProps<{
   visible: boolean;
-  contact?: ContactCtx | null;
+  contact?: { fullName?: string | null; gender?: string | null; phone?: string | null } | null;
   currentUserName?: string | null;
   ownerNickId?: string | null;
 }>();
 
 const emit = defineEmits<{
-  select: [renderedContent: string];
+  /** Sale chọn preview — parent mở Preview dialog (truyền cả block) */
+  preview: [block: Block];
+  /** Sale chọn gửi luôn — parent resolve + dispatch */
+  'send-direct': [block: Block];
   close: [];
 }>();
 
-const blocks = ref<Block[]>([]);
+const allBlocks = ref<Block[]>([]);
+const recentBlocks = ref<Block[]>([]);
 const loading = ref(false);
 const loadError = ref('');
 const searchQuery = ref('');
 const selectedIndex = ref(0);
+const selectedTags = ref<string[]>([]);
+const activeTab = ref<'recent' | 'all'>('recent');
+const sendingId = ref<string | null>(null);
 const searchRef = ref<HTMLInputElement | null>(null);
 
-async function fetchBlocks() {
+async function fetchAll() {
   loading.value = true;
   loadError.value = '';
   try {
-    // Lấy Block "Gửi tin nhắn" — limit 100 đủ dùng cho UI list.
-    // Không filter ownerNickId mặc định: sale có thể chèn cả Block shared + Block riêng.
-    blocks.value = await listBlocks({ actionType: 'send_message', limit: 100 });
+    const [all, recent] = await Promise.all([
+      listBlocks({ actionType: 'send_message', limit: 100 }),
+      listRecentBlocks().catch(() => [] as Block[]),
+    ]);
+    allBlocks.value = all;
+    recentBlocks.value = recent.filter((b) => b.actionType === 'send_message');
   } catch (e: unknown) {
     loadError.value = e instanceof Error ? e.message : String(e);
-    blocks.value = [];
   } finally {
     loading.value = false;
   }
 }
 
-// Mở popup → fetch (lazy), reset state, focus search.
 watch(() => props.visible, async (open) => {
   if (!open) return;
   searchQuery.value = '';
   selectedIndex.value = 0;
-  if (blocks.value.length === 0) await fetchBlocks();
+  selectedTags.value = [];
+  activeTab.value = recentBlocks.value.length > 0 ? 'recent' : 'all';
+  await fetchAll();
   await nextTick();
   searchRef.value?.focus();
 });
 
+const availableTags = computed(() => {
+  const set = new Set<string>();
+  for (const b of allBlocks.value) {
+    for (const t of b.tagIds || []) set.add(t);
+  }
+  return Array.from(set).sort();
+});
+
 const filtered = computed(() => {
+  const source = activeTab.value === 'recent' ? recentBlocks.value : allBlocks.value;
   const q = searchQuery.value.trim().toLowerCase();
-  let list = blocks.value;
-  // Optional: ưu tiên Block của nick đang gửi lên đầu nếu có ownerNickId.
+  let list = source.filter((b) => {
+    if (selectedTags.value.length > 0) {
+      if (!(b.tagIds || []).some((t) => selectedTags.value.includes(t))) return false;
+    }
+    if (!q) return true;
+    if (b.name.toLowerCase().includes(q)) return true;
+    const txt = JSON.stringify(b.content).slice(0, 500).toLowerCase();
+    return txt.includes(q);
+  });
   if (props.ownerNickId) {
     list = [...list].sort((a, b) => {
       const aMatch = a.ownerNickId === props.ownerNickId ? 0 : 1;
@@ -175,106 +209,75 @@ const filtered = computed(() => {
       return aMatch - bMatch;
     });
   }
-  if (!q) return list;
-  return list.filter((b) => {
-    if (b.name.toLowerCase().includes(q)) return true;
-    const fv = firstVariant(b).toLowerCase();
-    return fv.includes(q);
-  });
+  return list;
 });
 
 watch(filtered, () => { selectedIndex.value = 0; });
 
-const currentBlock = computed<Block | null>(() => filtered.value[selectedIndex.value] ?? null);
+function toggleTag(tag: string) {
+  const i = selectedTags.value.indexOf(tag);
+  if (i >= 0) selectedTags.value.splice(i, 1);
+  else selectedTags.value.push(tag);
+}
 
-const previewText = computed(() => {
-  if (!currentBlock.value) return '';
-  const raw = pickRandomVariant(currentBlock.value);
-  return renderGreetingVars(raw, props.contact ?? null, props.currentUserName ?? null);
-});
-
-function firstVariant(block: Block): string {
-  const variants = (block.content?.textVariants as unknown);
-  if (Array.isArray(variants) && variants.length > 0 && typeof variants[0] === 'string') {
-    return variants[0];
-  }
-  return '';
+function blockIcon(block: Block): string {
+  if (block.actionType === 'request_friend') return '🤝';
+  return '📨';
 }
 
 function variantCount(block: Block): number {
-  const variants = (block.content?.textVariants as unknown);
-  return Array.isArray(variants) ? variants.length : 0;
-}
-
-function pickRandomVariant(block: Block): string {
-  const variants = (block.content?.textVariants as unknown);
-  if (!Array.isArray(variants) || variants.length === 0) return '';
-  const idx = Math.floor(Math.random() * variants.length);
-  const v = variants[idx];
-  return typeof v === 'string' ? v : '';
-}
-
-function truncate(s: string, max: number): string {
-  if (!s) return '';
-  return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s;
-}
-
-// ── Render template vars ────────────────────────────────────────────────────
-// Memory reference_greeting_template_vars (chốt 2026-05-28):
-//   {gender} = Anh/Chị/Anh-Chị từ contact.gender (zalo profile)
-//   {name}   = LAST WORD của contact.fullName (convention VN: tên đứng cuối)
-//   {sale}   = LAST WORD của currentUser.fullName
-// KHÔNG dùng cú pháp {{contact.fullName}} của template renderer BE — format single-brace.
-function lastWord(name: string | null | undefined): string {
-  if (!name) return '';
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  return parts.length === 0 ? '' : parts[parts.length - 1];
-}
-
-function resolveGender(gender: string | null | undefined): string {
-  const g = (gender ?? '').toLowerCase();
-  if (g === 'female' || g === 'f' || g === 'nu' || g === 'nữ') return 'Chị';
-  if (g === 'male' || g === 'm' || g === 'nam') return 'Anh';
-  return 'Anh/Chị';
-}
-
-function renderGreetingVars(
-  template: string,
-  contact: ContactCtx | null,
-  saleFullName: string | null,
-): string {
-  if (!template) return '';
-  const genderStr = resolveGender(contact?.gender);
-  // Ưu tiên last word của fullName; nếu rỗng (KH chưa đặt tên) thì fallback "anh/chị".
-  const nameStr = lastWord(contact?.fullName) || 'anh/chị';
-  const saleStr = lastWord(saleFullName) || '';
-  return template
-    .replaceAll('{gender}', genderStr)
-    .replaceAll('{name}', nameStr)
-    .replaceAll('{sale}', saleStr);
-}
-
-function selectBlock(block: Block) {
-  const raw = pickRandomVariant(block);
-  const rendered = renderGreetingVars(raw, props.contact ?? null, props.currentUserName ?? null);
-  if (!rendered.trim()) {
-    // Khối rỗng — coi như no-op, không paste chuỗi rỗng vào composer.
-    emit('close');
-    return;
+  const c = block.content as any;
+  if (Array.isArray(c?.greetingVariants)) return c.greetingVariants.length;
+  if (Array.isArray(c?.textVariants)) return c.textVariants.length;
+  if (Array.isArray(c?.components)) {
+    let n = 0;
+    for (const cmp of c.components) {
+      if (cmp?.kind === 'text') {
+        n += (Array.isArray(cmp.variants) ? cmp.variants.length : 0) + 1;
+      }
+    }
+    return n;
   }
-  emit('select', rendered);
+  return 0;
+}
+
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return 'vừa xong';
+  if (min < 60) return `${min} phút trước`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} giờ trước`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d} ngày trước`;
+  return new Date(iso).toLocaleDateString('vi-VN');
+}
+
+function onPreview(block: Block) {
+  emit('preview', block);
+}
+
+async function onSendDirect(block: Block) {
+  sendingId.value = block.id;
+  try {
+    emit('send-direct', block);
+  } finally {
+    // Giữ sendingId cho tới khi parent gọi close
+    setTimeout(() => { sendingId.value = null; }, 500);
+  }
 }
 
 function onKey(e: KeyboardEvent) {
   if (e.key === 'ArrowDown') {
     e.preventDefault();
-    selectedIndex.value = Math.min(selectedIndex.value + 1, filtered.value.length - 1);
+    if (filtered.value.length > 0) selectedIndex.value = (selectedIndex.value + 1) % filtered.value.length;
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
-    selectedIndex.value = Math.max(selectedIndex.value - 1, 0);
+    if (filtered.value.length > 0) selectedIndex.value = (selectedIndex.value - 1 + filtered.value.length) % filtered.value.length;
   } else if (e.key === 'Enter') {
     e.preventDefault();
-    if (currentBlock.value) selectBlock(currentBlock.value);
+    const block = filtered.value[selectedIndex.value];
+    if (block) onPreview(block);
   } else if (e.key === 'Escape') {
     e.preventDefault();
     emit('close');
@@ -283,159 +286,236 @@ function onKey(e: KeyboardEvent) {
 </script>
 
 <style scoped>
-.block-picker-card {
+.bp-card {
+  background: #fff;
   display: flex;
   flex-direction: column;
-  max-height: 78vh;
-  background: #ffffff;
+  max-height: 80vh;
 }
 
 .bp-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid #e6e8eb;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px 10px;
-}
-.bp-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 600;
-  color: #1f2937;
+  gap: 12px;
 }
 .bp-icon { font-size: 18px; }
+.bp-title { font-size: 15px; font-weight: 700; color: #1f2328; flex: 1; }
 .bp-close {
+  width: 30px;
+  height: 30px;
   background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 6px;
+  border: 0;
   color: #6b7280;
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 16px;
 }
-.bp-close:hover { background: #f3f4f6; color: #111827; }
+.bp-close:hover { background: #f4f5f7; color: #1f2328; }
+
+.bp-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 18px;
+  border-bottom: 1px solid #e6e8eb;
+  background: #fafbfc;
+}
+.bp-tab {
+  padding: 9px 14px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  font-family: inherit;
+}
+.bp-tab:hover { color: #1f2328; }
+.bp-tab.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+.bp-tab-badge {
+  font-size: 10px;
+  background: rgba(59,130,246,0.15);
+  color: #1d4ed8;
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: 4px;
+  font-weight: 600;
+}
 
 .bp-search {
+  padding: 11px 18px;
+  border-bottom: 1px solid #e6e8eb;
+  background: #fff;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 18px 12px;
-  padding: 8px 12px;
-  background: #f3f4f6;
-  border-radius: 8px;
+  position: relative;
+}
+.bp-search-icon {
+  position: absolute;
+  left: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9ca3af;
+  font-size: 13px;
 }
 .bp-search-input {
   flex: 1;
-  border: none;
-  background: transparent;
+  padding: 7px 11px 7px 32px;
+  border: 1px solid #d4d7dc;
+  border-radius: 6px;
+  font-size: 12.5px;
   outline: none;
-  font-size: 13px;
-  color: #1f2937;
+  font-family: inherit;
+}
+.bp-search-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.18); }
+
+.bp-tag-row {
+  padding: 6px 18px 11px;
+  border-bottom: 1px solid #e6e8eb;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: #fff;
+}
+.bp-tag-label {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 600;
+  margin-right: 2px;
+}
+.bp-tag-chip {
+  background: #fff;
+  color: #6b7280;
+  border: 1px solid #e6e8eb;
+  border-radius: 11px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.bp-tag-chip:hover { background: #f4f5f7; }
+.bp-tag-chip.active {
+  background: rgba(59,130,246,0.12);
+  color: #1d4ed8;
+  border-color: #93c5fd;
+  font-weight: 600;
+}
+.bp-tag-status {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: #10b981;
+  font-weight: 600;
 }
 
-.bp-list-wrap {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  min-height: 120px;
-  max-height: 360px;
-  padding: 4px 8px;
-}
-
+.bp-body { flex: 1; overflow-y: auto; padding: 12px 18px; }
 .bp-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
   padding: 40px 20px;
-  color: #6b7280;
-  text-align: center;
+  color: #9ca3af;
+  gap: 10px;
+  font-size: 28px;
 }
-.bp-empty-text { font-size: 13px; }
+.bp-empty-text { font-size: 12.5px; }
 
 .bp-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 .bp-item {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
   padding: 10px 12px;
+  border: 1px solid #e6e8eb;
   border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.12s;
+  background: #fff;
+  transition: all 0.12s;
 }
-.bp-item:hover, .bp-item.active {
-  background: #f3f4f6;
-}
+.bp-item:hover { border-color: #3b82f6; box-shadow: 0 2px 8px rgba(59,130,246,0.1); }
 .bp-item-icon {
-  font-size: 18px;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-.bp-item-body { flex: 1; min-width: 0; }
-.bp-item-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: #1f2937;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bp-item-preview {
-  font-size: 12px;
-  color: #6b7280;
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bp-item-meta {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
-  flex-wrap: wrap;
-}
-.bp-meta-chip {
-  font-size: 11px;
-  padding: 2px 8px;
-  background: #e5e7eb;
-  color: #374151;
-  border-radius: 10px;
-}
-.bp-meta-folder { background: #fef3c7; color: #92400e; }
-.bp-meta-owner { background: #dbeafe; color: #1e40af; }
-
-.bp-preview {
-  padding: 10px 18px;
-  background: #f9fafb;
-  max-height: 140px;
-  overflow-y: auto;
-}
-.bp-preview-label {
-  font-size: 11px;
-  color: #6b7280;
-  margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.bp-preview-text {
-  font-size: 13px;
-  color: #1f2937;
-  white-space: pre-wrap;
-  line-height: 1.5;
-}
-
-.bp-footer {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(59,130,246,0.12);
+  color: #1d4ed8;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 18px;
-  background: #ffffff;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
 }
-.bp-hint {
+.bp-item.kind-friend .bp-item-icon {
+  background: rgba(16,185,129,0.12);
+  color: #047857;
+}
+.bp-item-info { flex: 1; min-width: 0; }
+.bp-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2328;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bp-item-meta {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.bp-vis { font-size: 11px; }
+.bp-vis.public { color: #10b981; }
+.bp-vis.private { color: #f59e0b; }
+.bp-tag-mini {
+  background: rgba(59,130,246,0.1);
+  color: #1d4ed8;
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 500;
+}
+.bp-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.bp-btn-small {
+  padding: 5px 10px;
+  border: 1px solid #d4d7dc;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2328;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.bp-btn-small:hover { background: #f4f5f7; }
+.bp-btn-small.bp-btn-primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+.bp-btn-small.bp-btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+.bp-btn-small:disabled { opacity: 0.5; cursor: wait; }
+
+.bp-footer {
+  padding: 10px 18px;
+  border-top: 1px solid #e6e8eb;
   font-size: 11px;
   color: #9ca3af;
+  text-align: center;
 }
 </style>

@@ -608,7 +608,7 @@
           </button>
         </div>
 
-        <!-- M14 (2026-06-02) — Popup chèn Khối tin nhắn -->
+        <!-- 2026-06-04 — Khối Phase 1 MVP picker với Preview + Send direct -->
         <BlockPickerPopup
           :visible="showBlockPicker"
           :contact="conversation.contact ? {
@@ -618,8 +618,20 @@
           } : null"
           :current-user-name="_authStore.user?.fullName ?? null"
           :owner-nick-id="conversation.zaloAccount?.id ?? null"
-          @select="onBlockPick"
+          @preview="onBlockPreview"
+          @send-direct="onBlockSendDirect"
           @close="showBlockPicker = false"
+        />
+
+        <!-- 2026-06-04 — Preview dialog (Mockup 4) -->
+        <BlockPreviewDialog
+          v-if="previewBlock"
+          :visible="!!previewBlock"
+          :block="previewBlock"
+          :contact-name="conversation.contact?.fullName || 'KH'"
+          :nick-name="conversation.zaloAccount?.displayName || 'Nick'"
+          @send="onConfirmSendBlock"
+          @close="previewBlock = null"
         />
 
         <!-- Modal "Nhắc hẹn" — unified UI giống trang /appointments -->
@@ -782,6 +794,7 @@ import ContactDealStageSelector from '@/components/chat/ContactDealStageSelector
 import Avatar from '@/components/ui/Avatar.vue';
 import EmojiPicker from '@/components/chat/EmojiPicker.vue';
 import QuickTemplatePopup from '@/components/chat/quick-template-popup.vue';
+import BlockPreviewDialog from '@/components/chat/BlockPreviewDialog.vue';
 // M14 (2026-06-02) — Popup chọn "Khối tin nhắn" từ Automation Blocks
 import BlockPickerPopup from '@/components/chat/BlockPickerPopup.vue';
 import MessageBubble from '@/components/chat/message-bubble.vue';
@@ -2279,15 +2292,64 @@ function openBlockPicker() {
   if (!privacyVisibility.canSendInConv(props.conversation)) return;
   showBlockPicker.value = true;
 }
-async function onBlockPick(rendered: string) {
-  if (!rendered) { showBlockPicker.value = false; return; }
-  // Append với 1 space nếu composer đã có text; thay thế trực tiếp nếu rỗng.
-  inputText.value = inputText.value.trim()
-    ? `${inputText.value.replace(/\s+$/, '')} ${rendered}`
-    : rendered;
+// 2026-06-04 — Khối Phase 1 MVP: 2 đường workflow
+// 👁 Xem trước → mở Preview dialog → bấm Gửi → dispatch
+// 📤 Gửi luôn → bỏ qua preview, dispatch ngay
+const previewBlock = ref<import('@/api/automation/types').Block | null>(null);
+
+function onBlockPreview(block: import('@/api/automation/types').Block) {
+  previewBlock.value = block;
   showBlockPicker.value = false;
-  await nextTick();
-  setTimeout(() => editorRef.value?.focus('end'), 30);
+}
+
+async function onBlockSendDirect(block: import('@/api/automation/types').Block) {
+  showBlockPicker.value = false;
+  await dispatchBlockComponents(block.id);
+}
+
+async function onConfirmSendBlock(blockId: string) {
+  previewBlock.value = null;
+  await dispatchBlockComponents(blockId);
+}
+
+async function dispatchBlockComponents(blockId: string) {
+  try {
+    const { resolveBlockForSend } = await import('@/api/automation/blocks');
+    const resolved = await resolveBlockForSend(blockId);
+    if (!resolved.resolved || resolved.resolved.length === 0) {
+      toast.error('Khối không có nội dung để gửi');
+      return;
+    }
+    // Loop từng component, emit 'send' cho mỗi cái. MessageThread emit lên ChatView.
+    // Phase 1: chỉ support text → chèn text vào composer + user bấm Gửi.
+    // Multi-component (image/file/album) defer Phase 2 (cần wire backend zaloOps batch).
+    const textParts: string[] = [];
+    let hasNonText = false;
+    for (const c of resolved.resolved) {
+      if (c.messageType === 'text') {
+        const text = (c.payload as any)?.text;
+        if (typeof text === 'string' && text.trim()) textParts.push(text);
+      } else {
+        hasNonText = true;
+      }
+    }
+    if (textParts.length > 0) {
+      const combined = textParts.join('\n\n');
+      inputText.value = inputText.value.trim()
+        ? `${inputText.value.replace(/\s+$/, '')}\n\n${combined}`
+        : combined;
+    }
+    if (hasNonText) {
+      toast.push(`Đã chèn ${textParts.length} tin text. ${resolved.resolved.length - textParts.length} thành phần (ảnh/file/album) cần gửi tay riêng — Phase 1 chưa wire multi-dispatch.`);
+    } else {
+      toast.success(`Đã chèn ${textParts.length} tin từ Khối "${resolved.blockName}" vào ô gõ`);
+    }
+    await nextTick();
+    setTimeout(() => editorRef.value?.focus('end'), 30);
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || 'Không gửi được Khối';
+    toast.error(msg);
+  }
 }
 
 // ── Send ────────────────────────────────────────────────────────────────────
