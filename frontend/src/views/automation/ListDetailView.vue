@@ -41,7 +41,7 @@
           </div>
         </div>
         <div class="hero-actions">
-          <button class="at-btn at-btn--primary" @click="onCreateMucTieu">
+          <button class="at-btn at-btn--sm at-btn--action" @click="onCreateMucTieu">
             <span style="font-size:14px; line-height:1;">📤</span>
             Tạo Mục tiêu từ tệp này
           </button>

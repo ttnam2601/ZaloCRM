@@ -2537,8 +2537,9 @@ onUnmounted(() => {
   --text-2: #42526e;
   --text-3: #6b778c;
   --text-mute: #97a0af;
-  --primary: #2d7ff9;
-  --primary-hover: #1b6fe0;
+  /* Atlas v1 alignment 2026-06-04 — Đồng nhất với --at-action #0068ff */
+  --primary: #0068ff;
+  --primary-hover: #0052cc;
   --primary-bg: #e7f0ff;
   --success: #36b37e;
   --success-bg: #e3fcef;

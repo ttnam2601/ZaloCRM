@@ -16,7 +16,7 @@
             placeholder="Tìm Khối theo tên, nội dung, tag..."
           />
         </div>
-        <button class="bv-btn bv-btn-primary" @click="openCreate">+ Tạo Khối mới</button>
+        <button class="at-btn at-btn--sm at-btn--action" @click="openCreate">+ Tạo Khối mới</button>
       </div>
     </header>
 
@@ -92,22 +92,22 @@
           <button
             v-for="tag in availableTags"
             :key="tag"
-            class="bv-chip"
-            :class="{ 'is-active': selectedTags.includes(tag) }"
+            class="at-chip"
+            :class="{ 'at-chip--filter-active': selectedTags.includes(tag) }"
             @click="toggleTag(tag)"
           >
             {{ tag }}
             <span class="bv-chip-count">{{ tagCounts[tag] || 0 }}</span>
           </button>
-          <button class="bv-chip bv-chip-dashed" @click="openTagPicker">+ Thêm tag</button>
+          <button class="at-chip bv-chip-dashed" @click="openTagPicker">+ Thêm tag</button>
 
           <div class="bv-filter-right">
             <span class="bv-filter-label">Loại:</span>
             <button
               v-for="type in actionTypeChips"
               :key="type.value"
-              class="bv-chip"
-              :class="{ 'is-active': actionTypeFilter === type.value }"
+              class="at-chip"
+              :class="{ 'at-chip--filter-active': actionTypeFilter === type.value }"
               @click="actionTypeFilter = actionTypeFilter === type.value ? 'all' : type.value"
             >
               {{ type.label }}
@@ -130,7 +130,7 @@
             Khối là 1 cụm tin nhắn (text + ảnh + file...) gửi cho khách hàng.
             Tạo 1 lần dùng nhiều nơi.
           </p>
-          <button v-if="!showArchived" class="bv-btn bv-btn-primary" @click="openCreate">
+          <button v-if="!showArchived" class="at-btn at-btn--sm at-btn--action" @click="openCreate">
             + Tạo Khối đầu tiên
           </button>
         </div>
@@ -140,11 +140,11 @@
           <article
             v-for="block in filteredBlocks"
             :key="block.id"
-            class="bv-card"
-            :class="`kind-${block.actionType}`"
+            class="at-card at-card-interactive bv-card"
+            :class="actionAccentClass(block.actionType)"
             @click="openEdit(block)"
           >
-            <button class="bv-card-more" @click.stop="onCardMore(block, $event)">⋮</button>
+            <button class="at-btn-icon bv-card-more" @click.stop="onCardMore(block, $event)">⋮</button>
             <div class="bv-card-head">
               <div class="bv-card-icon">{{ actionIcon(block.actionType) }}</div>
               <div class="bv-card-name-wrap">
@@ -241,6 +241,12 @@ function actionIcon(t: BlockActionType): string {
   if (t === 'request_friend') return '🤝';
   if (t === 'update_status') return '🏷';
   return '📨';
+}
+// Atlas v1 — accent border-left color theo actionType
+function actionAccentClass(t: BlockActionType): string {
+  if (t === 'request_friend') return 'at-card--accent-green';
+  if (t === 'update_status') return 'at-card--accent-purple';
+  return 'at-card--accent-blue';
 }
 
 // Tags discovered from all blocks

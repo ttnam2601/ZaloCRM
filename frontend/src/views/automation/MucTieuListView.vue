@@ -1033,9 +1033,10 @@ onUnmounted(() => {
   --mtl-text-2: #42526E;
   --mtl-text-3: #6B778C;
   --mtl-text-mute: #97A0AF;
-  --mtl-primary: #2D7FF9;
-  --mtl-primary-hover: #1B6FE0;
-  --mtl-primary-bg: #E7F0FF;
+  /* Atlas v1 alignment 2026-06-04 — Đồng nhất palette với --at-action chính */
+  --mtl-primary: #0068ff; /* var(--at-action) */
+  --mtl-primary-hover: #0052cc; /* var(--at-action-hover) */
+  --mtl-primary-bg: #e7f0ff; /* var(--at-action-soft) */
   --mtl-success: #36B37E;
   --mtl-success-bg: #E3FCEF;
   --mtl-warning: #FFAB00;

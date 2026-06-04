@@ -190,28 +190,52 @@
     <div class="dual-pane" :class="{ 'detail-open': viewMode === 'm2' && selectedContact }">
     <div class="scroll-wrap" :class="{ 'mode-shrunk': viewMode === 'm2' && selectedContact }">
       <table class="smax-table" :class="{ 'mode-shrunk': viewMode === 'm2' && selectedContact }">
+        <!-- colgroup: pin width cứng cho mọi cột → hàng con (row-child) có colspan
+             vẫn gióng chính xác theo cột cha. (2026-06-04) -->
+        <colgroup>
+          <col style="width:26px">
+          <col style="width:30px">
+          <col style="width:132px">
+          <col style="width:100px">
+          <col style="width:68px">
+          <col style="width:54px">
+          <col style="width:72px">
+          <col style="width:42px">
+          <col style="width:118px">
+          <col style="width:94px">
+          <col>
+          <col>
+          <col style="width:56px">
+          <col style="width:80px">
+          <col style="width:50px">
+          <col v-if="visibleCols.zaloUid" style="width:120px">
+          <col v-if="visibleCols.zaloGlobalId" style="width:130px">
+          <col v-if="visibleCols.zaloUsername" style="width:130px">
+          <col v-if="visibleCols.lookupState" style="width:100px">
+          <col style="width:80px">
+        </colgroup>
         <thead>
           <tr>
-            <th class="w-32"></th>
-            <th class="w-40"></th>
-            <th class="w-200">Tên CRM / Zalo (KH)</th>
-            <th class="w-120">SĐT</th>
-            <th class="w-100">Tỉnh/Quận</th>
-            <th class="w-80">Nguồn</th>
-            <th class="w-100">Trạng thái KH</th>
-            <th class="w-60">Score</th>
-            <th class="w-180">Nick chăm</th>
-            <th class="w-150">Sale chính / hỗ trợ</th>
-            <th class="w-170">KH nhắn cuối</th>
-            <th class="w-170">Sale nhắn cuối</th>
-            <th class="w-80">Tin in/out</th>
-            <th class="w-110">Tags CRM</th>
-            <th class="w-70">Có Zalo?</th>
+            <th class="w-26"></th>
+            <th class="w-30"></th>
+            <th class="w-132">Tên CRM / Zalo (KH)</th>
+            <th class="w-100">SĐT</th>
+            <th class="w-68">Tỉnh/Quận</th>
+            <th class="w-54">Nguồn</th>
+            <th class="w-72">Trạng thái KH</th>
+            <th class="w-42">Score</th>
+            <th class="w-118">Nick chăm</th>
+            <th class="w-94">Sale chính / hỗ trợ</th>
+            <th class="w-msg">KH nhắn cuối</th>
+            <th class="w-msg">Sale nhắn cuối</th>
+            <th class="w-56">Tin in/out</th>
+            <th class="w-80">Tags CRM</th>
+            <th class="w-50">Có Zalo?</th>
             <th v-if="visibleCols.zaloUid" class="w-120" title="Zalo UID per-account chính (cũ nhất)">Zalo UID</th>
             <th v-if="visibleCols.zaloGlobalId" class="w-130" title="Zalo globalId toàn cục (dedup cross-account)">Global ID</th>
             <th v-if="visibleCols.zaloUsername" class="w-130" title="Zalo username (handle t_xxx)">Username</th>
             <th v-if="visibleCols.lookupState" class="w-100" title="Trạng thái tra Zalo qua SĐT">Lookup</th>
-            <th class="w-130">Action</th>
+            <th class="w-80">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -227,48 +251,34 @@
               :data-contact-id="contact.id"
               @click="onRowClick($event, contact.id)"
             >
-              <td>
-                <button class="expand-btn" @click.stop="toggleExpand(contact.id)">
+              <!-- col1: caret -->
+              <td class="cl-caret-cell">
+                <button class="cl-caret" @click.stop="toggleExpand(contact.id)">
                   {{ expandedId === contact.id ? '▾' : '▸' }}
                 </button>
               </td>
-              <td>
-                <Avatar
-                  :src="contact.avatarUrl"
-                  :name="contact.crmName || contact.fullName || '?'"
-                  :size="32"
-                  :gender="contact.gender"
-                  :gradient-seed="contact.id"
-                />
-              </td>
-              <td>
-                <!-- 2026-06-03: GT + tuổi gắn liền tên (anh chốt qua office-hours) -->
-                <div class="name-text">
-                  {{ contact.crmName || contact.fullName || '—' }}
-                  <span
-                    v-if="contact.gender === 'male'" class="gtag-inline gtag-male"
-                    :title="genderLabel(contact.gender)"
-                  >♂</span>
-                  <span
-                    v-else-if="contact.gender === 'female'" class="gtag-inline gtag-female"
-                    :title="genderLabel(contact.gender)"
-                  >♀</span>
-                  <span v-if="ageOf(contact)" class="age-inline">{{ ageOf(contact) }}t</span>
-                </div>
-                <!-- Anh chốt 2026-05-28: badge "Cùng chăm (N)" xuống dòng 2 để giảm width cột -->
-                <div
-                  v-if="(contact.childrenCount ?? 0) > 1"
-                  class="name-sub"
-                >
-                  <span
-                    class="chip chip-cung-cham"
-                    :title="`${contact.childrenCount} nick chăm KH này — mở ▸ để xem`"
-                  >
-                    🤝 Cùng chăm ({{ contact.childrenCount }})
-                  </span>
-                </div>
-                <div v-if="contact.fullName && contact.crmName && contact.fullName !== contact.crmName" class="name-sub">
-                  {{ contact.fullName }}
+              <!-- col2+3 GỘP: avatar + tên trong 1 ô flex (avatar luôn thẳng dòng tên đầu,
+                   kể cả tên nhiều dòng — fix tận gốc "avatar đè tên" + "tên nhảy lên") -->
+              <td class="cl-name" colspan="2">
+                <span class="av-slot">
+                  <Avatar
+                    :src="contact.avatarUrl"
+                    :name="contact.crmName || contact.fullName || '?'"
+                    :size="26"
+                    :gradient-seed="contact.id"
+                  />
+                </span>
+                <div class="cl-name-stack">
+                  <div class="cl-name-line">
+                    <span class="cl-nm">{{ contact.crmName || contact.fullName || '—' }}</span>
+                    <span v-if="contact.gender === 'male'" class="gtag gtag-male" :title="genderLabel(contact.gender)">♂</span>
+                    <span v-else-if="contact.gender === 'female'" class="gtag gtag-female" :title="genderLabel(contact.gender)">♀</span>
+                    <span v-if="ageOf(contact)" class="age-inline">{{ ageOf(contact) }}t</span>
+                  </div>
+                  <div v-if="(contact.childrenCount ?? 0) > 1" class="cl-name-sub">
+                    <span class="chip chip-cung-cham" :title="`${contact.childrenCount} nick chăm KH này — mở ▸ để xem`">🤝 Cùng chăm ({{ contact.childrenCount }})</span>
+                  </div>
+                  <div v-if="contact.fullName && contact.crmName && contact.fullName !== contact.crmName" class="cl-name-sub">{{ contact.fullName }}</div>
                 </div>
               </td>
               <td>
@@ -316,16 +326,16 @@
                   <span
                     v-for="(acc, idx) in (contact.contactAccess ?? []).slice(0, 4)"
                     :key="acc.user?.id || idx"
-                    class="cc-avatar"
-                    :class="{ 'cc-primary': acc.role === 'primary' }"
+                    class="ccs-avatar"
+                    :class="{ 'ccs-primary': acc.role === 'primary' }"
                     :style="{ background: avatarColor(acc.user?.fullName || acc.user?.email || '') }"
                   >
                     {{ initialOf(acc.user?.fullName || acc.user?.email || '?') }}
                   </span>
-                  <span v-if="(contact.contactAccess?.length ?? 0) > 4" class="cc-more">
+                  <span v-if="(contact.contactAccess?.length ?? 0) > 4" class="ccs-more">
                     +{{ (contact.contactAccess?.length ?? 0) - 4 }}
                   </span>
-                  <span class="cc-count">{{ contact.contactAccess?.length ?? 0 }} sale</span>
+                  <span class="ccs-count">{{ contact.contactAccess?.length ?? 0 }} sale</span>
                 </div>
                 <div v-else class="nick-count-grid">
                   <span v-for="b in nickCountChips(contact)" :key="b.kind" :class="['chip', 'nick-mini', b.cls]" :title="b.title">
@@ -335,7 +345,7 @@
               </td>
               <td>
                 <div class="assigned-cell">
-                  <span class="sale-main-name">{{ contact.assignedUser?.fullName || '—' }}</span>
+                  <span class="sale-main-name" :title="contact.assignedUser?.fullName || ''">{{ contact.assignedUser?.fullName || '—' }}</span>
                   <!-- Phase Contact Scope Hybrid 2026-05-27 — badge collaborator -->
                   <span
                     v-if="contact.viewerRole === 'primary'"
@@ -389,14 +399,11 @@
                   </span>
                 </div>
               </td>
-              <td>
-                <!-- Phase Dual View 2026-05-28: cột Zalo cố định 3 trạng thái mutex.
-                     Anh fix 2026-05-28: dùng displayHasZalo aggregate Cha/Con thay
-                     hasZalo raw — KH có zalo_uid/global_id từ Friend row thì Cha
-                     phải hiện "Có Zalo" dù field hasZalo chưa được set. -->
-                <span v-if="zaloDisplay(contact) === 'yes'" class="zalo-pill zalo-yes">🟢 Có Zalo</span>
-                <span v-else-if="zaloDisplay(contact) === 'no'" class="zalo-pill zalo-no">🔴 Không tìm thấy</span>
-                <span v-else class="zalo-pill zalo-unknown">⚪ Chưa tìm</span>
+              <td class="cl-zalo">
+                <!-- cl-zalo overflow hidden → pill KHÔNG tràn sang Action. 3 trạng thái mutex. -->
+                <span v-if="zaloDisplay(contact) === 'yes'" class="zpill zpill-yes" title="Có Zalo">🟢 Có</span>
+                <span v-else-if="zaloDisplay(contact) === 'no'" class="zpill zpill-no" title="Không tìm thấy Zalo">🔴 Ko</span>
+                <span v-else class="zpill zpill-wait" title="Chưa tìm Zalo">⚪ Chờ</span>
               </td>
               <td v-if="visibleCols.zaloUid" :title="'Per-account UID khác nhau theo nick. Mở ▸ xem chi tiết per row con.'">
                 <span v-if="(contact.childrenCount ?? 0) > 1" class="chip chip-multi" title="Đa Zalo identity — mỗi nick có UID riêng">đa {{ contact.childrenCount }} con</span>
@@ -421,104 +428,134 @@
                 <span v-else class="empty">chưa tra</span>
               </td>
               <td>
-                <div class="action-cell">
-                  <button class="row-action-btn view-profile-btn" @click.stop="openProfile(contact)" title="Xem & sửa hồ sơ khách hàng">👤 Hồ sơ</button>
-                  <button class="row-action-btn" @click.stop="goChat(contact)" title="Mở chat">💬</button>
+                <div class="cl-action">
+                  <button class="cl-btn cl-btn-profile" @click.stop="openProfile(contact)" title="Xem & sửa hồ sơ khách hàng">👤 Hồ sơ</button>
+                  <!-- 💬 bỏ khỏi dòng KH Cha (chốt 2026-06-04): chat mở từ friend row,
+                       vì 1 KH Cha có thể nhiều nick → chọn nick cụ thể ở row con. -->
                 </div>
               </td>
             </tr>
 
-            <!-- Child row: nick chăm — STRIP LAI ①+② (chốt 2026-06-03, thay bảng 16 cột cũ).
-                 Mỗi nick = 1 strip 3 dòng, viền trái đổi màu theo trạng thái kết bạn,
-                 Friend Tag nhãn chữ (Zalo/Tự gắn/Tự động), không giấu field. -->
-            <tr v-if="expandedId === contact.id" class="exp-row">
-              <td :colspan="totalColumnsCount">
-                <div class="deck">
-                  <div v-if="friendshipLoading[contact.id]" class="child-empty">Đang tải…</div>
-                  <template v-else-if="childRows(contact).length">
-                    <div class="deck-head">{{ childRows(contact).length }} NICK ĐANG CHĂM KHÁCH NÀY</div>
-                    <div
-                      v-for="(row, idx) in childRows(contact)" :key="row.id"
-                      class="strip" :class="[stripKbClass(row.relationshipKind), { winner: idx === 0 }]"
-                    >
-                      <!-- Dòng 1: avatar + tên nick + winner + KB + chat + tên nhớ + score -->
-                      <div class="s-r1">
-                        <Avatar :src="row.nickAvatarUrl" :name="row.nickName" :size="28" :gradient-seed="row.id" platform="zalo" />
-                        <span class="nm">{{ row.nickName }}</span>
-                        <span v-if="idx === 0" class="winbadge">🏆 Nick chính</span>
-                        <span class="kb" :class="kbCClass(row.relationshipKind)">{{ kindLabel(row.relationshipKind) }}</span>
-                        <span class="chatdot" :class="{ off: !row.hasConversation }">
-                          {{ row.hasConversation ? '💬 đang chat' : 'ø chưa chat' }}
-                        </span>
-                        <span class="alias-wrap">
-                          <span class="alias-lbl">Tên nhớ</span>
-                          <input
-                            class="alias-in"
-                            :value="row.aliasInNick || ''"
-                            placeholder="— chưa đặt —"
-                            title="Đồng bộ 2 chiều với Zalo. Đổi ở đây → push qua Zalo của Sale."
-                            @click.stop
-                            @change="onFriendAliasChange(row, ($event.target as HTMLInputElement).value)"
-                          />
-                          <span class="alias-sync" title="Đồng bộ 2 chiều với Zalo">⇄ Zalo</span>
-                        </span>
-                        <input
-                          type="number" class="miniscore-input"
-                          :class="scoreChipClass(row.leadScore)"
-                          :value="row.leadScore" min="0" max="100"
-                          title="Score per-nick. Cha = AVG."
-                          @click.stop
-                          @change="onFriendScoreChange(row, ($event.target as HTMLInputElement).value)"
-                        />
+            <!-- Child rows: nick chăm — GIÓNG CỘT (chốt 2026-06-04, thay strip 3 dòng).
+                 Mỗi nick = 1 <tr.row-child> dùng CHUNG cột với hàng KH cha:
+                 Trạng thái/Score/KH-Sale nhắn cuối/Tin/Action gióng thẳng dưới header.
+                 Tên nhớ mượn 3 cột SĐT+Tỉnh+Nguồn; badge KB ở cột Sale chính. -->
+            <template v-if="expandedId === contact.id">
+              <tr v-if="friendshipLoading[contact.id]" class="exp-loading">
+                <td :colspan="totalColumnsCount" class="child-empty">Đang tải…</td>
+              </tr>
+              <template v-else-if="childRows(contact).length">
+                <tr class="deck-head-row">
+                  <td :colspan="totalColumnsCount">{{ childRows(contact).length }} NICK ĐANG CHĂM KHÁCH NÀY</td>
+                </tr>
+                <tr
+                  v-for="(row, idx) in childRows(contact)" :key="row.id"
+                  class="fr-row" :class="[frKbClass(row.relationshipKind), { 'is-last': idx === childRows(contact).length - 1 }]"
+                >
+                  <!-- col1: caret-slot trống (giữ thẳng cột với caret cha) -->
+                  <td class="cl-caret-cell"></td>
+                  <!-- col2+3 GỘP: avatar + nick + 🏆 + chấm chat + alias (cùng pattern .cl-name như cha
+                       → avatar con thẳng dọc avatar cha, accent = inset shadow trái) -->
+                  <td class="cl-name fr-name" colspan="2">
+                    <span class="av-slot">
+                      <Avatar :src="row.nickAvatarUrl" :name="row.nickName" :size="22" :gradient-seed="row.id" />
+                    </span>
+                    <div class="cl-name-stack">
+                      <div class="cl-name-line">
+                        <span class="cl-nm fr-nm" :title="row.nickName">{{ row.nickName }}</span>
+                        <span v-if="idx === 0" class="fr-trophy" title="Nick chính">🏆</span>
+                        <span class="fr-chatdot" :class="{ off: !row.hasConversation }" :title="row.hasConversation ? 'đang chat' : 'chưa chat'"></span>
                       </div>
-                      <!-- Dòng 2: sale + trạng thái KH + Friend Tag (nhãn nhóm) + số liệu -->
-                      <div class="s-r2">
-                        <span class="sale">Sale <b>{{ row.saleName }}</b><span v-if="row.becameFriendAt"> · bạn {{ row.becameFriendAt }}</span></span>
-                        <span
-                          v-if="row.statusRef"
-                          class="chip status-edit-chip"
-                          :style="{ background: chipBg(row.statusRef.color), color: chipFg(row.statusRef.color) }"
-                          title="Click đổi trạng thái"
-                          @click.stop="openFriendStatusEdit(row)"
-                        >{{ row.statusRef.name }}</span>
-                        <span v-else class="empty" style="cursor:pointer" @click.stop="openFriendStatusEdit(row)">— đặt trạng thái —</span>
-                        <span class="tagsec">
-                          <span class="tlbl">Tag</span>
-                          <span v-for="t in friendTagsOf(row)" :key="t.key" class="ftag" :class="t.cls" :title="t.group">{{ t.label }}</span>
-                          <span v-if="!friendTagsOf(row).length" class="empty">—</span>
-                        </span>
-                        <span class="metarow">
-                          <span class="m">📥 <b>{{ row.totalInbound }}</b></span>
-                          <span class="m">📤 <b>{{ row.totalOutbound }}</b></span>
-                        </span>
-                      </div>
-                      <!-- Dòng 3: tin nhắn cuối (nhãn KH/Sale) + action -->
-                      <div class="s-r3">
-                        <span class="msgbox">
-                          <span v-if="row.lastInboundAt" class="msgline">
-                            <span class="who kh">KH</span>
-                            <span class="txt">{{ row.lastInboundPreview ? cleanPreview(row.lastInboundPreview, row.lastInboundType) : '(đã nhắn)' }}</span>
-                            <span class="tm">{{ formatRecentDateTime(row.lastInboundAt) }}</span>
-                          </span>
-                          <span v-if="row.lastOutboundAt" class="msgline">
-                            <span class="who sale">Sale</span>
-                            <span class="txt">{{ row.lastOutboundPreview ? cleanPreview(row.lastOutboundPreview, row.lastOutboundType) : '(đã nhắn)' }}</span>
-                            <span class="tm">{{ formatRecentDateTime(row.lastOutboundAt) }}</span>
-                          </span>
-                          <span v-if="!row.lastInboundAt && !row.lastOutboundAt" class="empty" style="font-size:11px">Chưa có tin nhắn</span>
-                        </span>
-                        <span class="actbtns">
-                          <button class="primary" @click.stop="onChildAction('chat', row)">💬 Chat</button>
-                          <button @click.stop="onChildAction('auto', row)">⚡ Marketing</button>
-                          <button @click.stop="onPromoteFriend(row)" title="Tách nick này thành KH Cha riêng">✂ Tách</button>
-                        </span>
-                      </div>
+                      <input
+                        class="fr-alias"
+                        :value="row.aliasInNick || ''"
+                        placeholder="✎ tên nhớ"
+                        title="Tên nhớ (đồng bộ 2 chiều với Zalo)."
+                        @click.stop
+                        @change="onFriendAliasChange(row, ($event.target as HTMLInputElement).value)"
+                      />
                     </div>
-                  </template>
-                  <div v-else class="child-empty">KH này chưa có nick CRM nào chăm.</div>
-                </div>
-              </td>
-            </tr>
+                  </td>
+                  <!-- col4 SĐT → ⇄ Zalo sync hint -->
+                  <td><span class="fr-sync-hint" title="Tên nhớ đồng bộ 2 chiều với Zalo">⇄ Zalo</span></td>
+                  <!-- col5 Tỉnh, col6 Nguồn → trống -->
+                  <td></td>
+                  <td></td>
+                  <!-- col7 Trạng thái KH (per-nick, editable) -->
+                  <td>
+                    <button
+                      v-if="row.statusRef"
+                      class="chip fr-status-btn"
+                      :style="{ background: chipBg(row.statusRef.color), color: chipFg(row.statusRef.color) }"
+                      title="Click đổi trạng thái"
+                      @click.stop="openFriendStatusEdit(row)"
+                    >{{ row.statusRef.name }}</button>
+                    <button v-else class="chip chip-grey fr-status-btn" @click.stop="openFriendStatusEdit(row)">— đặt —</button>
+                  </td>
+                  <!-- col8 Score (per-nick, editable) -->
+                  <td>
+                    <input
+                      type="number" class="fr-score"
+                      :class="scoreChipClass(row.leadScore)"
+                      :value="row.leadScore" min="0" max="100"
+                      title="Score per-nick. Cha = AVG."
+                      @click.stop
+                      @change="onFriendScoreChange(row, ($event.target as HTMLInputElement).value)"
+                    />
+                  </td>
+                  <!-- col9 Nick chăm → ngày kết bạn -->
+                  <td><span class="fr-became">{{ row.becameFriendAt ? ('KB ' + row.becameFriendAt) : 'chưa KB' }}</span></td>
+                  <!-- col10 Sale chính → tên sale chăm nick -->
+                  <td><span class="fr-sale" :title="row.saleName">{{ row.saleName }}</span></td>
+                  <!-- col11 KH nhắn cuối -->
+                  <td>
+                    <template v-if="row.lastInboundAt">
+                      <div class="cell-strong">{{ formatRecentDateTime(row.lastInboundAt) }}</div>
+                      <div class="cell-preview" :title="row.lastInboundPreview || ''">{{ row.lastInboundPreview ? cleanPreview(row.lastInboundPreview, row.lastInboundType) : '(đã nhắn)' }}</div>
+                    </template>
+                    <span v-else class="empty">—</span>
+                  </td>
+                  <!-- col12 Sale nhắn cuối -->
+                  <td>
+                    <template v-if="row.lastOutboundAt">
+                      <div class="cell-strong">{{ formatRecentDateTime(row.lastOutboundAt) }}</div>
+                      <div class="cell-preview" :title="row.lastOutboundPreview || ''">{{ row.lastOutboundPreview ? cleanPreview(row.lastOutboundPreview, row.lastOutboundType) : '(đã nhắn)' }}</div>
+                    </template>
+                    <span v-else class="empty">—</span>
+                  </td>
+                  <!-- col13 Tin in/out -->
+                  <td class="fr-io"><b>{{ row.totalInbound }}</b> / {{ row.totalOutbound }}</td>
+                  <!-- col14 Tags CRM (Friend Tag) -->
+                  <td>
+                    <div class="tag-cell">
+                      <span v-for="t in friendTagsOf(row).slice(0, 2)" :key="t.key" class="ftag" :class="t.cls" :title="t.group">{{ t.label }}</span>
+                      <span v-if="friendTagsOf(row).length > 2" class="chip chip-grey">+{{ friendTagsOf(row).length - 2 }}</span>
+                      <span v-if="!friendTagsOf(row).length" class="empty">—</span>
+                    </div>
+                  </td>
+                  <!-- col15 Có Zalo? → badge trạng thái kết bạn nick -->
+                  <td class="cl-zalo">
+                    <span class="zpill" :class="kbCClass(row.relationshipKind)" :title="kindLabel(row.relationshipKind)">{{ kindLabelShort(row.relationshipKind) }}</span>
+                  </td>
+                  <!-- cột Zalo v-if: trống giữ alignment khi power-user bật -->
+                  <td v-if="visibleCols.zaloUid"></td>
+                  <td v-if="visibleCols.zaloGlobalId"></td>
+                  <td v-if="visibleCols.zaloUsername"></td>
+                  <td v-if="visibleCols.lookupState"></td>
+                  <!-- col16 Action (💬 / ⚡ / ⬆) -->
+                  <td>
+                    <div class="cl-action">
+                      <button class="cl-btn cl-btn-primary" @click.stop="onChildAction('chat', row)" title="Mở chat">💬</button>
+                      <button class="cl-btn" @click.stop="onChildAction('auto', row)" title="Marketing">⚡</button>
+                      <button class="cl-btn" @click.stop="onPromoteFriend(row)" title="Tách nick này thành KH Cha riêng">⬆</button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              <tr v-else class="exp-empty">
+                <td :colspan="totalColumnsCount" class="child-empty">KH này chưa có nick CRM nào chăm.</td>
+              </tr>
+            </template>
           </template>
 
           <tr v-if="!loading && !contacts.length">
@@ -914,7 +951,7 @@ function toggleExpand(id: string) {
 // Skip nếu click vào button / input / link bên trong.
 function onRowClick(e: MouseEvent, id: string) {
   const t = e.target as HTMLElement;
-  if (t.closest('button, input, select, textarea, a, .v-menu, .action-cell')) return;
+  if (t.closest('button, input, select, textarea, a, .v-menu, .cl-action')) return;
   if (viewMode.value === 'm2') {
     const c = contacts.value.find((x) => x.id === id);
     if (c) selectedContact.value = c;
@@ -1299,10 +1336,20 @@ function kindLabel(kind: ChildRow['relationshipKind']): string {
   };
   return map[kind];
 }
-// ── Strip lai ①+② helpers (2026-06-03) ──
-// Viền trái strip đổi màu theo trạng thái kết bạn.
-function stripKbClass(kind: ChildRow['relationshipKind']): string {
-  return { friend: 'kb-yes', pending_friend: 'kb-pending', chatting_stranger: 'kb-info', ghost: 'kb-off' }[kind] || '';
+// Nhãn ngắn cho badge KB ở hàng con (cột Nick chăm 118px) — tránh cắt chữ. Full ở title.
+function kindLabelShort(kind: ChildRow['relationshipKind']): string {
+  const map: Record<ChildRow['relationshipKind'], string> = {
+    friend: 'Đã KB',
+    pending_friend: 'Đã mời',
+    chatting_stranger: 'Nhắn lạ',
+    ghost: 'Đã ngắt',
+  };
+  return map[kind];
+}
+// ── Friend row helpers ──
+// frKbClass: class trên <tr.fr-row> → accent rail trái (inset shadow) đổi màu theo KB.
+function frKbClass(kind: ChildRow['relationshipKind']): string {
+  return { friend: 'kb-yes', pending_friend: 'kb-pending', chatting_stranger: 'kb-info', ghost: 'kb-off' }[kind] || 'kb-off';
 }
 // Chip trạng thái KB (nền nhạt).
 function kbCClass(kind: ChildRow['relationshipKind']): string {
@@ -1710,9 +1757,11 @@ watch(
   width: 100%;
   border-collapse: collapse;
   font-size: 12.5px;
-  /* min-width: 1500 cho HD 1366 — < viewport hẹp 1500 sẽ H scroll trong wrap.
-     Cột explicit width đủ cho content phổ biến nhưng không quá rộng. */
-  min-width: 1500px;
+  /* min-width khít HD 1366: 14 cột cố định (1020px) + 2 cột tin nhắn auto (~155×2)
+     = 1330 = usable wrap @1366 → KHÔNG còn H-scroll. Màn rộng: table width:100%
+     kéo bảng rộng ra, 2 cột .w-msg (auto) tự nuốt phần dư.
+     Bật thêm cột Zalo (v-if) thì bảng mới scroll — đó là power-user opt-in. */
+  min-width: 1300px;
   /* table-layout: fixed → cột không recalc khi expand row con (no layout shift) */
   table-layout: fixed;
 }
@@ -1758,25 +1807,58 @@ watch(
 .smax-table td {
   /* 2026-06-03 design-review #2: giảm padding ngang 11→8 cho bảng đỡ chật ở 1366 */
   padding: 9px 8px;
+  /* vertical-align: top (giữ như bản gốc) — cụm tên nhiều dòng (tên + giới tính +
+     Cùng chăm + sub-name) căn TOP, tên đầu thẳng đỉnh avatar. KHÔNG dùng middle
+     (middle đẩy dòng tên đầu lên cao hơn avatar khi cụm tên >1 dòng → "tên nhảy lên"). */
   vertical-align: top;
 }
+/* 2026-06-04: cột avatar (td thứ 2) padding ngang nhỏ + căn giữa → avatar 26px KHÔNG
+   tràn sang cột tên (cột chỉ 30px, padding 8px 2 bên chỉ chừa 14px). Áp cho hàng cha. */
+.smax-table tbody tr.master-row > td:nth-child(2) { padding-left: 2px; padding-right: 2px; text-align: center; }
+.smax-table tbody tr.master-row > td:nth-child(2) :deep(.v-avatar),
+.smax-table tbody tr.master-row > td:nth-child(2) > * { vertical-align: middle; }
+/* 14 cột cố định — tổng 1020px (đo thật @1366: usable wrap = 1330) để 2 cột
+   tin nhắn .w-msg (width:auto) tự lấy phần còn lại ~155px mỗi cột → không scroll. */
+.w-26 { width: 26px; }
+.w-30 { width: 30px; }
 .w-32 { width: 32px; }
 .w-40 { width: 40px; }
+.w-42 { width: 42px; }
+.w-50 { width: 50px; }
+.w-54 { width: 54px; }
+.w-56 { width: 56px; }
 .w-60 { width: 60px; }
+.w-68 { width: 68px; }
 .w-70 { width: 70px; }
+.w-72 { width: 72px; }
+.w-76 { width: 76px; }
 .w-78 { width: 78px; }
 .w-80 { width: 80px; }
+.w-88 { width: 88px; }
 .w-90 { width: 90px; }
+.w-94 { width: 94px; }
+.w-96 { width: 96px; }
 .w-100 { width: 100px; }
+.w-106 { width: 106px; }
 .w-110 { width: 110px; }
+.w-114 { width: 114px; }
+.w-118 { width: 118px; }
 .w-120 { width: 120px; }
 .w-130 { width: 130px; }
+.w-132 { width: 132px; }
+.w-138 { width: 138px; }
 .w-140 { width: 140px; }
+.w-144 { width: 144px; }
 .w-150 { width: 150px; }
 .w-170 { width: 170px; }
+.w-176 { width: 176px; }
 .w-180 { width: 180px; }
 .w-200 { width: 200px; }
 .w-260 { width: 260px; }
+/* 2 cột tin nhắn = "hố thu" phần dư. width:auto → table-layout:fixed cho cột auto
+   nuốt toàn bộ chỗ còn lại sau khi trừ 14 cột px (≈155px @1366, nở rộng @FHD/2K).
+   KHÔNG dùng min-width (table-layout:fixed bỏ qua) hay % (cư xử lệch). */
+.w-msg { width: auto; }
 
 .expand-btn {
   background: transparent; border: none;
@@ -1800,10 +1882,12 @@ watch(
 
 .name-text { font-weight: 500; color: var(--smax-text); }
 .name-sub { font-size: 11px; color: var(--smax-grey-700); }
-.cell-strong { font-weight: 500; font-size: 12px; }
+.cell-strong { font-weight: 500; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cell-preview {
   font-size: 11.5px; color: var(--smax-grey-700);
-  max-width: 220px;
+  /* 100% (không cố định 220) → preview nở theo cột .w-msg trên màn rộng,
+     đọc được câu dài hơn; ellipsis vẫn cắt gọn khi cột hẹp @1366. */
+  max-width: 100%;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .empty { color: var(--smax-grey-300); }
@@ -1976,7 +2060,7 @@ watch(
   gap: 4px;
   cursor: help;
 }
-.cc-avatar {
+.ccs-avatar {
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -1992,12 +2076,12 @@ watch(
   margin-left: -6px;
   text-transform: uppercase;
 }
-.cc-avatar:first-child { margin-left: 0; }
-.cc-avatar.cc-primary {
+.ccs-avatar:first-child { margin-left: 0; }
+.ccs-avatar.ccs-primary {
   border: 2px solid #f59e0b;
   box-shadow: 0 0 0 1px #fbbf24;
 }
-.cc-more {
+.ccs-more {
   font-size: 10px;
   color: #64748b;
   margin-left: 2px;
@@ -2006,7 +2090,7 @@ watch(
   border-radius: 8px;
   font-weight: 600;
 }
-.cc-count {
+.ccs-count {
   font-size: 10px;
   color: #475569;
   margin-left: 4px;
@@ -2084,6 +2168,14 @@ watch(
   flex-direction: column;
   gap: 3px;
   align-items: flex-start;
+  min-width: 0;
+}
+/* Fix text đè 2026-06-04: tên sale 1 dòng ellipsis (cột 94px hẹp), badge đã xuống
+   dòng riêng (flex-column) nên không inline-wrap. Tên đầy đủ ở title tooltip. */
+.assigned-cell .sale-main-name {
+  display: block; max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 12px;
 }
 .role-badge {
   font-size: 10.5px;
@@ -2134,17 +2226,19 @@ watch(
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
-/* Cột Zalo cố định 3 trạng thái mutex */
+
 .zalo-pill {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 10.5px;
-  padding: 3px 9px;
+  gap: 2px;
+  font-size: 10px;
+  padding: 3px 6px;
   border-radius: 9999px;
   font-weight: 600;
   white-space: nowrap;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .zalo-pill.zalo-yes {
   background: #dcfce7;
@@ -2268,12 +2362,17 @@ watch(
 /* Full HD (1920×1080) */
 @media (min-width: 1920px) {
   .dual-pane.detail-open { grid-template-columns: 620px 1fr; }
+  /* Cap bảng 1560px → 14 cột px (990) + 2 cột tin nhắn auto = ~285px/cột (anh chốt
+     ~280px). Cap để 2 cột không phình quá rộng; phần dư màn rộng thành lề 2 bên. */
+  .smax-contacts-page { max-width: 1560px; margin: 0 auto; }
 }
 
 /* 2K / QHD (2560×1440) */
 @media (min-width: 2560px) {
   .dual-pane.detail-open { grid-template-columns: 720px 1fr; }
-  .smax-contacts-page { max-width: 2400px; margin: 0 auto; }
+  /* Cap 1560 đồng nhất với FHD → cột tin nhắn giữ ~285px (không phình tới 700px),
+     bảng center, lề 2 bên rộng là centering bình thường (không phải gap giữa cột). */
+  .smax-contacts-page { max-width: 1560px; margin: 0 auto; }
 }
 
 /* Wedge A 2026-05-28: FAB "Thêm KH nhanh" — floating bottom-right */
@@ -2365,59 +2464,95 @@ watch(
 .smax-table tbody tr.master-row.row-no-zalo:hover { background: rgba(255, 145, 0, 0.07); }
 .smax-table tbody tr.master-row.row-no-zalo.open { background: var(--smax-primary-soft); }
 
-/* ════════ STRIP LAI ①+② cho nick con xổ inline (chốt 2026-06-03) ════════ */
-.exp-row > td { padding: 0; background: var(--smax-grey-50); }
-.deck { border-left: 4px solid var(--smax-primary); padding: 9px 13px 11px; background: #f7f9fc; }
-.deck-head { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: var(--smax-grey-700); font-weight: 700; margin-bottom: 8px; }
-.strip { background: #fff; border: 1px solid var(--smax-grey-200); border-left: 5px solid var(--smax-grey-300); border-radius: 6px; padding: 9px 12px; margin-bottom: 7px; }
-.strip.kb-yes { border-left-color: var(--smax-success); }
-.strip.kb-pending { border-left-color: var(--smax-warning); }
-.strip.kb-info { border-left-color: var(--smax-info); }
-.strip.kb-off { border-left-color: #9e9e9e; opacity: .72; }
-.strip.winner { background: rgba(0, 200, 83, .045); box-shadow: 0 0 0 1px rgba(0, 200, 83, .18); }
-/* dòng 1 */
-.strip .s-r1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-.strip .s-r1 .nm { font-weight: 700; font-size: 13px; }
-.strip .winbadge { font-size: 11px; background: rgba(0, 200, 83, .13); color: #1b8a3f; border-radius: 7px; padding: 1px 6px; }
-.strip .kb { display: inline-flex; align-items: center; gap: 3px; padding: 1px 8px; border-radius: 9px; font-size: 11px; font-weight: 600; white-space: nowrap; }
-.kb-c-yes { background: rgba(0, 200, 83, .15); color: #1b8a3f; } .kb-c-pending { background: rgba(255, 145, 0, .16); color: #ef6c00; }
-.kb-c-info { background: rgba(33, 150, 243, .14); color: #1565c0; } .kb-c-off { background: var(--smax-grey-100); color: #9e9e9e; }
-.strip .chatdot { font-size: 11px; color: #1b8a3f; } .strip .chatdot.off { color: #9e9e9e; }
-.strip .alias-wrap { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-.strip .alias-lbl { font-size: 10px; color: var(--smax-grey-400); }
-.strip .alias-in { border: 1px solid var(--smax-grey-300); border-radius: 5px; padding: 3px 8px; font-size: 12px; font-family: inherit; background: #fff; width: 180px; }
-.strip .alias-in:focus { outline: 1.5px solid var(--smax-primary); border-color: var(--smax-primary); }
-.strip .alias-sync { font-size: 10px; color: #1565c0; cursor: pointer; }
-.strip .miniscore-input { width: 48px; text-align: center; padding: 2px 4px; border: 1px solid var(--smax-grey-300); border-radius: 5px; font-weight: 700; font-size: 12px; }
-.strip .miniscore-input.chip-success { background: rgba(0,200,83,.15); color: #1b8a3f; }
-.strip .miniscore-input.chip-warning { background: rgba(255,145,0,.15); color: #ef6c00; }
-.strip .miniscore-input.chip-error { background: rgba(255,61,0,.13); color: #c62828; }
-/* dòng 2 */
-.strip .s-r2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; font-size: 11.5px; }
-.strip .s-r2 .sale { color: var(--smax-grey-700); } .strip .s-r2 .sale b { color: var(--smax-text); }
-.strip .tagsec { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-.strip .tagsec .tlbl { font-size: 9.5px; color: var(--smax-grey-400); text-transform: uppercase; font-weight: 600; }
-.strip .ftag { display: inline-flex; align-items: center; gap: 2px; padding: 1px 7px; border-radius: 9px; font-size: 10.5px; font-weight: 600; border: 1px solid; }
-.strip .ft-zalo { background: #fff8f0; border-color: #ff9800; color: #ef6c00; }
-.strip .ft-manual { background: #f0f7ff; border-color: #42a5f5; color: #1565c0; }
-.strip .ft-auto { background: #faf3fc; border-color: #ce93d8; color: #6a1b9a; }
-.strip .ft-score { background: rgba(0,200,83,.08); border-color: #66bb6a; color: #1b8a3f; }
-.strip .ft-sync { background: var(--smax-grey-100); border-color: var(--smax-grey-300); color: var(--smax-grey-700); }
-.strip .metarow { display: flex; gap: 11px; flex-wrap: wrap; margin-left: auto; }
-.strip .metarow .m { display: inline-flex; align-items: center; gap: 3px; color: var(--smax-grey-700); }
-.strip .metarow .m b { color: var(--smax-text); }
-/* dòng 3 */
-.strip .s-r3 { display: flex; align-items: center; gap: 12px; }
-.strip .msgbox { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.strip .msgline { font-size: 11px; display: flex; gap: 5px; align-items: baseline; }
-.strip .msgline .who { flex-shrink: 0; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 0 5px; }
-.strip .who.kh { background: rgba(0, 200, 83, .12); color: #1b8a3f; } .strip .who.sale { background: rgba(33, 150, 243, .1); color: #1565c0; }
-.strip .msgline .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--smax-text); }
-.strip .msgline .tm { flex-shrink: 0; color: var(--smax-grey-400); font-size: 10px; }
-.strip .actbtns { display: flex; gap: 5px; flex-shrink: 0; }
-.strip .actbtns button { border: 1px solid var(--smax-grey-300); background: #fff; border-radius: 5px; padding: 5px 11px; font-size: 11px; cursor: pointer; color: var(--smax-grey-700); white-space: nowrap; }
-.strip .actbtns button.primary { background: var(--smax-primary); color: #fff; border-color: var(--smax-primary); }
-.strip .actbtns button:hover { border-color: var(--smax-primary); color: var(--smax-primary); }
-.strip .actbtns button.primary:hover { background: var(--smax-primary-hover); color: #fff; }
+/* ═══════════ BẢNG KH — LAYOUT SẠCH (rewrite 2026-06-04) ═══════════
+   Gốc rễ các bug cũ: avatar (cột riêng) + tên (cột riêng) = 2 <td> với vertical-align
+   khác nhau → avatar đè tên / tên nhảy. FIX: gộp caret+avatar+tên vào 1 ô flex .cl-name
+   (align-items: flex-start) → avatar luôn thẳng dòng tên đầu, dù tên nhiều dòng.
+   Hàng con (fr-row) dùng cùng pattern → avatar con thẳng dọc avatar cha. */
+
+/* ô caret (cột 1) */
+.cl-caret-cell { text-align: center; padding-left: 2px; padding-right: 2px; }
+.cl-caret { width: 16px; height: 18px; line-height: 18px; padding: 0; background: none; border: 0; cursor: pointer; color: var(--smax-grey-700); font-size: 11px; }
+.cl-caret:hover { color: var(--smax-primary); }
+
+/* ô Tên (gộp avatar + tên, colspan 2) — flex 1 hàng, avatar pin top dòng tên */
+.cl-name { display: flex; align-items: flex-start; gap: 7px; }
+.av-slot { flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; }
+.fr-row .av-slot { flex-basis: 22px; width: 22px; height: 22px; }
+.cl-name-stack { flex: 1 1 auto; min-width: 0; }
+.cl-name-line { display: flex; align-items: center; gap: 4px; min-width: 0; min-height: 26px; }
+.fr-row .cl-name-line { min-height: 22px; }
+.cl-nm { font-weight: 500; color: var(--smax-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cl-name-sub { font-size: 11px; color: var(--smax-grey-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gtag { flex: 0 0 auto; font-size: 11px; font-weight: 600; border-radius: 7px; padding: 0 5px; }
+.gtag-male { background: rgba(30,136,229,.13); color: #1565c0; }
+.gtag-female { background: rgba(233,30,99,.12); color: #c2185b; }
+.age-inline { flex: 0 0 auto; font-size: 11px; color: var(--smax-grey-700); font-weight: 500; }
+
+/* Có Zalo? pill — KHÔNG tràn sang Action (box-sizing + max-width + overflow) */
+.cl-zalo { overflow: hidden; }
+.zpill { display: inline-flex; align-items: center; gap: 2px; box-sizing: border-box; max-width: 100%; font-size: 10px; line-height: 1; font-weight: 600; padding: 3px 5px; border-radius: 9999px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zpill-yes { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+.zpill-no { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.zpill-wait { background: #f1f5f9; color: #475569; border: 1px dashed #cbd5e1; }
+/* badge KB hàng con dùng .zpill + màu .kb-c-* */
+.kb-c-yes { background: rgba(0,200,83,.15); color: #1b8a3f; border: 1px solid #86efac; }
+.kb-c-pending { background: rgba(255,145,0,.16); color: #ef6c00; border: 1px solid #fcd9a5; }
+.kb-c-info { background: rgba(33,150,243,.14); color: #1565c0; border: 1px solid #90caf9; }
+.kb-c-off { background: var(--smax-grey-100); color: #9e9e9e; border: 1px solid var(--smax-grey-300); }
+
+/* Action — nút icon fixed-width, không tràn */
+.cl-action { display: flex; gap: 4px; }
+.cl-btn { box-sizing: border-box; height: 26px; padding: 0 8px; border: 1px solid var(--smax-grey-300); border-radius: 5px; background: #fff; font-size: 12px; line-height: 24px; white-space: nowrap; cursor: pointer; color: var(--smax-grey-700); }
+.cl-btn:hover { border-color: var(--smax-primary); color: var(--smax-primary); }
+.cl-btn-profile { background: var(--smax-primary-soft); border-color: var(--smax-primary); color: var(--smax-primary); font-weight: 600; }
+.cl-btn-profile:hover { background: var(--smax-primary); color: #fff; }
+.fr-row .cl-btn { width: 22px; height: 22px; padding: 0; text-align: center; line-height: 20px; }
+.fr-row .cl-action { gap: 3px; }
+.cl-btn-primary { background: var(--smax-primary); color: #fff; border-color: var(--smax-primary); }
+.cl-btn-primary:hover { background: var(--smax-primary); color: #fff; }
+
+/* ───────── HÀNG CON (fr-row) — gióng cột với cha ───────── */
+.deck-head-row > td { padding: 5px 8px 5px 28px; background: var(--smax-grey-50); font-size: 10.5px; font-weight: 700; letter-spacing: .03em; color: var(--smax-primary); border-bottom: 1px solid var(--smax-grey-200); }
+.exp-loading > td, .exp-empty > td { background: var(--smax-grey-50); }
+.fr-row { background: var(--smax-grey-50); font-size: 12px; }
+.fr-row:hover { background: #eef0f4; }
+.fr-row > td { padding: 7px 6px; vertical-align: middle; border-bottom: 1px solid var(--smax-grey-200); overflow: hidden; }
+.fr-row.is-last > td { border-bottom: 2px solid #d4d9e0; }
+
+/* accent rail = inset shadow trái trên ô Tên (KHÔNG cột riêng → gióng cột chuẩn) */
+.fr-name { box-shadow: inset 3px 0 0 var(--smax-grey-300); }
+.fr-row.kb-yes .fr-name { box-shadow: inset 3px 0 0 var(--smax-success); }
+.fr-row.kb-pending .fr-name { box-shadow: inset 3px 0 0 var(--smax-warning); }
+.fr-row.kb-info .fr-name { box-shadow: inset 3px 0 0 var(--smax-info); }
+.fr-row.kb-off .fr-name { box-shadow: inset 3px 0 0 #9e9e9e; }
+
+.fr-nm { font-size: 12.5px; font-weight: 600; }
+.fr-trophy { flex: 0 0 auto; color: #f9a825; font-size: 11px; }
+.fr-chatdot { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--smax-success); }
+.fr-chatdot.off { background: var(--smax-grey-300); }
+.fr-alias { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid transparent; border-radius: 5px; padding: 2px 6px; font: inherit; font-size: 11px; background: transparent; color: var(--smax-text); text-overflow: ellipsis; }
+.fr-alias::placeholder { color: var(--smax-grey-400); font-style: italic; }
+.fr-alias:hover { border-color: var(--smax-grey-300); background: #fff; }
+.fr-alias:focus { outline: none; border-color: var(--smax-primary); background: #fff; }
+.fr-sync-hint { font-size: 10px; color: #1565c0; white-space: nowrap; cursor: help; }
+.fr-status-btn { border: 0; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fr-score { width: 34px; box-sizing: border-box; text-align: center; padding: 2px; border: 1px solid transparent; border-radius: 5px; font: inherit; font-weight: 700; font-size: 11.5px; -moz-appearance: textfield; }
+.fr-score::-webkit-outer-spin-button, .fr-score::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.fr-score:hover, .fr-score:focus { border-color: var(--smax-grey-300); background: #fff; outline: none; }
+.fr-score.chip-success { background: rgba(0,200,83,.15); color: #1b8a3f; }
+.fr-score.chip-warning { background: rgba(255,145,0,.15); color: #ef6c00; }
+.fr-score.chip-error { background: rgba(255,61,0,.13); color: #c62828; }
+.fr-became, .fr-sale { display: block; font-size: 11px; color: var(--smax-grey-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fr-io { font-size: 12px; white-space: nowrap; }
+.fr-io b { font-weight: 700; }
+/* Friend Tag chip (cột Tags hàng con) */
+.fr-row .ftag { display: inline-flex; align-items: center; gap: 2px; padding: 1px 6px; border-radius: 8px; font-size: 9.5px; font-weight: 600; border: 1px solid; white-space: nowrap; }
+.fr-row .ft-zalo { background: #fff8f0; border-color: #ff9800; color: #ef6c00; }
+.fr-row .ft-manual { background: #f0f7ff; border-color: #42a5f5; color: #1565c0; }
+.fr-row .ft-auto { background: #faf3fc; border-color: #ce93d8; color: #6a1b9a; }
+.fr-row .ft-score { background: rgba(0,200,83,.08); border-color: #66bb6a; color: #1b8a3f; }
+.fr-row .ft-sync { background: var(--smax-grey-100); border-color: var(--smax-grey-300); color: var(--smax-grey-700); }
 .child-empty { padding: 9px 13px; font-size: 12px; color: var(--smax-grey-700); }
+
 </style>

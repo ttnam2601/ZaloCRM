@@ -8,7 +8,7 @@
           Tệp KH làm <b>audience source</b> cho Sequence / Broadcast / Campaign.
         </p>
       </div>
-      <button class="at-btn at-btn--primary" @click="showCreate = true">
+      <button class="at-btn at-btn--sm at-btn--action" @click="showCreate = true">
         <v-icon size="18">mdi-plus</v-icon>
         Tạo tệp mới
       </button>
