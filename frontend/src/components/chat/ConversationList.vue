@@ -158,17 +158,17 @@
                Show 3 tag đầu + "+N" chip click xem rest qua v-menu. -->
           <div class="ci-tag-row">
             <span
-              v-for="tag in mergedTags(conv).slice(0, 3)"
-              :key="tag"
+              v-for="tag in displayTags(conv).slice(0, 3)"
+              :key="tag.key"
               class="tag-mini"
-              :class="{ 'tag-zalo': isZaloManaged(tag), 'tag-crm': !isZaloManaged(tag) }"
-              :style="{ '--tag-color': tagColor(tag) }"
+              :class="{ 'tag-zalo': tag.isZalo, 'tag-crm': !tag.isZalo }"
+              :style="{ '--tag-color': tag.color }"
             >
-              <ZaloBrandIcon v-if="isZaloManaged(tag)" :size="11" />{{ cleanTagName(tag) }}
+              <ZaloBrandIcon v-if="tag.isZalo" :size="11" />{{ tag.name }}
             </span>
 
             <v-menu
-              v-if="mergedTags(conv).length > 3"
+              v-if="displayTags(conv).length > 3"
               :close-on-content-click="false"
               location="top start"
               open-on-hover
@@ -177,19 +177,19 @@
                 <span
                   v-bind="actProps"
                   class="tag-overflow"
-                  :title="`Còn ${mergedTags(conv).length - 3} tag khác`"
+                  :title="`Còn ${displayTags(conv).length - 3} tag khác`"
                   @click.stop
-                >+{{ mergedTags(conv).length - 3 }}</span>
+                >+{{ displayTags(conv).length - 3 }}</span>
               </template>
               <div class="tag-overflow-popup">
                 <span
-                  v-for="tag in mergedTags(conv).slice(3)"
-                  :key="tag"
+                  v-for="tag in displayTags(conv).slice(3)"
+                  :key="tag.key"
                   class="tag-popup-pill"
-                  :class="{ 'tag-zalo': isZaloManaged(tag), 'tag-crm': !isZaloManaged(tag) }"
-                  :style="{ '--tag-color': tagColor(tag) }"
+                  :class="{ 'tag-zalo': tag.isZalo, 'tag-crm': !tag.isZalo }"
+                  :style="{ '--tag-color': tag.color }"
                 >
-                  <ZaloBrandIcon v-if="isZaloManaged(tag)" :size="11" />{{ cleanTagName(tag) }}
+                  <ZaloBrandIcon v-if="tag.isZalo" :size="11" />{{ tag.name }}
                 </span>
               </div>
             </v-menu>
@@ -432,17 +432,33 @@ function buildFilterParams(): Record<string, string> {
 
 /* Merge Contact.tags + Friend.crmTagsPerNick (Zalo-mirrored "🔵 X").
  * Dedup, Zalo tags hiển thị đầu (priority cho per-pair context). */
-function mergedTags(conv: Conversation): string[] {
+// 2026-06-06 (Anh chốt) — Tag Zalo Real ở cột 2 lấy từ Friend.zaloLabels (object {name,color}
+// màu CHUẨN = zalo_labels.color, đồng bộ TagCrmBar + header) thay vì string '🔵 X' + crm_tags legacy.
+// Tag khác (manual/auto) giữ đường cũ. Trả object {name, color, isZalo} thống nhất.
+interface DisplayTag { name: string; color: string; isZalo: boolean; key: string }
+function displayTags(conv: Conversation): DisplayTag[] {
+  const seen = new Set<string>();
+  const out: DisplayTag[] = [];
+  // 1. Tag Zalo Real từ zaloLabels (màu chuẩn) — ƯU TIÊN đầu.
+  const zalo = (conv.friendship as { zaloLabels?: Array<{ id?: number; name?: string; color?: string }> } | null | undefined)?.zaloLabels;
+  if (Array.isArray(zalo)) {
+    for (const z of zalo) {
+      if (!z?.name || seen.has('z:' + z.name)) continue;
+      seen.add('z:' + z.name);
+      out.push({ name: z.name, color: z.color || '#0068FF', isZalo: true, key: 'z:' + (z.id ?? z.name) });
+    }
+  }
+  // 2. Tag CRM khác (manual/auto) — Contact.tags + crmTagsPerNick KHÔNG có prefix 🔵 (Zalo đã lấy ở trên).
   const contactTags = Array.isArray(conv.contact?.tags) ? (conv.contact!.tags as string[]) : [];
   const friendTagsRaw = (conv.friendship as { crmTagsPerNick?: string[] } | null | undefined)?.crmTagsPerNick;
   const friendTags = Array.isArray(friendTagsRaw) ? friendTagsRaw : [];
-  // Dedup, Zalo-managed (🔵 prefix) lên trước
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const t of friendTags) if (t.startsWith('🔵 ') && !seen.has(t)) { seen.add(t); result.push(t); }
-  for (const t of friendTags) if (!t.startsWith('🔵 ') && !seen.has(t)) { seen.add(t); result.push(t); }
-  for (const t of contactTags) if (!seen.has(t)) { seen.add(t); result.push(t); }
-  return result;
+  for (const t of [...friendTags, ...contactTags]) {
+    if (t.startsWith('🔵 ')) continue; // tag Zalo mirror → đã lấy từ zaloLabels
+    if (seen.has('c:' + t)) continue;
+    seen.add('c:' + t);
+    out.push({ name: cleanTagName(t), color: tagColor(t) || '#6B7280', isZalo: false, key: 'c:' + t });
+  }
+  return out;
 }
 
 // ── Conversation display ───────────────────────────────────────────────────

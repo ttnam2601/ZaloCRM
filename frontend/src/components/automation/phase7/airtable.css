@@ -390,6 +390,8 @@
   color: var(--at-ink);
   margin-top: 4px;
   line-height: 1;
+  /* 2026-06-06 — số liệu KPI dùng mono (Roboto Mono) khớp HS Holding. */
+  font-family: var(--mono, "Roboto Mono", ui-monospace, monospace);
   font-variant-numeric: tabular-nums;
 }
 .at-kpi-delta {
@@ -528,23 +530,11 @@
 
 /* ────────────────────────────────────────────────────────────────────────
  * RESPONSIVE
- * Mobile < 768 / Tablet 768-1023 / Desktop ≥1024 / Wide ≥1440
+ * HD-first (anh chốt): target 1366×768, min 1280. Helper visibility mobile/tablet
+ * (.at-hide-mobile/.at-only-*) đã GỠ 2026-06-06 — không view nào dùng + vi phạm
+ * HD-first. Giữ lại touch-target 44px + page-header stacking cho an toàn module
+ * Lịch hẹn (dùng chung airtable.css).
  * ──────────────────────────────────────────────────────────────────────── */
-
-/* Visibility helpers */
-.at-hide-mobile  { /* show on tablet+ */ }
-.at-only-mobile  { display: none; }
-.at-only-tablet  { display: none; }
-.at-only-desktop { display: initial; }
-
-@media (max-width: 767px) {
-  .at-hide-mobile  { display: none !important; }
-  .at-only-mobile  { display: initial; }
-  .at-only-desktop { display: none; }
-}
-@media (min-width: 768px) and (max-width: 1023px) {
-  .at-only-tablet { display: initial; }
-}
 
 /* Touch targets ≥44px on mobile (WCAG AAA recommendation) */
 @media (max-width: 767px) {

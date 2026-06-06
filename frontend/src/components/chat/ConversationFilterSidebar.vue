@@ -17,10 +17,11 @@
       </button>
     </header>
 
-    <!-- Privacy unlock dialog (mở từ lock badge) -->
-    <PrivacyUnlockDialog
-      v-model="privacyDialogOpen"
-      :nick="privacyDialogNick"
+    <!-- Privacy unlock OTP modal (mở từ lock badge) — 2026-06-06 thay PIN dialog -->
+    <PrivacyUnlockOtpModal
+      :open="privacyDialogOpen"
+      @close="privacyDialogOpen = false"
+      @unlocked="privacyDialogOpen = false"
     />
 
     <!-- ══════ COLLAPSED MODE ══════ -->
@@ -739,7 +740,7 @@ import type { AccountFolder, AutoTagKey, ScoreTier, StuckDuration, LastMessageWi
 import { useCrmTagDefs, cleanTagName, type CrmTagDef } from '@/composables/use-crm-tag-defs';
 import PrivacyLockBadge from '@/components/privacy/PrivacyLockBadge.vue';
 import LeadFloatingButton from '@/components/lead-pool/LeadFloatingButton.vue';
-import PrivacyUnlockDialog from '@/components/privacy/PrivacyUnlockDialog.vue';
+import PrivacyUnlockOtpModal from '@/components/privacy/PrivacyUnlockOtpModal.vue';
 import { usePrivacyStore } from '@/stores/privacy';
 // Icon Lucide thay emoji thô cho strip lọc (/plan-design-review 2026-06-06).
 import { Tag, Gauge, Clock, CalendarClock, UserRoundCog } from 'lucide-vue-next';
@@ -770,14 +771,9 @@ const _privacyStore = usePrivacyStore();
 const _authStore = useAuthStore();
 const canUsePrivacy = computed(() => !!_authStore.user?.id);
 const privacyDialogOpen = ref(false);
-const privacyDialogNick = computed(() => ({
-  displayName: _authStore.user?.fullName || _authStore.user?.email || 'Bạn',
-  avatarUrl: null,
-  zaloUid: null,
-}));
 async function onLockBadgeClick(_wasUnlocked: boolean) {
-  // Anh chốt 2026-05-22: badge tự lock khi đang unlocked. Parent chỉ mở dialog
-  // khi state hiện tại đang lock → user click để nhập PIN mở khoá.
+  // Anh chốt 2026-05-22: badge tự lock khi đang unlocked. Parent chỉ mở modal
+  // khi state hiện tại đang lock → user click để mở khoá qua OTP.
   await _privacyStore.fetchStatus(true).catch(() => {});
   if (!_privacyStore.isUnlocked) {
     privacyDialogOpen.value = true;

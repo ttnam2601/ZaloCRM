@@ -19,15 +19,10 @@
           <div class="pin-sub">{{ primarySub }}</div>
         </div>
         <div class="pin-action">
-          <!-- Unlocked: split 2 buttons -->
-          <div v-if="store.isUnlocked" class="pin-btn-group">
-            <button class="pin-btn-split lock" @click="onLock">🔒 Khoá ngay</button>
-            <button class="pin-btn-split changepin" @click="onOpenChangePin">⚙ Đổi PIN</button>
-          </div>
-          <!-- Locked: 1 unlock button -->
-          <button v-else-if="store.hasPin" class="pin-btn primary" @click="onOpenUnlock">🔓 Mở khoá</button>
-          <!-- Empty: 1 setup button -->
-          <button v-else class="pin-btn empty" @click="onOpenSetup">⚙ Setup PIN</button>
+          <!-- Unlocked: nút khoá ngay -->
+          <button v-if="store.isUnlocked" class="pin-btn-split lock" @click="onLock">🔒 Khoá ngay</button>
+          <!-- Locked: nút mở khoá qua OTP -->
+          <button v-else class="pin-btn primary" @click="onOpenUnlock">🔓 Mở khoá</button>
         </div>
       </div>
 
@@ -95,9 +90,8 @@
 
     <div v-if="errorMsg" class="ptab-error" @click="errorMsg = ''">⚠ {{ errorMsg }} <span class="dismiss">✕</span></div>
 
-    <!-- Dialogs: reuse PrivacyUnlockDialog cho unlock + PrivacyPinSetupDialog cho setup/change -->
-    <PrivacyUnlockDialog v-model="unlockOpen" :nick="meAsNick" @unlocked="onUnlocked" />
-    <PrivacyPinSetupDialog v-model="setupOpen" :mode="setupMode" @done="onSetupDone" />
+    <!-- OTP unlock modal (2026-06-06 thay PIN dialog + setup dialog) -->
+    <PrivacyUnlockOtpModal :open="unlockOpen" @close="unlockOpen = false" @unlocked="onUnlocked" />
   </div>
 </template>
 
@@ -106,8 +100,7 @@ import { ref, computed, onMounted, onUnmounted, h, defineComponent } from 'vue';
 import { api } from '@/api/index';
 import { usePrivacyStore } from '@/stores/privacy';
 import { useAuthStore } from '@/stores/auth';
-import PrivacyUnlockDialog from '@/components/privacy/PrivacyUnlockDialog.vue';
-import PrivacyPinSetupDialog from '@/components/privacy/PrivacyPinSetupDialog.vue';
+import PrivacyUnlockOtpModal from '@/components/privacy/PrivacyUnlockOtpModal.vue';
 
 interface MyNick {
   id: string;
@@ -129,8 +122,6 @@ const errorMsg = ref('');
 const maxPrivacyNicks = ref(2);
 
 const unlockOpen = ref(false);
-const setupOpen = ref(false);
-const setupMode = ref<'setup' | 'change'>('setup');
 const pendingToggle = ref<MyNick | null>(null);
 
 // Tick mỗi giây cho countdown realtime
@@ -141,26 +132,20 @@ const privateNicks = computed(() => nicks.value.filter((n) => n.privacyMode === 
 const normalNicks = computed(() => nicks.value.filter((n) => n.privacyMode !== 'main'));
 const privateCount = computed(() => privateNicks.value.length);
 
-// PIN config grid — state-aware
+// Privacy config grid — state-aware (OTP-only: chỉ unlocked / locked)
 const primaryState = computed(() => {
-  if (!store.hasPin) return 'empty';
   if (store.isUnlocked) return '';
   return 'locked';
 });
-const primaryIcon = computed(() => {
-  if (!store.hasPin) return '⚙';
-  return store.isUnlocked ? '🔓' : '🔒';
-});
-const primaryTitle = computed(() => {
-  if (!store.hasPin) return 'Chưa setup PIN bảo mật';
-  return store.isUnlocked ? 'Đang mở khoá Riêng tư' : 'Riêng tư đang khoá';
-});
-const primarySub = computed(() => {
-  if (!store.hasPin) return 'Đặt PIN 4 chữ số để có thể bật Riêng tư cho nick của bạn.';
-  return store.isUnlocked
+const primaryIcon = computed(() => (store.isUnlocked ? '🔓' : '🔒'));
+const primaryTitle = computed(() =>
+  store.isUnlocked ? 'Đang mở khoá Riêng tư' : 'Riêng tư đang khoá',
+);
+const primarySub = computed(() =>
+  store.isUnlocked
     ? 'Bạn có thể xem nội dung tin nhắn của các nick Riêng tư đến hết countdown.'
-    : 'Nhập PIN để xem nội dung các nick bạn đã đặt Riêng tư.';
-});
+    : 'Mở khoá qua mã OTP gửi về Zalo (nick Liên lạc nội bộ) để xem nội dung nick Riêng tư.',
+);
 
 // Device info — parse từ active session
 const activeDevice = computed(() => {
@@ -185,13 +170,6 @@ const countdown = computed(() => {
   const s = total % 60;
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 });
-
-// Fake nick cho PrivacyUnlockDialog (vì dialog accept nick prop nhưng đây là user-level unlock)
-const meAsNick = computed(() => ({
-  displayName: auth.user?.fullName || 'Bạn',
-  avatarUrl: null,
-  zaloUid: null,
-}));
 
 async function loadAll() {
   loading.value = true;

@@ -162,6 +162,8 @@ async function exec<T>(opts: ExecOptions, fn: (api: any) => Promise<T>): Promise
 
       // Record successful operation
       zaloRateLimiter.recordSend(accountId, category);
+      // 2026-06-06 — đếm riêng "đồng bộ danh bạ" (getAllFriends) cho dashboard metric.
+      if (operation === 'getAllFriends') void zaloRateLimiter.recordOperation(accountId, 'contact_sync');
 
       // 4. Emit Socket.IO event if configured
       if (opts.io && opts.socketEvent) {

@@ -47,6 +47,10 @@ export interface EnrichedAccount {
   uptime7d: number;
   lastActivityAt: string | null;
   healthAlert: boolean;
+  // 2026-06-06 — SDK counts/ngày (Redis rate-limiter) cho bảng ma trận.
+  sdkCounts?: Record<string, number>;
+  sdkTotal?: number;
+  contactSyncToday?: number;
 }
 
 export interface TeamStats {

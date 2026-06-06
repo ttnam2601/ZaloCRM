@@ -91,11 +91,10 @@
       </footer>
     </div>
 
-    <!-- PIN unlock dialog — owner click 🔒 nick của mình -->
-    <PrivacyUnlockDialog
-      v-if="pendingLockedNick"
-      v-model="showUnlockDialog"
-      :nick="pendingLockedNick"
+    <!-- OTP unlock modal — owner click 🔒 nick của mình (2026-06-06 thay PIN dialog) -->
+    <PrivacyUnlockOtpModal
+      :open="showUnlockDialog"
+      @close="showUnlockDialog = false"
       @unlocked="onUnlocked"
     />
   </Teleport>
@@ -106,7 +105,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, h } from 'v
 import { useAuthStore } from '@/stores/auth';
 import { usePrivacyStore } from '@/stores/privacy';
 import { useToast } from '@/composables/use-toast';
-import PrivacyUnlockDialog from '@/components/privacy/PrivacyUnlockDialog.vue';
+import PrivacyUnlockOtpModal from '@/components/privacy/PrivacyUnlockOtpModal.vue';
 
 export interface NickPickerAccount {
   id: string;

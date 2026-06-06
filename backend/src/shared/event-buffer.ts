@@ -41,6 +41,12 @@ function normalizeReaction(reaction: string): string {
   return REACTION_ALIASES[reaction.toLowerCase()] ?? reaction;
 }
 
+/** Lấy Socket.IO server đã đăng ký (null nếu chưa start). Cho module khác emit
+ *  org-scoped event mà không phải truyền io qua nhiều call-site (2026-06-06). */
+export function getIo(): Server | null {
+  return ioRef;
+}
+
 async function start(io: Server): Promise<void> {
   ioRef = io;
   if (flushTimer) return;

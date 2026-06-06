@@ -11,6 +11,10 @@
           <th>Sale phụ trách (Owner)</th>
           <th>Phòng ban</th>
           <th>Đội ngũ chia sẻ</th>
+          <th class="th-sdk">
+            SDK / Giới hạn hôm nay
+            <button class="sdk-cfg-btn" title="Cài đặt trần giới hạn SDK" @click.stop="emit('configLimits')">⚙️ Trần</button>
+          </th>
           <th>Msg today</th>
           <th>Hôm nay <span class="th-hint">📥📤🤖🤝🔍</span></th>
           <th>Hoạt động 7d</th>
@@ -130,6 +134,30 @@
             </div>
             <span v-else class="muted-italic">—</span>
           </td>
+          <!-- 2026-06-06 — Cột SDK ma trận: 4 thanh quota X/cap (đổi màu theo %) -->
+          <td class="td-sdk">
+            <div class="sdk-grid">
+              <div class="sdk-row" title="Tổng lượt gọi SDK hôm nay">
+                <span class="sk">⚡ SDK</span>
+                <span class="sv">{{ acct.sdkTotal ?? 0 }}</span>
+              </div>
+              <template v-for="m in [
+                  { cat: 'friend_action', ic: '🤝', lb: 'Kết bạn' },
+                  { cat: 'friend_read', ic: '🔍', lb: 'Tìm SĐT' },
+                  { cat: 'message', ic: '💌', lb: 'Tin nhắn' },
+                ]" :key="m.cat">
+                <div class="sdk-row" :class="sdkBar(acct, m.cat).cls" :title="`${m.lb}: ${sdkBar(acct, m.cat).used}/${sdkBar(acct, m.cat).cap}`">
+                  <span class="sk">{{ m.ic }}</span>
+                  <span class="sv">{{ sdkBar(acct, m.cat).used }}<small>/{{ sdkBar(acct, m.cat).cap }}</small></span>
+                  <div class="sbar"><i :style="{ width: sdkBar(acct, m.cat).pct + '%' }"></i></div>
+                </div>
+              </template>
+              <div class="sdk-row" title="Số lần đồng bộ danh bạ từ Zalo">
+                <span class="sk">🔄 Đồng bộ</span>
+                <span class="sv">{{ acct.contactSyncToday ?? 0 }}</span>
+              </div>
+            </div>
+          </td>
           <td>
             <div class="progress" :class="progressClass(acct.msgToday, acct.quota)">
               <span class="vals">{{ acct.msgToday }}/{{ acct.quota }}</span>
@@ -239,12 +267,26 @@ const props = defineProps<{
   relativeTime: (iso: string | null) => string;
   statusLabel: (live: string) => { label: string; color: string };
   uptimeColor: (uptime: number) => 'success' | 'warning' | 'error';
+  // 2026-06-06 — trần hiệu lực per-nick (đã gộp nick override + org default ở composable).
+  //   limitFor(nickId, category) → daily limit để vẽ thanh quota X/cap.
+  limitFor?: (nickId: string, category: string) => number;
 }>();
+
+// Thanh quota SDK: trả { pct, cls, used, cap } cho 1 nick + category.
+function sdkBar(acct: EnrichedAccount, category: string): { used: number; cap: number; pct: number; cls: string } {
+  const used = acct.sdkCounts?.[category] ?? 0;
+  const cap = props.limitFor ? props.limitFor(acct.id, category) : 0;
+  const pct = cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
+  const cls = pct >= 100 ? 'q-crit' : pct >= 70 ? 'q-warn' : 'q-ok';
+  return { used, cap, pct, cls };
+}
 
 const emit = defineEmits<{
   (e: 'open-detail', id: string): void;
   (e: 'action', payload: { account: EnrichedAccount; action: 'reconnect' | 'sync' }): void;
   (e: 'reassign-owner', account: EnrichedAccount): void;
+  // 2026-06-06 — mở dialog cài đặt trần SDK (org default + nick override).
+  (e: 'configLimits'): void;
 }>();
 
 // Phase 4 2026-05-22: group rows theo phòng ban khi groupByDept=true.
@@ -548,6 +590,26 @@ tbody tr.alert:hover { background: #FFF5F5 }
 }
 .progress.high .bar > i { background: #F59E0B }
 .progress.over .bar > i { background: #EF4444 }
+
+/* 2026-06-06 — cột SDK ma trận */
+.th-sdk { white-space: nowrap; }
+.sdk-cfg-btn {
+  margin-left: 8px; border: 1px solid #d1d5db; background: #fff; border-radius: 6px;
+  padding: 2px 8px; font-size: 11px; font-weight: 600; color: #2563eb; cursor: pointer;
+}
+.sdk-cfg-btn:hover { background: #eff6ff; }
+.td-sdk { min-width: 160px; }
+.sdk-grid { display: flex; flex-direction: column; gap: 3px; }
+.sdk-row { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 5px; font-size: 11px; color: #4b5563; position: relative; }
+.sdk-row .sk { color: #6b7280; white-space: nowrap; }
+.sdk-row .sv { font-weight: 700; font-variant-numeric: tabular-nums; }
+.sdk-row .sv small { font-weight: 500; color: #9ca3af; }
+.sdk-row .sbar { grid-column: 1 / -1; height: 3px; background: #f3f4f6; border-radius: 99px; overflow: hidden; margin-top: 1px; }
+.sdk-row .sbar > i { display: block; height: 100%; border-radius: 99px; background: #2563eb; }
+.sdk-row.q-warn .sbar > i { background: #f59e0b; }
+.sdk-row.q-warn .sv { color: #d97706; }
+.sdk-row.q-crit .sbar > i { background: #ef4444; }
+.sdk-row.q-crit .sv { color: #dc2626; }
 
 .uptime {
   display: inline-flex;

@@ -385,6 +385,26 @@ export async function syncLabelsForAccount(
     });
     friendsUpdated++;
 
+    // 2026-06-06 (Anh chốt) — emit 'friend:updated' patch.zaloLabels để sync realtime tag Zalo Real
+    // cross-device: cột 2 conv list + TagCrmBar + /friends. Dùng getIo() (không phải truyền io 5 call-site).
+    if (f.contactId) {
+      try {
+        const { getIo } = await import('../../shared/event-buffer.js');
+        const io = getIo();
+        if (io) {
+          io.to(`org:${orgId}`).emit('friend:updated', {
+            friendId: f.id,
+            contactId: f.contactId,
+            zaloAccountId: accountId,
+            zaloUidInNick: f.zaloUidInNick,
+            patch: { zaloLabels: newLabels },
+          });
+        }
+      } catch (err) {
+        logger.warn(`[zalo-labels] emit friend:updated (zaloLabels) failed for ${f.id}: ${(err as Error).message}`);
+      }
+    }
+
     // M57 Wave 3 /plan-eng-review dual-write: sync vào FriendTag(source=zalo_real).
     // Lookup Tag(scope=friend, source=zalo_real, zaloAccountId=accountId, sourceZaloLabelId)
     // → upsert FriendTag với @@unique(friend_id, tag_id). Re-activate nếu đã soft-removed.

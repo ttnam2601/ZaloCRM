@@ -154,7 +154,6 @@
 </template>
 
 <script setup lang="ts">
-// @ts-nocheck — privacy OTP store extension WIP, methods not yet on store typing
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import { usePrivacyStore } from '@/stores/privacy';

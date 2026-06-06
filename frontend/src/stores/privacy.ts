@@ -1,7 +1,8 @@
 /**
- * stores/privacy.ts — Pinia store cho Phase Riêng Tư.
+ * stores/privacy.ts — Pinia store cho Phase Riêng Tư (OTP-only 2026-06-06).
  *
- * State: hasPin, isUnlocked, expiresAt, activeSessions.
+ * Anh chốt 2026-06-06: bỏ PIN, unlock qua OTP gửi Zalo nick nội bộ.
+ * State: isUnlocked (qua activeSessionCount), expiresAt, activeSessions.
  * Cookie management: HttpOnly nên frontend KHÔNG đọc/ghi cookie. Status từ API.
  */
 import { defineStore } from 'pinia';
@@ -19,6 +20,21 @@ export interface PrivacyStatus {
     ipAddress: string | null;
     unlockedAt: string;
   }>;
+}
+
+export interface OtpStatus {
+  /** User có internal contact ready để nhận OTP không */
+  canRequestOtp: boolean;
+  /** Lý do nếu canRequestOtp=false */
+  blockedReason: 'no_internal_contact' | 'locked' | null;
+  /** Còn bao lâu mới hết lock (ISO string) */
+  lockedUntil: string | null;
+}
+
+export interface RequestOtpResult {
+  tokenId: string;
+  expiresAt: string;
+  retryAfterSeconds?: number;
 }
 
 export const usePrivacyStore = defineStore('privacy', {
@@ -54,21 +70,6 @@ export const usePrivacyStore = defineStore('privacy', {
         this.loading = false;
       }
     },
-    // Phase Privacy v2 2026-05-23: setup PIN lần đầu KHÔNG cần password (anh chốt).
-    // BE block nếu user đã có PIN — caller phải dùng changePin() thay.
-    async setupPin(pin: string) {
-      await api.post('/privacy/setup-pin', { pin });
-      await this.fetchStatus(true);
-    },
-    async unlock(pin: string, durationMinutes: 5 | 15 | 480 | 720) {
-      // HttpOnly cookie set by server, frontend chỉ track expiresAt
-      const { data } = await api.post<{ ok: boolean; expiresAt: string }>('/privacy/unlock', {
-        pin,
-        durationMinutes,
-      });
-      await this.fetchStatus(true);
-      return data;
-    },
     async lock() {
       try {
         await api.post('/privacy/lock');
@@ -78,10 +79,26 @@ export const usePrivacyStore = defineStore('privacy', {
     async flipNickPrivacyMode(zaloAccountId: string, mode: 'main' | 'sub') {
       await api.patch(`/zalo-accounts/${zaloAccountId}/privacy-mode`, { mode });
     },
-    // Phase Privacy v2 2026-05-23 — đổi PIN bằng PIN cũ (KHÔNG cần password).
-    async changePin(oldPin: string, newPin: string) {
-      await api.post('/privacy/change-pin', { oldPin, newPin });
+
+    // ── OTP flow (2026-06-06) ────────────────────────────────────────────
+    /** Kiểm user có thể xin OTP không (có internal contact + không đang lock). */
+    async fetchOtpStatus(): Promise<OtpStatus> {
+      const { data } = await api.get<OtpStatus>('/privacy/otp/status');
+      return data;
+    },
+    /** Sinh + gửi OTP 4 số qua Zalo nick nội bộ. */
+    async requestOtp(durationMinutes: 5 | 15 | 480 | 720): Promise<RequestOtpResult> {
+      const { data } = await api.post<RequestOtpResult>('/privacy/otp/request', { durationMinutes });
+      return data;
+    },
+    /** Verify OTP → server set HttpOnly cookie session. */
+    async verifyOtp(tokenId: string, code: string): Promise<{ ok: boolean; expiresAt: string; durationMinutes: number }> {
+      const { data } = await api.post<{ ok: boolean; expiresAt: string; durationMinutes: number }>(
+        '/privacy/otp/verify',
+        { tokenId, code },
+      );
       await this.fetchStatus(true);
+      return data;
     },
   },
 });

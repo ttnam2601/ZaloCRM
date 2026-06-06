@@ -432,6 +432,7 @@ export async function chatRoutes(app: FastifyInstance) {
       becameFriendAt: Date | null; firstMessageAt: Date | null;
       updatedAt: Date;
       crmTagsPerNick: unknown;
+      zaloLabels: unknown;               // 2026-06-06: [{id,name,color}] tag Zalo Real native
       aliasInNick: string | null;        // ui-phase5: "Tên gợi nhớ" Zalo sync 2-way
       // Per-pair counter (FE header cột 3 đọc — fix bug 235/198 revert 0/0)
       totalInbound: number;
@@ -456,6 +457,8 @@ export async function chatRoutes(app: FastifyInstance) {
           becameFriendAt: true, firstMessageAt: true,
           updatedAt: true,                     // last status change — dùng cho pendingDaysLabel
           crmTagsPerNick: true,                // per-pair CRM tags (kèm Zalo-mirrored "🔵 X")
+          zaloLabels: true,                    // 2026-06-06: tag Zalo Real native {id,name,color} —
+                                               // cột 2 render tag Zalo từ đây (màu CHUẨN = zalo_labels.color)
           aliasInNick: true,                   // "Tên gợi nhớ" Zalo, sync 2-way (ui-phase5)
           // ── Per-pair counter ─────────────────────────────────────────────
           // KHÔNG include trước đây gây bug: header MessageThread cột 3 đọc
@@ -485,6 +488,7 @@ export async function chatRoutes(app: FastifyInstance) {
         firstMessageAt: f.firstMessageAt,
         updatedAt: f.updatedAt,
         crmTagsPerNick: f.crmTagsPerNick,
+        zaloLabels: f.zaloLabels,            // 2026-06-06: tag Zalo Real {id,name,color} màu chuẩn cho cột 2
         aliasInNick: f.aliasInNick,          // ui-phase5
         // Per-pair counter — header chat cột 3 dùng (fix bug 235/198 → 0/0)
         totalInbound: f.totalInbound,

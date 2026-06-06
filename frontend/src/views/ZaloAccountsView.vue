@@ -129,9 +129,19 @@
       :relative-time="relativeTime"
       :status-label="statusLabel"
       :uptime-color="uptimeColor"
+      :limit-for="limitFor"
       @open-detail="openDrawer"
       @action="onTableAction"
       @reassign-owner="onOpenReassign"
+      @config-limits="showSdkLimits = true"
+    />
+
+    <!-- 2026-06-06 — Dialog cài đặt trần SDK (org default + nick override) -->
+    <SdkLimitsDialog
+      v-if="showSdkLimits"
+      :nicks="visibleAccounts.map(a => ({ id: a.id, displayName: a.displayName }))"
+      @close="showSdkLimits = false"
+      @saved="loadSdkLimits"
     />
 
     <!-- Phase 4 2026-05-22: Owner reassign drawer -->
@@ -171,6 +181,7 @@
       :relative-time="relativeTime"
       :status-label="statusLabel"
       :uptime-color="uptimeColor"
+      :limit-for="limitFor"
       @add-crew="onAddCrew"
       @remove-crew="onRemoveCrew"
       @action="onDrawerAction"
@@ -274,6 +285,7 @@ import { ref, onMounted, computed, onUnmounted } from 'vue';
 import { useZaloAccountsDashboard } from '@/composables/use-zalo-accounts-dashboard';
 import StatsCards from '@/components/zalo-accounts/StatsCards.vue';
 import AccountsTable from '@/components/zalo-accounts/AccountsTable.vue';
+import SdkLimitsDialog from '@/components/zalo-accounts/SdkLimitsDialog.vue';
 import AccountDetailDrawer from '@/components/zalo-accounts/AccountDetailDrawer.vue';
 import BulkActionBar from '@/components/zalo-accounts/BulkActionBar.vue';
 import OwnerReassignDrawer from '@/components/zalo-accounts/OwnerReassignDrawer.vue';
@@ -307,6 +319,24 @@ const {
   addAccount, loginAccount, reconnectAccount, deleteAccount,
   cancelQR, setupSocket,
 } = dash;
+
+// 2026-06-06 — Trần SDK: load org default + nick override để vẽ thanh quota X/cap.
+const showSdkLimits = ref(false);
+const sdkOrgLimits = ref<Record<string, { daily: number }>>({});
+const sdkNickOverrides = ref<Record<string, Record<string, { daily: number }>>>({});
+async function loadSdkLimits() {
+  try {
+    const { data } = await api.get('/zalo-accounts/sdk-limits');
+    sdkOrgLimits.value = data.orgDefault ?? {};
+    sdkNickOverrides.value = data.nickOverrides ?? {};
+  } catch { /* non-fatal: bảng vẫn hiển thị, cap = 0 */ }
+}
+// limitFor: trần hiệu lực 1 nick + category (ưu tiên nick override → org default → 0).
+function limitFor(nickId: string, category: string): number {
+  return sdkNickOverrides.value[nickId]?.[category]?.daily
+    ?? sdkOrgLimits.value[category]?.daily
+    ?? 0;
+}
 
 // Local UI state
 const showAddDialog = ref(false);
@@ -614,7 +644,7 @@ async function handleDelete() {
 // ─────────────────────────────────────────────────────────────────
 onMounted(async () => {
   setupSocket();
-  await Promise.all([refreshAll(), fetchDeptTree(), loadPrivacyCounter(), loadInternalContactBadge()]);
+  await Promise.all([refreshAll(), fetchDeptTree(), loadPrivacyCounter(), loadInternalContactBadge(), loadSdkLimits()]);
   lastRefresh.value = new Date();
 
   // Light polling — refresh stats every 60s while page is open.

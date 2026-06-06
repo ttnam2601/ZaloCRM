@@ -104,6 +104,7 @@
       @refresh-ai-sentiment="generateAiSentiment"
       @close="showContactPanel = false"
       @saved="fetchConversations()"
+      @status-changed="onPanelStatusChanged"
     />
   </div>
 </template>
@@ -416,6 +417,42 @@ onMounted(async () => {
     fetchAiConfig();
     initSocket();
     registerSocketListeners(getSocket());
+    // 2026-06-06 (Anh chốt): listen 'friend:updated' để sync realtime giai đoạn KH
+    // cross-device. BE emit patch.statusId cho mọi friend của contact khi đổi trạng thái.
+    // Cập nhật conversations[].contact.statusId → cột 3 (DealStageSelector watch) + cột 4 đổi ngay.
+    const _socket = getSocket();
+    if (_socket) {
+      _socket.emit('org:join', { orgId: authStore.user?.orgId });
+      _socket.on('friend:updated', (p: {
+        contactId?: string;
+        zaloUidInNick?: string;
+        patch?: { statusId?: string | null; zaloLabels?: Array<{ id?: number; name?: string; color?: string }> };
+      }) => {
+        if (!p?.contactId || !p.patch) return;
+        // statusId → cột 3 (DealStageSelector watch) + cột 4 đổi ngay (toàn bộ friend của contact).
+        if ('statusId' in p.patch) {
+          for (const conv of conversations.value) {
+            if ((conv as any).contact?.id === p.contactId) {
+              (conv as any).contact.statusId = p.patch.statusId ?? null;
+            }
+          }
+        }
+        // 2026-06-06 (Anh chốt) — Tag Zalo Real realtime: BE emit patch.zaloLabels khi sync/assign.
+        // Match theo (contactId × zaloUidInNick = externalThreadId) — KHÔNG ghi đè mọi friend của
+        // contact, vì per-nick UID rule: cùng KH nhiều friend rows, mỗi nick label riêng.
+        // Cột 2 (ConversationList.displayTags) đọc friendship.zaloLabels → tự re-render.
+        if ('zaloLabels' in p.patch && Array.isArray(p.patch.zaloLabels)) {
+          for (const conv of conversations.value) {
+            const c = conv as any;
+            if (c.contact?.id !== p.contactId) continue;
+            // Khớp đúng friend row qua thread id (nếu BE gửi kèm), fallback theo contact.
+            if (p.zaloUidInNick && c.externalThreadId && c.externalThreadId !== p.zaloUidInNick) continue;
+            if (!c.friendship) c.friendship = {};
+            c.friendship.zaloLabels = p.patch.zaloLabels;
+          }
+        }
+      });
+    }
     // Nếu URL đã có /chat/:convId → select luôn (deep-link)
     const initId = route.params.convId;
     if (typeof initId === 'string' && initId) {
@@ -430,6 +467,13 @@ onUnmounted(() => {
     window.removeEventListener('zalo-labels-synced', onLabelsSynced);
   }
 });
+
+// Đổi trạng thái ở cột 4 (panel) → cập nhật selectedConv.contact.statusId → cột 3 sync (cùng tab).
+function onPanelStatusChanged(statusId: string | null) {
+  if (selectedConv.value?.contact) {
+    (selectedConv.value.contact as { statusId?: string | null }).statusId = statusId;
+  }
+}
 
 let searchTimeout: ReturnType<typeof setTimeout>;
 watch(searchQuery, () => {

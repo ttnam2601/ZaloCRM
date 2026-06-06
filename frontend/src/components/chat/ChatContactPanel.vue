@@ -16,10 +16,15 @@
         <template #name>
           <div class="ip-name-line" :title="headerFullName">{{ headerFullName }}</div>
           <div v-if="props.contact?.zaloUid" class="ip-id">UID: {{ props.contact.zaloUid }}</div>
+          <!-- 2026-06-06 (Anh chốt): trạng thái cột 4 cạnh UID dùng CÙNG ContactDealStageSelector
+               (statusId dynamic) như cột 3 → đổi 1 chỗ sync ngay 2 chỗ (cùng trường statusId). -->
           <div class="ip-care-row-inline">
-            <CareStatusBadge
-              :model-value="(form.status as string | null) || 'new'"
-              @update:model-value="onChangeCareStatus"
+            <ContactDealStageSelector
+              v-if="props.contact?.id"
+              :contact-id="props.contact.id"
+              :current-status-id="(props.contact as { statusId?: string | null }).statusId ?? null"
+              :org-id="orgId"
+              @updated="onDealStageUpdatedPanel"
             />
           </div>
         </template>
@@ -554,8 +559,8 @@ import AiSentimentBadge from '@/components/ai/ai-sentiment-badge.vue';
 import AutomationCardList from './AutomationCardList.vue';
 import AddFlowModal from './AddFlowModal.vue';
 import Avatar from '@/components/ui/Avatar.vue';
-import CareStatusBadge from '@/components/ui/CareStatusBadge.vue';
-import type { CareStatusValue } from '@/constants/care-status';
+import ContactDealStageSelector from '@/components/chat/ContactDealStageSelector.vue';
+import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/use-toast';
 import { api } from '@/api';
 import CustomerTimelineSection from './CustomerTimelineSection.vue';
@@ -591,7 +596,21 @@ const emit = defineEmits<{
   'refresh-ai-summary': [];
   'refresh-ai-sentiment': [];
   'insert-suggestion': [text: string];
+  'status-changed': [statusId: string | null];
 }>();
+
+// orgId cho ContactDealStageSelector (trạng thái cột 4 cạnh UID — sync với cột 3).
+const _authStorePanel = useAuthStore();
+const orgId = computed(() => _authStorePanel.user?.orgId ?? null);
+
+// Đổi trạng thái ở cột 4 → cập nhật local contact + emit để cột 3 sync (cùng tab).
+// Cross-device đã do BE emit friend:updated lo (ChatView listen).
+function onDealStageUpdatedPanel(newStatusId: string | null) {
+  if (props.contact) {
+    (props.contact as { statusId?: string | null }).statusId = newStatusId;
+  }
+  emit('status-changed', newStatusId);
+}
 
 const {
   form, saveSuccess, saveError,
@@ -782,11 +801,8 @@ async function fetchRelations(contactId: string) {
   }
 }
 
-// ════════ Care status (dropdown qua CareStatusBadge — emit value mới) ════════
-function onChangeCareStatus(value: CareStatusValue) {
-  form.status = value;
-  saveContact();
-}
+// Care status legacy (CareStatusBadge) GỠ 2026-06-06 — cột 4 dùng ContactDealStageSelector
+// (statusId dynamic) cạnh UID để sync với cột 3. onChangeCareStatus + import bỏ.
 
 // ════════ Header name (Avatar component handle initials + gender + gradient) ════════
 // B7 fix — Contact stub có thể fullName='Unknown'; fallback qua aliasInNick (props.friendship)
@@ -875,6 +891,12 @@ const hasAnyActivity = computed(() =>
 
 const toast = useToast();
 const router = useRouter();
+
+// AI suggest state — PHẢI khai báo TRƯỚC watcher(props.contactId, {immediate:true}) bên dưới
+// vì watcher đó reset suggestText.value lúc setup. Khai báo sau watcher → TDZ
+// "Cannot access 'suggestText' before initialization" làm crash setup panel (fix 2026-06-06).
+const suggestText = ref('');
+const suggestLoading = ref(false);
 
 // Khi đổi sang contact mới, reset về tab Hồ sơ + refetch relations
 // (NotesSection tự fetch khi prop contactId đổi).
@@ -1076,8 +1098,7 @@ function shortName(full: string | null | undefined): string | null {
 }
 
 // ─── Widget 2: AI suggest ────────────────────────────────────────────────
-const suggestText = ref('');
-const suggestLoading = ref(false);
+// suggestText + suggestLoading đã khai báo ở trên (trước watcher contactId) để tránh TDZ.
 
 async function runAiSuggest() {
   if (!props.conversationId) {

@@ -13,7 +13,7 @@
  *   - 5s giữa 2 lần request OTP cùng user
  *   - Bị lock → reject cả request lẫn verify
  */
-import { randomBytes, randomInt, createHash } from 'node:crypto';
+import { randomInt, createHash } from 'node:crypto';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { zaloOps } from '../../shared/zalo-operations.js';
@@ -21,22 +21,12 @@ import { zaloPool } from '../zalo/zalo-pool.js';
 import { zaloRateLimiter } from '../zalo/zalo-rate-limiter.js';
 import { formatMessage } from '../../shared/text-formatter.js';
 import { toZaloStyles } from '../system-notifications/welcome-message-builder.js';
-import { DURATIONS_MIN, type SessionDuration } from './pin-service.js';
+import { DURATIONS_MIN, genSessionToken, hashIp, type SessionDuration } from './session-service.js';
 
-const SESSION_TOKEN_BYTES = 32;
 const OTP_EXPIRES_MS = 5 * 60 * 1000;          // 5 phút
 const OTP_RESEND_COOLDOWN_MS = 5 * 1000;       // 5s giữa 2 lần request
 const OTP_LOCK_DURATION_MS = 30 * 60 * 1000;   // 5 sai liên tiếp → lock 30 phút
 const OTP_MAX_VERIFY_ATTEMPTS = 5;
-
-function genSessionToken(): string {
-  return randomBytes(SESSION_TOKEN_BYTES).toString('base64url');
-}
-
-function hashIp(ip?: string): string | null {
-  if (!ip) return null;
-  return createHash('sha256').update(ip).digest('hex').slice(0, 32);
-}
 
 function generateOtp4(): string {
   return String(randomInt(0, 10000)).padStart(4, '0');

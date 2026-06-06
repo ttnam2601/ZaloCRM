@@ -18,8 +18,10 @@ import { zaloPool } from './zalo-pool.js';
 import { logger } from '../../shared/utils/logger.js';
 import { getZaloScope, canManageAccount, requireAccountVisible } from './zalo-scope.js';
 import { uptimeWindowBatch } from './status-log-service.js';
-import { revokeAllSessions } from '../privacy/pin-service.js';
+import { revokeAllSessions } from '../privacy/session-service.js';
 import { getNickDayMetricsBatch, type NickDayMetrics } from './nick-metrics-service.js';
+import { ALL_CATEGORIES, DEFAULT_SDK_LIMITS, invalidateLimitCache } from './sdk-limit-service.js';
+import { zaloRateLimiter } from './zalo-rate-limiter.js';
 
 const DAILY_QUOTA = 500; // per-nick soft cap shown in UI (msg today X / 500)
 
@@ -212,6 +214,16 @@ export async function zaloDashboardRoutes(app: FastifyInstance): Promise<void> {
       lastMsgRows.map((r) => [r.account_id, r.last_at]),
     );
 
+    // 2026-06-06 — SDK counts per-nick (Redis rate-limiter) cho bảng ma trận:
+    // tổng lượt SDK + từng category + số lần đồng bộ danh bạ.
+    const sdkCountsMap = new Map<string, Record<string, number>>();
+    const contactSyncMap = new Map<string, number>();
+    await Promise.all(ids.map(async (nid) => {
+      const counts = await zaloRateLimiter.getAllDailyCounts(nid);
+      sdkCountsMap.set(nid, counts);
+      contactSyncMap.set(nid, await zaloRateLimiter.getOperationCount(nid, 'contact_sync'));
+    }));
+
     return accounts.map((a) => {
       const live = zaloPool.getStatus(a.id) ?? a.status;
       const u = uptimeMap.get(a.id);
@@ -271,6 +283,11 @@ export async function zaloDashboardRoutes(app: FastifyInstance): Promise<void> {
           phoneSearchFoundZalo: todayMetrics.phoneSearchFoundZalo,
           phoneSearchNoZalo: todayMetrics.phoneSearchNoZalo,
         } : null,
+        // 2026-06-06 — SDK counts/ngày cho bảng ma trận (Redis rate-limiter).
+        // sdkCounts: { friend_read, friend_action, message, ... } · sdkTotal: tổng gộp.
+        sdkCounts: sdkCountsMap.get(a.id) ?? {},
+        sdkTotal: Object.values(sdkCountsMap.get(a.id) ?? {}).reduce((s, n) => s + n, 0),
+        contactSyncToday: contactSyncMap.get(a.id) ?? 0,
         // E3: health alert badge when uptime under 80% in the 7-day window
         healthAlert: uptime7d < 80,
       };
@@ -478,6 +495,130 @@ export async function zaloDashboardRoutes(app: FastifyInstance): Promise<void> {
         failed: results.filter((r) => !r.ok).length,
         results,
       };
+    },
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // TRẦN SDK ZALO (2026-06-06 Anh chốt) — org default + per-nick override.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // GET /api/v1/zalo-accounts/sdk-limits — trần org default + danh sách nick override.
+  app.get('/api/v1/zalo-accounts/sdk-limits', async (request) => {
+    const user = request.user!;
+    const rows = await prisma.sdkLimit.findMany({
+      where: { orgId: user.orgId },
+      select: { zaloAccountId: true, category: true, dailyLimit: true, burstLimit: true, burstWindowMs: true },
+    });
+    // org default: ưu tiên hàng DB; thiếu category nào → fallback hằng số.
+    const orgDefault: Record<string, { daily: number; burst: number; burstWindowMs: number }> = {};
+    for (const cat of ALL_CATEGORIES) {
+      const row = rows.find((r) => r.zaloAccountId === null && r.category === cat);
+      orgDefault[cat] = row
+        ? { daily: row.dailyLimit, burst: row.burstLimit, burstWindowMs: row.burstWindowMs }
+        : { daily: DEFAULT_SDK_LIMITS[cat].daily, burst: DEFAULT_SDK_LIMITS[cat].burst, burstWindowMs: DEFAULT_SDK_LIMITS[cat].burstWindowMs };
+    }
+    // per-nick override: gom theo nick → { category: {...} }
+    const nickOverrides: Record<string, Record<string, { daily: number; burst: number; burstWindowMs: number }>> = {};
+    for (const r of rows) {
+      if (!r.zaloAccountId) continue;
+      (nickOverrides[r.zaloAccountId] ??= {})[r.category] = {
+        daily: r.dailyLimit, burst: r.burstLimit, burstWindowMs: r.burstWindowMs,
+      };
+    }
+    return { categories: ALL_CATEGORIES, orgDefault, nickOverrides };
+  });
+
+  // PUT /api/v1/zalo-accounts/sdk-limits/org — owner/admin lưu trần org default.
+  // Body: { limits: { [category]: { daily, burst, burstWindowMs? } } }
+  app.put(
+    '/api/v1/zalo-accounts/sdk-limits/org',
+    { preHandler: requireRole('owner', 'admin') },
+    async (request, reply) => {
+      const user = request.user!;
+      const body = (request.body ?? {}) as { limits?: Record<string, { daily?: number; burst?: number; burstWindowMs?: number }> };
+      const limits = body.limits ?? {};
+      const ops = [];
+      for (const cat of ALL_CATEGORIES) {
+        const v = limits[cat];
+        if (!v) continue;
+        const daily = Number(v.daily);
+        const burst = Number(v.burst);
+        const win = Number(v.burstWindowMs ?? DEFAULT_SDK_LIMITS[cat].burstWindowMs);
+        if (!Number.isFinite(daily) || daily < 0 || daily > 100000)
+          return reply.status(400).send({ error: `${cat}_daily_invalid`, hint: 'daily 0..100000' });
+        if (!Number.isFinite(burst) || burst < 0 || burst > 1000)
+          return reply.status(400).send({ error: `${cat}_burst_invalid`, hint: 'burst 0..1000' });
+        // upsert org-default theo (orgId, category, zaloAccountId NULL) — findFirst + update/create
+        // vì NULL không dùng được composite upsert.
+        const existing = await prisma.sdkLimit.findFirst({
+          where: { orgId: user.orgId, zaloAccountId: null, category: cat },
+          select: { id: true },
+        });
+        if (existing) {
+          ops.push(prisma.sdkLimit.update({ where: { id: existing.id }, data: { dailyLimit: daily, burstLimit: burst, burstWindowMs: win } }));
+        } else {
+          ops.push(prisma.sdkLimit.create({ data: { orgId: user.orgId, zaloAccountId: null, category: cat, dailyLimit: daily, burstLimit: burst, burstWindowMs: win } }));
+        }
+      }
+      await prisma.$transaction(ops);
+      invalidateLimitCache(user.orgId);
+      logger.info(`[sdk-limits] org default updated by ${user.email}`);
+      return { ok: true };
+    },
+  );
+
+  // PUT /api/v1/zalo-accounts/:id/sdk-limits — ghi đè trần cho 1 nick.
+  // Body: { limits: { [category]: { daily, burst, burstWindowMs? } | null } } (null = xoá override category đó)
+  app.put(
+    '/api/v1/zalo-accounts/:id/sdk-limits',
+    { preHandler: requireRole('owner', 'admin') },
+    async (request, reply) => {
+      const user = request.user!;
+      const { id } = request.params as { id: string };
+      const nick = await prisma.zaloAccount.findFirst({ where: { id, orgId: user.orgId }, select: { id: true } });
+      if (!nick) return reply.status(404).send({ error: 'nick_not_found' });
+      const body = (request.body ?? {}) as { limits?: Record<string, { daily?: number; burst?: number; burstWindowMs?: number } | null> };
+      const limits = body.limits ?? {};
+      for (const cat of ALL_CATEGORIES) {
+        if (!(cat in limits)) continue;
+        const v = limits[cat];
+        const existing = await prisma.sdkLimit.findFirst({
+          where: { orgId: user.orgId, zaloAccountId: id, category: cat }, select: { id: true },
+        });
+        if (v === null) {
+          // xoá override → nick quay về org default
+          if (existing) await prisma.sdkLimit.delete({ where: { id: existing.id } });
+          continue;
+        }
+        const daily = Number(v.daily);
+        const burst = Number(v.burst);
+        const win = Number(v.burstWindowMs ?? DEFAULT_SDK_LIMITS[cat].burstWindowMs);
+        if (!Number.isFinite(daily) || daily < 0 || daily > 100000)
+          return reply.status(400).send({ error: `${cat}_daily_invalid` });
+        if (!Number.isFinite(burst) || burst < 0 || burst > 1000)
+          return reply.status(400).send({ error: `${cat}_burst_invalid` });
+        if (existing) {
+          await prisma.sdkLimit.update({ where: { id: existing.id }, data: { dailyLimit: daily, burstLimit: burst, burstWindowMs: win } });
+        } else {
+          await prisma.sdkLimit.create({ data: { orgId: user.orgId, zaloAccountId: id, category: cat, dailyLimit: daily, burstLimit: burst, burstWindowMs: win } });
+        }
+      }
+      invalidateLimitCache(user.orgId);
+      logger.info(`[sdk-limits] nick ${id} override updated by ${user.email}`);
+      return { ok: true };
+    },
+  );
+
+  // DELETE /api/v1/zalo-accounts/:id/sdk-limits — xoá HẾT override của nick (về org default).
+  app.delete(
+    '/api/v1/zalo-accounts/:id/sdk-limits',
+    { preHandler: requireRole('owner', 'admin') },
+    async (request, reply) => {
+      const user = request.user!;
+      const { id } = request.params as { id: string };
+      await prisma.sdkLimit.deleteMany({ where: { orgId: user.orgId, zaloAccountId: id } });
+      invalidateLimitCache(user.orgId);
+      return { ok: true };
     },
   );
 }

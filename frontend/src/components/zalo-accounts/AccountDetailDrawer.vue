@@ -52,6 +52,20 @@
           </div>
         </div>
 
+        <!-- 2026-06-06 — SDK & Giới hạn hôm nay (thanh quota X/cap theo trần) -->
+        <section v-if="account" class="d-section">
+          <div class="h"><span>⚡ SDK &amp; Giới hạn hôm nay</span></div>
+          <div class="sdk-detail">
+            <div class="sdk-tot">Tổng lượt gọi SDK: <b>{{ formatNum(account.sdkTotal ?? 0) }}</b></div>
+            <div v-for="m in SDK_ROWS" :key="m.cat" class="sdkd-row" :class="sdkClass(m.cat)">
+              <div class="sdkd-lbl">{{ m.ic }} {{ m.lb }}</div>
+              <div class="sdkd-val">{{ formatNum(sdkUsed(m.cat)) }}<small>/{{ formatNum(sdkCap(m.cat)) }}</small></div>
+              <div class="sdkd-bar"><i :style="{ width: sdkPct(m.cat) + '%' }"></i></div>
+            </div>
+            <div class="sdkd-extra">🔄 Đồng bộ danh bạ: <b>{{ formatNum(account.contactSyncToday ?? 0) }}</b> lượt hôm nay</div>
+          </div>
+        </section>
+
         <!-- Phase metrics layer 2026-05-22 — Số liệu hôm nay -->
         <section v-if="account.metricsToday" class="d-section">
           <div class="h"><span>📊 Số liệu hôm nay</span></div>
@@ -233,14 +247,29 @@
 import type { EnrichedAccount, UptimeBucket } from '@/composables/use-zalo-accounts-dashboard';
 import UptimeSparkline from './UptimeSparkline.vue';
 
-defineProps<{
+const props = defineProps<{
   modelValue: boolean;
   account: EnrichedAccount | null;
   uptimeCache: Record<string, UptimeBucket[]>;
   relativeTime: (iso: string | null) => string;
   statusLabel: (live: string) => { label: string; color: string };
   uptimeColor: (uptime: number) => 'success' | 'warning' | 'error';
+  // 2026-06-06 — trần hiệu lực để vẽ thanh quota SDK.
+  limitFor?: (nickId: string, category: string) => number;
 }>();
+
+// 2026-06-06 — SDK quota rows trong panel chi tiết.
+const SDK_ROWS = [
+  { cat: 'friend_action', ic: '🤝', lb: 'Gửi kết bạn' },
+  { cat: 'friend_read', ic: '🔍', lb: 'Tìm SĐT→UID + đọc danh bạ' },
+  { cat: 'message', ic: '💌', lb: 'Gửi tin nhắn' },
+  { cat: 'reaction', ic: '❤️', lb: 'Thả cảm xúc' },
+  { cat: 'query', ic: '👁️', lb: 'Xem thông tin' },
+];
+function sdkUsed(cat: string): number { return props.account?.sdkCounts?.[cat] ?? 0; }
+function sdkCap(cat: string): number { return props.account && props.limitFor ? props.limitFor(props.account.id, cat) : 0; }
+function sdkPct(cat: string): number { const c = sdkCap(cat); return c > 0 ? Math.min(100, Math.round((sdkUsed(cat) / c) * 100)) : 0; }
+function sdkClass(cat: string): string { const p = sdkPct(cat); return p >= 100 ? 'q-crit' : p >= 70 ? 'q-warn' : 'q-ok'; }
 
 const emit = defineEmits<{
   (e: 'update:modelValue', v: boolean): void;
@@ -468,6 +497,20 @@ function maskPhone(p: string): string {
 }
 
 .d-section { margin-bottom: 16px }
+/* 2026-06-06 — SDK quota trong panel chi tiết */
+.sdk-detail { display: flex; flex-direction: column; gap: 8px; }
+.sdk-tot { font-size: 13px; color: #4b5563; }
+.sdk-tot b { font-size: 15px; color: #1f2937; }
+.sdkd-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: baseline; }
+.sdkd-lbl { font-size: 12.5px; color: #4b5563; }
+.sdkd-val { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sdkd-val small { font-weight: 500; color: #9ca3af; }
+.sdkd-bar { grid-column: 1 / -1; height: 5px; background: #f3f4f6; border-radius: 99px; overflow: hidden; }
+.sdkd-bar > i { display: block; height: 100%; border-radius: 99px; background: #2563eb; }
+.sdkd-row.q-warn .sdkd-bar > i { background: #f59e0b; } .sdkd-row.q-warn .sdkd-val { color: #d97706; }
+.sdkd-row.q-crit .sdkd-bar > i { background: #ef4444; } .sdkd-row.q-crit .sdkd-val { color: #dc2626; }
+.sdkd-extra { font-size: 12px; color: #6b7280; margin-top: 2px; }
+.sdkd-extra b { color: #1f2937; }
 .d-section .h {
   font-size: 11px;
   font-weight: 600;

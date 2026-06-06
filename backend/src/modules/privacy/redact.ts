@@ -214,7 +214,7 @@ export async function buildPrivacyContext(request: any): Promise<PrivacyContext>
   const token = cookies.priv_session;
   if (!token) return { viewerUserId, orgId, privacyUnlocked: false };
 
-  const { resolveSession } = await import('./pin-service.js');
+  const { resolveSession } = await import('./session-service.js');
   const session = await resolveSession(token);
   return {
     viewerUserId,

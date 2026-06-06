@@ -129,6 +129,8 @@ model Organization {
   leadPoolBonusQuotas  LeadPoolBonusQuota[]
   // Phase Multi-Source Lead Ads 2026-05-27
   facebookPageAccounts FacebookPageAccount[]
+  // 2026-06-06 (Anh chốt) — trần SDK mặc định hệ thống (9 category, áp cho mọi nick).
+  sdkLimits            SdkLimit[]
 
   @@map("organizations")
 }
@@ -305,8 +307,41 @@ model ZaloAccount {
   systemNotifyRecipientsAsInternal SystemNotifyRecipient[] @relation("SystemNotifyInternalContact")
   systemNotificationsAsSender      SystemNotification[]    @relation("SystemNotificationSender")
   systemNotificationsAsInternal    SystemNotification[]    @relation("SystemNotificationInternalContact")
+  // 2026-06-06 (Anh chốt) — trần SDK ghi đè riêng per-nick (NULL = theo org default).
+  sdkLimits                        SdkLimit[]
 
   @@map("zalo_accounts")
+}
+
+// 2026-06-06 (Anh chốt) — Trần an toàn SDK Zalo, cấu hình được (thay CATEGORY_LIMITS hardcode).
+// 1 bảng cho CẢ org default LẪN nick override:
+//   - zaloAccountId = NULL  → trần MẶC ĐỊNH HỆ THỐNG (áp cho mọi nick của org).
+//   - zaloAccountId = <id>  → trần GHI ĐÈ riêng cho nick đó.
+// Quy tắc đọc (Anh chốt): ưu tiên giá trị của nick; nick không có → dùng org default;
+// org cũng chưa cấu hình loại đó → fallback hằng số code (DEFAULT_SDK_LIMITS).
+// MỌI nơi gọi SDK (automation/trigger/sequence/broadcast qua zalo-rate-limiter) đọc từ đây.
+model SdkLimit {
+  id             String  @id @default(uuid())
+  orgId          String  @map("org_id")
+  zaloAccountId  String? @map("zalo_account_id") // NULL = org default; có giá trị = nick override
+  category       String  // 'message'|'reaction'|'chat_action'|'group_admin'|'group_read'|'friend_action'|'friend_read'|'profile'|'query'
+  dailyLimit     Int     @map("daily_limit")
+  burstLimit     Int     @map("burst_limit")
+  burstWindowMs  Int     @default(30000) @map("burst_window_ms")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  nick ZaloAccount? @relation(fields: [zaloAccountId], references: [id], onDelete: Cascade)
+
+  // Uniqueness do 2 PARTIAL unique index trong migration đảm bảo (Postgres):
+  //   - sdk_limits_org_default_key  : UNIQUE(org_id, category) WHERE zalo_account_id IS NULL
+  //   - sdk_limits_nick_override_key: UNIQUE(zalo_account_id, category) WHERE zalo_account_id IS NOT NULL
+  // Không dùng @@unique của Prisma vì nó coi mỗi NULL là khác nhau → không chặn trùng org-default.
+  // Service đọc/ghi qua findFirst + update/create (không upsert composite).
+  @@index([orgId, zaloAccountId])
+  @@map("sdk_limits")
 }
 
 // Phase ZaloAccounts redesign 2026-05-22 — event log + checkpoint hybrid.

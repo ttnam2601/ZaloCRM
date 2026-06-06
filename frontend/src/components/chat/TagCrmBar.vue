@@ -128,6 +128,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '@/api/index';
 import { useToast } from '@/composables/use-toast';
+import { useFriendSocket } from '@/composables/use-friend-socket';
 import ZaloBrandIcon from '@/components/icons/ZaloBrandIcon.vue';
 
 interface TagV2 {
@@ -194,6 +195,17 @@ onMounted(() => {
 
 watch(() => props.friendId, () => {
   loadFriendTags();
+});
+
+// 2026-06-06 (Anh chốt) — Realtime sync tag Zalo Real: khi BE emit friend:updated{zaloLabels}
+// (sale đổi tag trên app Zalo / từ header CRM / sync) cho ĐÚNG friend đang mở → reload junction
+// để pill Zalo Real ở thanh này khớp header + cột 2. Lọc theo friendId tránh reload thừa.
+// useFriendSocket tự cleanup khi unmount.
+useFriendSocket((p) => {
+  if (!props.friendId || p.friendId !== props.friendId) return;
+  if (p.patch && 'zaloLabels' in p.patch) {
+    loadFriendTags();
+  }
 });
 
 // Màu NỀN thống nhất theo nhóm (đồng bộ ScoreBanner để dễ phân biệt ở UI Chat — Anh chốt

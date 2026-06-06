@@ -77,7 +77,9 @@
             <v-menu v-if="conversation.externalThreadId && conversation.zaloAccount" :close-on-content-click="false" location="bottom start">
               <template #activator="{ props: actProps }">
                 <button v-bind="actProps" class="zlbl-trigger" :title="currentLabel ? `Đang gắn: ${currentLabel.text}` : 'Chưa gắn tag Zalo'">
-                  <span class="zlbl-icon" :style="currentLabel ? `color: ${currentLabel.color}` : ''">🏷</span>
+                  <!-- Logo Zalo thật (brand đa màu) — ĐỒNG BỘ với TagCrmBar + cột 2 (Anh chốt 2026-06-06).
+                       KHÔNG ép màu theo label; chỉ tên label mới ăn currentLabel.color. -->
+                  <ZaloBrandIcon class="zlbl-icon" :size="14" />
                   <span v-if="currentLabel" class="zlbl-current-name" :style="`color: ${currentLabel.color}`">
                     {{ currentLabel.emoji ? currentLabel.emoji + ' ' : '' }}{{ currentLabel.text }}
                   </span>
@@ -786,6 +788,7 @@ import AISuggestBar from '@/components/chat/AISuggestBar.vue';
 // `Contact.status` khiến lazy gate KHÔNG kích hoạt. CareStatusBadge giữ ở ChatContactPanel.vue
 // nếu sale vẫn cần thao tác care-status legacy 9 giá trị.
 import ContactDealStageSelector from '@/components/chat/ContactDealStageSelector.vue';
+import ZaloBrandIcon from '@/components/icons/ZaloBrandIcon.vue';
 import Avatar from '@/components/ui/Avatar.vue';
 import EmojiPicker from '@/components/chat/EmojiPicker.vue';
 import QuickTemplatePopup from '@/components/chat/quick-template-popup.vue';
@@ -1198,9 +1201,15 @@ async function onPickLabel(label: AccountLabelView) {
 
   // ── Snapshots cho rollback nếu fail ─────────────────────────────────
   const snapshotAllLabels = allLabels.value.map(l => ({ ...l }));
-  const friendship = props.conversation?.friendship as { crmTagsPerNick?: string[] } | null | undefined;
+  const friendship = props.conversation?.friendship as {
+    crmTagsPerNick?: string[];
+    zaloLabels?: Array<{ id?: number; name?: string; color?: string }>;
+  } | null | undefined;
   const oldCrmTags = Array.isArray(friendship?.crmTagsPerNick)
     ? [...(friendship!.crmTagsPerNick as string[])]
+    : [];
+  const oldZaloLabels = Array.isArray(friendship?.zaloLabels)
+    ? [...(friendship!.zaloLabels as Array<{ id?: number; name?: string; color?: string }>)]
     : [];
 
   // ── Optimistic 1: allLabels assignedTo flag (dropdown ✓ animation) ──
@@ -1209,9 +1218,17 @@ async function onPickLabel(label: AccountLabelView) {
     assignedTo: labelId !== null && l.id === labelId,
   }));
 
-  // ── Optimistic 2: friendship.crmTagsPerNick — strip ALL "🔵 X" cũ +
-  // add "🔵 newLabel" nếu assign. Đây là field tag bar cột 3 + cột 2 read.
-  // Vue reactive mutation: friendship là proxy của conversation prop. ──
+  // ── Optimistic 2: friendship.zaloLabels — NGUỒN CHÍNH cột 2 đọc (object {id,name,color}
+  // màu chuẩn = zalo_labels.color, đồng bộ TagCrmBar + header). Single-select Zalo: 1 label/
+  // friend → assign = replace toàn bộ; unassign = []. Cập nhật NGAY, không chờ socket. ──
+  if (friendship) {
+    friendship.zaloLabels = labelId !== null
+      ? [{ id: label.id, name: label.text, color: label.color }]
+      : [];
+  }
+
+  // ── Optimistic 3: friendship.crmTagsPerNick mirror "🔵 X" — giữ cho legacy reader
+  // (filter chat-routes, timeline). Cột 2 KHÔNG còn đọc field này cho tag Zalo. ──
   const stripped = oldCrmTags.filter(t => !t.startsWith('🔵 '));
   const newTags = labelId !== null ? [...stripped, `🔵 ${label.text}`] : stripped;
   if (friendship) {
@@ -1238,9 +1255,12 @@ async function onPickLabel(label: AccountLabelView) {
     const contactId = props.conversation?.contact?.id;
     if (contactId) window.dispatchEvent(new CustomEvent('timeline-updated', { detail: { contactId } }));
   } catch (err: any) {
-    // Rollback BOTH optimistic mutations + clear pending
+    // Rollback ALL optimistic mutations + clear pending
     allLabels.value = snapshotAllLabels;
-    if (friendship) friendship.crmTagsPerNick = oldCrmTags;
+    if (friendship) {
+      friendship.crmTagsPerNick = oldCrmTags;
+      friendship.zaloLabels = oldZaloLabels;
+    }
     if (convId) clearPendingTags(convId);
     toast.error(err.response?.data?.error || 'Không gán được tag — đã hoàn tác');
   }
@@ -3451,7 +3471,7 @@ watch(() => props.editingMessage?.id, async (id) => {
   border-color: var(--smax-primary, #1786be);
   box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
-.zlbl-icon { font-size: 12px; flex-shrink: 0; }
+.zlbl-icon { flex-shrink: 0; display: block; }
 .zlbl-current-name {
   font-weight: 600;
   overflow: hidden;
