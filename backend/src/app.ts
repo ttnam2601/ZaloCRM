@@ -58,6 +58,7 @@ import { zaloSyncRoutes } from './modules/zalo/zalo-sync-routes.js';
 import { zaloDashboardRoutes } from './modules/zalo/zalo-dashboard-routes.js';
 import { zaloPool } from './modules/zalo/zalo-pool.js';
 import { registerZaloSocketHandlers } from './modules/zalo/zalo-socket.js';
+import { registerSocketAuth } from './shared/realtime/socket-auth.js';
 import { notificationRoutes } from './modules/notifications/notification-routes.js';
 import { searchRoutes } from './modules/search/search-routes.js';
 import { startZaloHealthCheck } from './modules/zalo/zalo-health-check.js';
@@ -160,6 +161,10 @@ async function bootstrap() {
 
   // Pass io to zalo pool for real-time event emission
   zaloPool.setIO(io);
+
+  // Phase 1b 2026-06-07 — Socket.IO auth PHẢI đăng ký TRƯỚC mọi handler:
+  // io.use() verify JWT + auto-join org room từ token (vá P0 IDOR cross-tenant WS).
+  registerSocketAuth(io, app);
 
   io.on('connection', (socket) => {
     logger.info(`Socket connected: ${socket.id}`);
