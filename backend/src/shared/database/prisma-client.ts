@@ -11,6 +11,7 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { normalizePhone } from '../utils/phone.js';
+import { checkTenantGuard } from '../tenant/tenant-guard.js';
 
 // $extends() returns a structurally-different type — alias to host extended client.
 type ExtendedPrisma = ReturnType<typeof createPrismaClient>;
@@ -60,6 +61,19 @@ function createPrismaClient() {
         async upsert({ args, query }) {
           args.create = deriveContactPhoneNormalized(args.create as Record<string, unknown>) as typeof args.create;
           args.update = deriveContactPhoneNormalized(args.update as Record<string, unknown>) as typeof args.update;
+          return query(args);
+        },
+      },
+    },
+  }).$extends({
+    // Phase 1a tenant-guard 2026-06-07 — defense-in-depth tầng app.
+    // Mặc định OFF (config.tenantGuardMode) → no-op, zero risk khi deploy.
+    // Biên giới CHÍNH là Postgres RLS (migration riêng).
+    name: 'tenant-guard',
+    query: {
+      $allModels: {
+        async $allOperations({ model, operation, args, query }) {
+          checkTenantGuard(model, operation);
           return query(args);
         },
       },

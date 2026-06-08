@@ -89,4 +89,16 @@ export const config = {
   kimiDefaultMoonshotV1Model: envValue('KIMI_DEFAULT_MOONSHOT_V1_MODEL') || '',
 
   isProduction: process.env.NODE_ENV === 'production',
+
+  /**
+   * Phase 1a tenant-guard 2026-06-07 — chế độ cô lập tenant ở tầng Prisma:
+   *   off     (mặc định) — không kiểm tra (hành vi cũ, zero risk khi deploy)
+   *   warn    — log cảnh báo khi org-scoped query chạy ngoài tenant context
+   *             (dùng trên staging để phát hiện call-site worker chưa withTenant)
+   *   enforce — throw khi thiếu context (bật sau khi warn sạch + RLS đã apply)
+   */
+  tenantGuardMode: (() => {
+    const v = (envValue('TENANT_GUARD_MODE') || 'off').toLowerCase();
+    return v === 'warn' || v === 'enforce' ? v : 'off';
+  })() as 'off' | 'warn' | 'enforce',
 };
