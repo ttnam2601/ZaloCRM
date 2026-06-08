@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authMiddleware } from '../auth/auth-middleware.js';
-import { requireRole } from '../auth/role-middleware.js';
+import { requireGrant } from '../rbac/rbac-middleware.js';
 import { requireZaloAccess } from '../zalo/zalo-access-middleware.js';
 import { getAiConfig, getAiUsage, updateAiConfig, generateAiOutput, aiFormatRichText, aiGenerateSalesHandoffMessage } from './ai-service.js';
 // M53 2026-05-30 — Trợ Lý AI Virtual Chat
@@ -62,7 +62,7 @@ export async function aiRoutes(app: FastifyInstance) {
     }
   });
 
-  app.put('/api/v1/ai/config', { preHandler: requireRole('owner', 'admin') }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.put('/api/v1/ai/config', { preHandler: requireGrant('settings', 'edit') }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const body = request.body as { provider?: string; model?: string; maxDaily?: number; enabled?: boolean };
       if (body.maxDaily !== undefined && body.maxDaily < 1) return reply.status(400).send({ error: 'maxDaily must be at least 1' });
@@ -261,7 +261,7 @@ export async function aiRoutes(app: FastifyInstance) {
   // PUT /ai/assistant-config — admin update prompt + toggle + skip regex
   app.put(
     '/api/v1/ai/assistant-config',
-    { preHandler: requireRole('owner', 'admin') },
+    { preHandler: requireGrant('settings', 'edit') },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const body = request.body as {

@@ -119,7 +119,9 @@ defineProps<{ embedded?: boolean }>();
 
 const toast = useToast();
 const auth = useAuthStore();
-const isAdmin = computed(() => auth.user?.role === 'owner' || auth.user?.role === 'admin');
+// RBAC 2026-06-08 — sửa cấu hình lắng nghe CHUNG của org theo grants 'settings.edit'
+// (owner/admin tự bypass). Giữ tên isAdmin cho gọn (nhiều :disabled tham chiếu).
+const isAdmin = computed(() => auth.canAccess('settings', 'edit'));
 
 // Switch component nhỏ (Atlas v2).
 const Sw = defineComponent({

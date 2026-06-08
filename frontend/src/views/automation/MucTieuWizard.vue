@@ -1062,7 +1062,10 @@ const form = ref({
   successorSequenceId: '',
   startMode: 'now' as 'now' | 'scheduled',
   scheduledAt: null as string | null, // datetime-local string "YYYY-MM-DDTHH:mm" (giờ VN)
-  welcomeDelayMinutes: 1, // Tin 1 Chào mừng: chờ bao lâu sau khi gửi lời mời. 0 = gửi ngay.
+  // FIX 2026-06-08 (Anh chốt): default 1 phút → 1 GIÂY. Sàn welcome_min_floor (BE) đã bỏ
+  // → độ trễ welcome = đúng giá trị này. Anh chỉnh khi tạo trigger (ô nhập có đơn vị giây/phút/giờ).
+  // base-unit của TimeAmountInput là minute → 1 giây = 1/60 phút.
+  welcomeDelayMinutes: 1 / 60, // Tin 1 Chào mừng: chờ bao lâu sau khi gửi lời mời. 0 = gửi ngay.
   thankYouDelayMinutes: 1, // Tin 2 Cảm ơn: chờ bao lâu sau khi KH đồng ý KB.
   remindDelayDays: 3,      // Tin 3 Nhắc: sau bao nhiêu ngày KH chưa đồng ý.
   // ── I10 2026-06-04 — cấu trúc 5 tin (Anh chốt /design-html v2) ──
@@ -1607,7 +1610,9 @@ async function loadForEdit(triggerId: string): Promise<void> {
       // giữ default đã có sẵn trong form, không clear.
     }
     if (typeof t.welcomeDelaySeconds === 'number') {
-      form.value.welcomeDelayMinutes = Math.max(0, Math.round(t.welcomeDelaySeconds / 60));
+      // FIX 2026-06-08: KHÔNG round (mất độ chính xác giây — vd 1s → round(0.0167)=0).
+      // base-unit minute → giữ giá trị thực giây/60 để ô nhập hiện đúng "1 giây".
+      form.value.welcomeDelayMinutes = Math.max(0, t.welcomeDelaySeconds / 60);
     }
     // I13 2026-06-04 — load cấu hình 5 tin khi sửa Mục tiêu.
     if (typeof t.thankYouTemplate === 'string') form.value.messages.thankYou = t.thankYouTemplate;

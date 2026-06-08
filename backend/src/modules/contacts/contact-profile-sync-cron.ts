@@ -87,10 +87,12 @@ export function parseBirthDate(sdob: unknown, dob: unknown): Date | null {
   return null;
 }
 
-/** Map gender SDK → Contact.gender. resolve-contact memo: 0=female, 1=male. */
+/** Map gender SDK → Contact.gender. FIX 2026-06-08 (Anh báo + verify SDK live):
+ *  Zalo trả 0=NAM(male), 1=NỮ(female). Memo cũ "0=female" SAI → cron sync đảo ngược
+ *  gender. Đồng bộ với 4 file đúng (lead-pool/zinstant/profile-operations/chat-routes). */
 function mapGender(g: unknown): 'male' | 'female' | null {
-  if (g === 0 || g === '0') return 'female';
-  if (g === 1 || g === '1') return 'male';
+  if (g === 0 || g === '0') return 'male';
+  if (g === 1 || g === '1') return 'female';
   return null;
 }
 

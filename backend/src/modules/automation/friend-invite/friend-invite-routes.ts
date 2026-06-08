@@ -11,7 +11,7 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../../../shared/database/prisma-client.js';
 import { authMiddleware } from '../../auth/auth-middleware.js';
-import { requireRole } from '../../auth/role-middleware.js';
+import { requireGrant } from '../../rbac/rbac-middleware.js';
 import { logger } from '../../../shared/utils/logger.js';
 import { closeCareSessionsForTrigger } from '../care-session/care-session-service.js';
 import { precomputeAndSeedPool, isFriendInviteSegmentSpec } from './skip-precompute.js';
@@ -393,7 +393,7 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
         warmWindowDays?: number;
       };
     };
-  }>(`${BASE}/friend-invite`, async (request, reply) => {
+  }>(`${BASE}/friend-invite`, { preHandler: requireGrant('trigger', 'create') }, async (request, reply) => {
     const user = request.user!;
     const body = request.body;
 
@@ -432,7 +432,9 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    let welcomeDelaySeconds = 60;
+    // FIX 2026-06-08 (Anh chốt): default 60→1. Sàn welcome_min_floor đã bỏ → độ trễ
+    // welcome = đúng giá trị này. Anh để trống = 1s (gửi tin chào gần như ngay).
+    let welcomeDelaySeconds = 1;
     if (body.welcomeDelaySeconds !== undefined) {
       const v = Number(body.welcomeDelaySeconds);
       if (!Number.isFinite(v) || v < 0 || v > 3600)
@@ -697,7 +699,7 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
   app.post<{
     Params: { id: string };
     Body?: { startMode?: 'now' | 'scheduled'; scheduledAt?: string | null };
-  }>(`${BASE}/:id/activate`, async (request, reply) => {
+  }>(`${BASE}/:id/activate`, { preHandler: requireGrant('trigger', 'edit') }, async (request, reply) => {
     const user = request.user!;
     const { id } = request.params;
     const body = request.body ?? {};
@@ -810,6 +812,7 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
   // ttlHours range: 1..720 (30 ngày) — match pause_on_activity_hours bound.
   app.post<{ Params: { id: string }; Body: { ttlHours?: number | null } }>(
     `${BASE}/:id/pause`,
+    { preHandler: requireGrant('trigger', 'edit') },
     async (request, reply) => {
       const user = request.user!;
       const { id } = request.params;
@@ -871,7 +874,7 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // ── POST /:id/resume ──────────────────────────────────────────────────────
-  app.post<{ Params: { id: string } }>(`${BASE}/:id/resume`, async (request, reply) => {
+  app.post<{ Params: { id: string } }>(`${BASE}/:id/resume`, { preHandler: requireGrant('trigger', 'edit') }, async (request, reply) => {
     const user = request.user!;
     const { id } = request.params;
 
@@ -900,7 +903,7 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── POST /:id/cancel ──────────────────────────────────────────────────────
-  app.post<{ Params: { id: string } }>(`${BASE}/:id/cancel`, async (request, reply) => {
+  app.post<{ Params: { id: string } }>(`${BASE}/:id/cancel`, { preHandler: requireGrant('trigger', 'edit') }, async (request, reply) => {
     const user = request.user!;
     const { id } = request.params;
 
@@ -948,7 +951,7 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
   // 2026-06-05 (Anh chốt): Mục tiêu đã Xóa (state='cancelled') nằm trong thùng rác,
   // bấm "Khôi phục" đưa về 'paused' (an toàn — KHÔNG tự chạy lại). Sale phải bấm
   // "Bắt đầu" (/activate) để re-precompute pool. KHÔNG spawn worker ở đây.
-  app.post<{ Params: { id: string } }>(`${BASE}/:id/restore`, async (request, reply) => {
+  app.post<{ Params: { id: string } }>(`${BASE}/:id/restore`, { preHandler: requireGrant('trigger', 'edit') }, async (request, reply) => {
     const user = request.user!;
     const { id } = request.params;
 
@@ -1788,7 +1791,7 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
         skipRules?: Record<string, unknown>;
       };
     };
-  }>(`${BASE}/:id`, async (request, reply) => {
+  }>(`${BASE}/:id`, { preHandler: requireGrant('trigger', 'edit') }, async (request, reply) => {
     const user = request.user!;
     const { id } = request.params;
     const body = request.body ?? {};
@@ -2067,9 +2070,10 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'list_failed' });
     }
   };
-  app.get<{ Querystring: MucTieuListQuery }>(`${BASE}/list-muc-tieu`, listMucTieuHandler);
+  app.get<{ Querystring: MucTieuListQuery }>(`${BASE}/list-muc-tieu`, { preHandler: requireGrant('trigger', 'access') }, listMucTieuHandler);
   app.get<{ Querystring: MucTieuListQuery }>(
     '/api/v1/automation/muc-tieu/list',
+    { preHandler: requireGrant('trigger', 'access') },
     listMucTieuHandler,
   );
 

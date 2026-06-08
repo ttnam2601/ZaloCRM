@@ -5,6 +5,7 @@
  */
 import type { Appointment } from './use-appointments';
 import { APPOINTMENT_TYPE_OPTIONS, APPOINTMENT_STATUS_OPTIONS } from './use-appointments';
+import { orgDayKey, orgWallClockToUtc } from './use-org-timezone';
 
 // Re-export so component imports stay short
 export { APPOINTMENT_TYPE_OPTIONS, APPOINTMENT_STATUS_OPTIONS };
@@ -160,8 +161,20 @@ export function initials(name: string | null | undefined): string {
   return (parts[parts.length - 2][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/** Trust `appointmentDate` (ISO with timezone) — never parse the legacy `appointmentTime` string. */
+/**
+ * FIX 2026-06-09 (Anh báo "auto 7h"): appointmentDate lưu NGÀY (timestamp 00:00 UTC),
+ * giờ THẬT nằm ở appointmentTime ("HH:mm" wall-clock org). Bản cũ chỉ `new Date(appointmentDate)`
+ * → bỏ giờ → mọi event dán cứng 07:00 (midnight UTC +7 ở giờ VN). Giờ GHÉP ngày (org-local
+ * day của appointmentDate) + appointmentTime → UTC instant đúng. Fallback: appointmentTime
+ * rỗng → giữ giờ nhúng trong appointmentDate (data cũ vài dòng có giờ trong cột date).
+ */
 export function appointmentStart(a: AppointmentEx): Date {
+  const dayKey = orgDayKey(a.appointmentDate);
+  const t = (a.appointmentTime || '').trim();
+  if (dayKey && t) {
+    const combined = orgWallClockToUtc(dayKey, t);
+    if (combined) return combined;
+  }
   return new Date(a.appointmentDate);
 }
 

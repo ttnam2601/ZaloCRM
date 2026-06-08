@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import type { Server } from 'socket.io';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
-import { requireAnyGrant } from '../rbac/rbac-middleware.js';
+import { requireAnyGrant, requireGrant } from '../rbac/rbac-middleware.js';
 import { logger } from '../../shared/utils/logger.js';
 import { mergeContacts } from './merge-service.js';
 import { runContactIntelligence } from './contact-intelligence.js';
@@ -30,7 +30,7 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authMiddleware);
 
   // ── GET /api/v1/contacts — list with filters and pagination ───────────────
-  app.get('/api/v1/contacts', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/v1/contacts', { preHandler: requireGrant('contact', 'access') }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const user = request.user!;
       const {

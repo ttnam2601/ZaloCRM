@@ -2152,7 +2152,9 @@ model AutomationTrigger {
   greetingTemplate        String?   @map("greeting_template") @db.Text
   // Wave 2 2026-05-29 — per-trigger welcome probe (split from Org-level)
   welcomeMessageTemplate  String?   @map("welcome_message_template") @db.Text
-  welcomeDelaySeconds     Int       @default(60) @map("welcome_delay_seconds")
+  // FIX 2026-06-08 (Anh chốt): default 60→1. Sàn welcomeMinFloorSeconds đã bỏ khỏi
+  // welcome-probe → độ trễ welcome = ĐÚNG giá trị này. Anh chỉnh khi tạo trigger.
+  welcomeDelaySeconds     Int       @default(1) @map("welcome_delay_seconds")
   // ── Cấu trúc 5 tin 2026-06-04 (I10 — Anh chốt qua /design-html) ──
   // Tin 2 · Cảm ơn KH đã đồng ý KB — gửi khi event friend_accepted (KHÁC welcome=Tin1
   // gửi sau khi mời, không chờ accept). thankYouDelay tính từ lúc KH accept.
@@ -2216,8 +2218,9 @@ model AutomationTrigger {
   // Default 20-40 = giữ nguyên hành vi prod cũ; muốn "test nhanh" thì set min=max=1.
   friendReqIntervalMinMinutes Int     @default(20) @map("friend_req_interval_min_minutes")
   friendReqIntervalMaxMinutes Int     @default(40) @map("friend_req_interval_max_minutes")
-  // Sàn tối thiểu (giây) trước khi gửi Tin 1 chào mừng — trước đây hardcode 60s ở
-  // welcome-probe. Độ trễ thực = MAX(welcomeMinFloorSeconds, welcomeDelaySeconds).
+  // DEPRECATED 2026-06-08 (Anh chốt bỏ sàn): welcome-probe KHÔNG còn dùng cột này.
+  // Trước đây độ trễ = MAX(sàn, welcomeDelaySeconds) → ép tối thiểu 60s. Giờ độ trễ =
+  // ĐÚNG welcomeDelaySeconds. Cột giữ lại để tránh migration drop, không tham chiếu nữa.
   welcomeMinFloorSeconds      Int     @default(60) @map("welcome_min_floor_seconds")
   // Cửa sổ (ngày) coi KH là "ấm" (đã là bạn + có inbound gần đây) để gửi Tin 1 qua
   // kênh bạn bè thay vì hộp người lạ — trước đây hardcode 30 ngày ở welcome-probe.

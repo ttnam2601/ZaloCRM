@@ -2321,6 +2321,8 @@ function onTemplateSelect(rendered: string) {
 // → fill vào inputText (append nếu đã có text, KHÔNG auto-send).
 // Tránh ghi đè khi đang edit message (nút đã disable ở toolbar, double-check ở handler).
 const showBlockPicker = ref(false);
+// FIX 2026-06-09: guard chống double-send khi gửi cả Khối (preview/send-direct).
+const blockSending = ref(false);
 function openBlockPicker() {
   if (props.editingMessage) return;
   if (!privacyVisibility.canSendInConv(props.conversation)) return;
@@ -2346,43 +2348,35 @@ async function onConfirmSendBlock(blockId: string) {
   await dispatchBlockComponents(blockId);
 }
 
+// FIX 2026-06-09 (Anh báo): trước đây hàm này chỉ CHÈN text các thành phần vào ô gõ
+// (inputText) → khối nhiều thành phần / có format bị dồn thành text thường, gửi sai.
+// Giờ gửi CẢ KHỐI qua backend GIỐNG nút "Gửi cả Khối" ở cột 4 Automation
+// (sendBlockToConversation): BE dispatch đủ thành phần đúng thứ tự, giữ rich-text,
+// render {gender}/{name}/{sale}, delay an toàn; tin hiện live ở cột 3 qua socket.
 async function dispatchBlockComponents(blockId: string) {
+  const conversationId = props.conversation?.id;
+  if (!conversationId) {
+    toast.error('Chưa chọn hội thoại để gửi Khối');
+    return;
+  }
+  if (blockSending.value) return; // chống double-send
+  blockSending.value = true;
   try {
-    const { resolveBlockForSend } = await import('@/api/automation/blocks');
-    const resolved = await resolveBlockForSend(blockId);
-    if (!resolved.resolved || resolved.resolved.length === 0) {
-      toast.error('Khối không có nội dung để gửi');
-      return;
-    }
-    // Loop từng component, emit 'send' cho mỗi cái. MessageThread emit lên ChatView.
-    // Phase 1: chỉ support text → chèn text vào composer + user bấm Gửi.
-    // Multi-component (image/file/album) defer Phase 2 (cần wire backend zaloOps batch).
-    const textParts: string[] = [];
-    let hasNonText = false;
-    for (const c of resolved.resolved) {
-      if (c.messageType === 'text') {
-        const text = (c.payload as any)?.text;
-        if (typeof text === 'string' && text.trim()) textParts.push(text);
-      } else {
-        hasNonText = true;
-      }
-    }
-    if (textParts.length > 0) {
-      const combined = textParts.join('\n\n');
-      inputText.value = inputText.value.trim()
-        ? `${inputText.value.replace(/\s+$/, '')}\n\n${combined}`
-        : combined;
-    }
-    if (hasNonText) {
-      toast.push(`Đã chèn ${textParts.length} tin text. ${resolved.resolved.length - textParts.length} thành phần (ảnh/file/album) cần gửi tay riêng — Phase 1 chưa wire multi-dispatch.`);
+    const { sendBlockToConversation } = await import('@/api/automation/blocks');
+    const res = await sendBlockToConversation(conversationId, blockId);
+    if (res.partial) {
+      toast.warning(`Đã gửi ${res.sentCount}/${res.totalMessages} tin — ${res.errors.length} thành phần lỗi`);
     } else {
-      toast.success(`Đã chèn ${textParts.length} tin từ Khối "${resolved.blockName}" vào ô gõ`);
+      toast.success(`Đã gửi Khối (${res.sentCount} tin) cho KH`);
     }
-    await nextTick();
-    setTimeout(() => editorRef.value?.focus('end'), 30);
   } catch (err: any) {
-    const msg = err?.response?.data?.error || err?.message || 'Không gửi được Khối';
+    const msg = err?.response?.data?.error
+      || err?.response?.data?.detail
+      || err?.message
+      || 'Không gửi được Khối';
     toast.error(msg);
+  } finally {
+    blockSending.value = false;
   }
 }
 

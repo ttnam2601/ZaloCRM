@@ -489,7 +489,6 @@ function onboardingIcon(s: OnboardingSummary): string {
 const STEP_LABEL_VI: Record<string, string> = {
   change_password: 'Đổi mật khẩu',
   connect_nick: 'Kết nối nick Zalo',
-  internal_contact: 'Thiết lập nhận thông báo',
   pin: 'Đặt PIN bảo mật (tuỳ chọn)',
 };
 function onboardingTooltip(s: OnboardingSummary): string {
