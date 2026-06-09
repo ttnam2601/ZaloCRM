@@ -254,6 +254,28 @@
       </aside>
     </div>
   </Transition>
+
+  <!-- 2026-06-09 (anh báo popup confirm() trình duyệt xấu): modal xác nhận in-app
+       tái dùng cho reset pw / bàn giao / vô hiệu. Riêng reset pw có tùy chọn gửi Zalo. -->
+  <Teleport to="body">
+    <div v-if="confirmModal.open" class="ce-overlay" @click.self="closeConfirm">
+      <div class="ce-modal" :class="{ 'ce-danger': confirmModal.danger }">
+        <h3 class="ce-title">{{ confirmModal.title }}</h3>
+        <p class="ce-msg">{{ confirmModal.message }}</p>
+        <!-- Tùy chọn gửi mật khẩu mới qua Zalo (chỉ hiện cho reset pw) -->
+        <label v-if="confirmModal.showZaloOpt" class="ce-zalo-opt">
+          <input type="checkbox" v-model="sendPwViaZalo" />
+          Gửi mật khẩu mới cho nhân viên qua Zalo (nick hệ thống) — có lưu ở Thông báo hệ thống
+        </label>
+        <div class="ce-actions">
+          <button class="ce-cancel" :disabled="busy" @click="closeConfirm">Hủy</button>
+          <button class="ce-ok" :class="{ 'ce-ok-danger': confirmModal.danger }" :disabled="busy" @click="runConfirm">
+            {{ busy ? 'Đang xử lý…' : confirmModal.okLabel }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -313,6 +335,26 @@ const canResetPassword = computed(() => {
   return ['owner', 'admin'].includes(props.currentUserRole ?? '') && props.user?.id !== props.currentUserId;
 });
 const resetPwResult = ref<string | null>(null);
+const sendPwViaZalo = ref(true); // mặc định gửi pw mới qua Zalo cho tiện sale
+
+// 2026-06-09 — modal xác nhận in-app (thay confirm() trình duyệt xấu).
+const confirmModal = ref<{
+  open: boolean; title: string; message: string; okLabel: string;
+  danger: boolean; showZaloOpt: boolean; action: (() => Promise<void>) | null;
+}>({ open: false, title: '', message: '', okLabel: 'Xác nhận', danger: false, showZaloOpt: false, action: null });
+function openConfirm(opts: Partial<typeof confirmModal.value> & { action: () => Promise<void> }) {
+  confirmModal.value = {
+    open: true, title: opts.title ?? 'Xác nhận', message: opts.message ?? '',
+    okLabel: opts.okLabel ?? 'Xác nhận', danger: opts.danger ?? false,
+    showZaloOpt: opts.showZaloOpt ?? false, action: opts.action,
+  };
+}
+function closeConfirm() { if (!busy.value) confirmModal.value.open = false; }
+async function runConfirm() {
+  const act = confirmModal.value.action;
+  if (act) await act();
+  if (!error.value) confirmModal.value.open = false; // giữ modal mở nếu lỗi để user thấy
+}
 // Sinh mật khẩu dễ đọc cho sale (không ký tự khó gõ): chữ thường + số, 8 ký tự.
 function genPassword(): string {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789'; // bỏ o/0/l/1/i gây nhầm
@@ -320,16 +362,26 @@ function genPassword(): string {
   for (let i = 0; i < 8; i++) out += chars[Math.floor(Math.random() * chars.length)];
   return out;
 }
-async function confirmResetPassword() {
+function confirmResetPassword() {
   if (!props.user || !canResetPassword.value) return;
-  if (!confirm(`Đặt lại mật khẩu cho "${props.user.fullName}"?\nMật khẩu cũ sẽ mất, nhân viên phải đăng nhập lại bằng mật khẩu mới.`)) return;
+  openConfirm({
+    title: 'Đặt lại mật khẩu',
+    message: `Đặt lại mật khẩu cho "${props.user.fullName}"? Mật khẩu cũ sẽ mất, nhân viên phải đăng nhập lại bằng mật khẩu mới.`,
+    okLabel: '🔑 Đặt lại',
+    showZaloOpt: true,
+    action: doResetPassword,
+  });
+}
+async function doResetPassword() {
+  if (!props.user) return;
   const newPw = genPassword();
   busy.value = true;
   error.value = '';
   resetPwResult.value = null;
   try {
-    await api.put(`/users/${props.user.id}/password`, { password: newPw });
-    resetPwResult.value = newPw; // hiện cho admin copy gửi sale
+    // sendZalo: BE sẽ gửi mật khẩu mới qua nick hệ thống + lưu Thông báo hệ thống.
+    await api.put(`/users/${props.user.id}/password`, { password: newPw, sendZalo: sendPwViaZalo.value });
+    resetPwResult.value = newPw; // vẫn hiện cho admin copy (phòng khi Zalo gửi lỗi)
     emit('changed');
   } catch (e: any) {
     error.value = e?.response?.data?.error || e?.response?.data?.message || 'Lỗi đặt lại mật khẩu';
@@ -353,10 +405,18 @@ const handoffTargets = computed(() =>
 const handoffToId = ref('');
 const handoffTransfer = ref({ contacts: true, nicks: true, appointments: true });
 const handoffResult = ref<{ to: string; contacts: number; nicks: number; appointments: number } | null>(null);
-async function confirmHandoff() {
+function confirmHandoff() {
   if (!props.user || !handoffToId.value) return;
   const toName = handoffTargets.value.find((u) => u.id === handoffToId.value)?.fullName ?? 'người nhận';
-  if (!confirm(`Bàn giao toàn bộ của "${props.user.fullName}" sang "${toName}"?\nKhách hàng, nick Zalo, lịch hẹn sẽ chuyển sang người nhận.`)) return;
+  openConfirm({
+    title: 'Bàn giao khách hàng',
+    message: `Bàn giao toàn bộ của "${props.user.fullName}" sang "${toName}"? Khách hàng, nick Zalo, lịch hẹn sẽ chuyển sang người nhận.`,
+    okLabel: '🔄 Bàn giao',
+    action: doHandoff,
+  });
+}
+async function doHandoff() {
+  if (!props.user || !handoffToId.value) return;
   busy.value = true;
   error.value = '';
   handoffResult.value = null;
@@ -571,10 +631,20 @@ async function onMaxPrivacyChange() {
   }
 }
 
-async function confirmDeactivate() {
+function confirmDeactivate() {
   if (!props.user) return;
-  if (!confirm(`Vô hiệu hóa user "${props.user.fullName || props.user.email}"? User sẽ không đăng nhập được.`)) return;
+  openConfirm({
+    title: 'Vô hiệu hóa nhân viên',
+    message: `Vô hiệu hóa "${props.user.fullName || props.user.email}"? Nhân viên sẽ không đăng nhập được. Nên bàn giao khách hàng trước.`,
+    okLabel: '🚫 Vô hiệu hóa',
+    danger: true,
+    action: doDeactivate,
+  });
+}
+async function doDeactivate() {
+  if (!props.user) return;
   busy.value = true;
+  error.value = '';
   try {
     await api.delete(`/users/${props.user.id}`);
     emit('changed');
@@ -656,6 +726,40 @@ function avatarColor(name: string): string {
 .btn-copy-sm { background: none; border: none; cursor: pointer; font-size: 15px; padding: 2px; }
 .reset-pw-note { font-size: 11.5px; color: #6b7280; margin: 6px 0 0; }
 .field-hint { font-size: 12px; color: #6b7280; margin: 0 0 10px; line-height: 1.4; }
+
+/* 2026-06-09 — Modal xác nhận in-app (thay confirm() trình duyệt) */
+.ce-overlay {
+  position: fixed; inset: 0; background: rgba(6, 34, 47, 0.45);
+  display: flex; align-items: center; justify-content: center; z-index: 12000;
+  backdrop-filter: blur(2px);
+}
+.ce-modal {
+  background: #fff; border-radius: 14px; padding: 22px 24px; width: 420px; max-width: calc(100vw - 32px);
+  box-shadow: 0 24px 60px -12px rgba(6, 34, 47, 0.4);
+}
+.ce-title { font-size: 17px; font-weight: 700; color: #0e445a; margin: 0 0 8px; }
+.ce-danger .ce-title { color: #b91c1c; }
+.ce-msg { font-size: 13.5px; color: #41454d; line-height: 1.5; margin: 0 0 14px; }
+.ce-zalo-opt {
+  display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #2b2f36;
+  background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 10px 12px;
+  margin-bottom: 16px; cursor: pointer; line-height: 1.4;
+}
+.ce-zalo-opt input { margin-top: 2px; }
+.ce-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.ce-cancel {
+  background: #f0f1f3; border: none; color: #41454d; font-weight: 500;
+  padding: 9px 18px; border-radius: 8px; cursor: pointer; font-size: 13.5px;
+}
+.ce-cancel:hover:not(:disabled) { background: #e4e6e9; }
+.ce-ok {
+  background: #1786be; border: none; color: #fff; font-weight: 600;
+  padding: 9px 18px; border-radius: 8px; cursor: pointer; font-size: 13.5px;
+}
+.ce-ok:hover:not(:disabled) { background: #0e6491; }
+.ce-ok-danger { background: #dc2626; }
+.ce-ok-danger:hover:not(:disabled) { background: #b91c1c; }
+.ce-ok:disabled, .ce-cancel:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* 2026-06-09 — Bàn giao */
 .handoff-opts { display: flex; gap: 14px; margin: 10px 0; flex-wrap: wrap; }

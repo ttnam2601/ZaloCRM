@@ -10,6 +10,7 @@ import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 import { logger } from '../../shared/utils/logger.js';
 import { normalizePhone } from '../../shared/utils/phone.js';
+import { sendSystemNotificationToUser } from '../system-notifications/system-notify-service.js';
 
 // 2026-06-09 (anh chốt audit) — ghi nhật ký hành động admin vào ActivityLog có sẵn
 // (category='admin'), KHÔNG tạo model mới. Fire-and-forget: lỗi log KHÔNG chặn nghiệp vụ.
@@ -214,24 +215,55 @@ export async function userRoutes(app: FastifyInstance) {
     }
 
     const { id } = request.params as { id: string };
-    const { password } = request.body as { password: string };
+    const { password, sendZalo } = request.body as { password: string; sendZalo?: boolean };
     if (!password || password.length < 6) {
       return reply.status(400).send({ error: 'Mật khẩu tối thiểu 6 ký tự' });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    await prisma.user.update({
+    const target = await prisma.user.update({
       where: { id, orgId: currentUser.orgId },
       data: {
         passwordHash,
         passwordChangedAt: null,            // force user phải đổi lại sau khi login
         jwtTokenVersion: { increment: 1 },  // revoke mọi JWT cũ
       },
+      select: { id: true, fullName: true },
     });
 
     logger.info(`User ${id} password reset by ${currentUser.email} (JWT revoked, onboarding force re-flow)`);
-    await writeAudit(currentUser, 'user.reset_password', id, {});
-    return { success: true };
+    await writeAudit(currentUser, 'user.reset_password', id, { sentZalo: !!sendZalo });
+
+    // 2026-06-09 (anh chốt): gửi mật khẩu mới qua Zalo từ nick hệ thống → user.
+    // sendSystemNotificationToUser LUÔN tạo bản ghi SystemNotification → tự có log
+    // ở trang Thông báo hệ thống (channel='zalo' nếu gửi được, 'crm_panel' nếu chưa setup nick).
+    let zaloSent = false;
+    let zaloError: string | null = null;
+    if (sendZalo) {
+      try {
+        const loginUrl = process.env.CRM_LOGIN_URL || 'https://zalo.hsholding.vn';
+        const title = '🔑 Mật khẩu đã được đặt lại';
+        const content =
+          `Quản trị viên vừa đặt lại mật khẩu tài khoản của bạn.\n` +
+          `Mật khẩu mới: ${password}\n` +
+          `Đăng nhập: ${loginUrl}\n` +
+          `Vui lòng đổi lại mật khẩu sau khi đăng nhập.`;
+        const result = await sendSystemNotificationToUser({
+          orgId: currentUser.orgId,
+          targetUserId: id,
+          type: 'password_reset',
+          title,
+          content,
+          priority: 'high',
+        });
+        zaloSent = (result as any)?.status === 'sent' || (result as any)?.channel === 'zalo';
+        zaloError = (result as any)?.error ?? null;
+      } catch (e) {
+        zaloError = (e as Error)?.message ?? 'Gửi Zalo lỗi';
+        logger.warn(`[reset-pw] gửi Zalo lỗi cho user ${id}: ${zaloError}`);
+      }
+    }
+    return { success: true, zaloSent, zaloError };
   });
 
   // DELETE /api/v1/users/:id — deactivate user (owner only)
