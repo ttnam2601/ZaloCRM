@@ -15,7 +15,7 @@
  * bung hàng nghìn promise rời → cạn connection pool ở scale 4784 friend).
  */
 
-import { prisma } from '../../shared/database/prisma-client.js';
+import { prisma, tenantTransaction } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import type { EngagementPattern } from './engagement-service.js';
 
@@ -118,8 +118,7 @@ export async function syncEngagementTag(contactId: string): Promise<void> {
     });
     if (friends.length === 0) return;
 
-    await prisma.$transaction(
-      async (tx) => {
+    await tenantTransaction(async (tx) => {
         for (const f of friends) {
           // 1. Soft-remove mọi engagement tag KHÁC wantTagId đang active.
           await tx.friendTag.updateMany({

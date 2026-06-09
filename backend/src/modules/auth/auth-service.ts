@@ -8,7 +8,7 @@
  * - Sale VN ít/không có email → admin tạo user chỉ với phone.
  */
 import bcrypt from 'bcryptjs';
-import { prisma } from '../../shared/database/prisma-client.js';
+import { prisma, tenantTransaction } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { normalizePhone } from '../../shared/utils/phone.js';
 import { runSystemQuery } from '../../shared/tenant/tenant-context.js';
@@ -72,7 +72,7 @@ export async function setup(
   const passwordHash = await bcrypt.hash(password, 12);
 
   const result = await runSystemQuery(() =>
-    prisma.$transaction(async (tx) => {
+    tenantTransaction(async (tx) => {
       const org = await tx.organization.create({ data: { name: orgName } });
       const user = await tx.user.create({
         data: {

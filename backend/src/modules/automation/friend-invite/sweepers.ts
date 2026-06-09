@@ -12,7 +12,7 @@
 //    Pick FriendRequestOutbox WHERE sendStatus='success' AND sequenceMaterializedAt IS NULL
 //    Call materializeSequenceForContact() per row → UPDATE sequenceMaterializedAt.
 
-import { prisma } from '../../../shared/database/prisma-client.js';
+import { prisma, tenantTransaction } from '../../../shared/database/prisma-client.js';
 import { logger } from '../../../shared/utils/logger.js';
 import { materializeSequenceForContact } from '../engine/campaign-materializer.js';
 import { getSequenceStepQueue } from '../queues/queue-registry.js';
@@ -632,7 +632,7 @@ async function runStickyNickHoldSweeper(): Promise<void> {
               }),
             )
           : null;
-        await withTenant(entryOrg?.orgId ?? '', () => prisma.$transaction(async (tx) => {
+        await withTenant(entryOrg?.orgId ?? '', () => tenantTransaction(async (tx) => {
           // Lookup org_id từ trigger (cần cho event log)
           const trigger = e.triggerId
             ? await tx.automationTrigger.findUnique({

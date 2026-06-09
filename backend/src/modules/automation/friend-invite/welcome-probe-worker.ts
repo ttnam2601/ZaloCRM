@@ -23,7 +23,7 @@
 //     uniq_outbox_welcome_sent_per_contact_trigger fires P2002 on the loser → DUPLICATE_SKIP.
 //  9. Honor hour 6-22 VN window
 
-import { prisma } from '../../../shared/database/prisma-client.js';
+import { prisma, tenantTransaction } from '../../../shared/database/prisma-client.js';
 import { logger } from '../../../shared/utils/logger.js';
 import { zaloOps } from '../../../shared/zalo-operations.js';
 import { logEvent } from './event-log-service.js';
@@ -249,17 +249,17 @@ async function processRow(row: ProbeRow): Promise<void> {
   });
   if (!nickStatusCheck || nickStatusCheck.status !== 'connected') {
     const now = new Date();
-    await prisma.$transaction([
-      prisma.friendRequestOutbox.update({
+    await tenantTransaction(async (tx) => {
+      await tx.friendRequestOutbox.update({
         where: { id: row.id },
         data: {
           // Giữ welcome_outcome=NULL để re-poll khi nick hồi
           nickFirstOfflineAt: row.nick_first_offline_at ?? now,
           welcomeLastError: `nick_offline status=${nickStatusCheck?.status ?? 'missing'}`,
         },
-      }),
+      });
       // #2 2026-06-06 — nickHoldSince ở bảng nối per-trigger (filter theo contactId denormalized).
-      prisma.triggerQueueEntry.updateMany({
+      await tx.triggerQueueEntry.updateMany({
         where: {
           contactId: row.contact_id,
           triggerId: row.trigger_id ?? undefined,
@@ -267,8 +267,8 @@ async function processRow(row: ProbeRow): Promise<void> {
           nickHoldSince: null,
         },
         data: { nickHoldSince: now },
-      }),
-    ]);
+      });
+    });
     logger.warn(
       `[welcome-probe] outbox=${row.id} nick=${row.nick_id} offline status=${nickStatusCheck?.status ?? 'missing'} — hold welcome, chờ nick hồi (Sprint v3)`,
     );
@@ -286,18 +286,18 @@ async function processRow(row: ProbeRow): Promise<void> {
       msg,
       allowStrangerMessage: !isWarm,
     });
-    await prisma.$transaction([
-      prisma.friendRequestOutbox.update({
+    await tenantTransaction(async (tx) => {
+      await tx.friendRequestOutbox.update({
         where: { id: row.id },
         // PARTIAL UNIQUE FIRES HERE on race-loss → caught below, mapped to DUPLICATE_SKIP.
         data: { welcomeOutcome: channel, welcomeSentAt: new Date() },
-      }),
-      prisma.contact.update({
+      });
+      await tx.contact.update({
         where: { id: row.contact_id },
         // Legacy hint, write-only — NOT used for gating under the new semantic.
         data: { welcomeChannel: channelLabel, welcomeSentAt: new Date() },
-      }),
-    ]);
+      });
+    });
     logger.info(`[welcome-probe] sent outbox=${row.id} channel=${channelLabel}`);
 
     // Wave 3 Event Log — welcome_sent vào Mục tiêu timeline
@@ -361,16 +361,16 @@ async function processRow(row: ProbeRow): Promise<void> {
       // như gate trên: giữ welcome_outcome=NULL, set nickFirstOfflineAt, đẩy
       // entry.nickHoldSince. Sweeper sticky-hold reset sau 23h nếu nick chưa hồi.
       const now = new Date();
-      await prisma.$transaction([
-        prisma.friendRequestOutbox.update({
+      await tenantTransaction(async (tx) => {
+        await tx.friendRequestOutbox.update({
           where: { id: row.id },
           data: {
             nickFirstOfflineAt: row.nick_first_offline_at ?? now,
             welcomeLastError: `awaiting_nick ${errMsg}`.slice(0, 500),
           },
-        }),
+        });
         // #2 2026-06-06 — nickHoldSince ở bảng nối per-trigger.
-        prisma.triggerQueueEntry.updateMany({
+        await tx.triggerQueueEntry.updateMany({
           where: {
             contactId: row.contact_id,
             triggerId: row.trigger_id ?? undefined,
@@ -378,8 +378,8 @@ async function processRow(row: ProbeRow): Promise<void> {
             nickHoldSince: null,
           },
           data: { nickHoldSince: now },
-        }),
-      ]);
+        });
+      });
       logger.warn(
         `[welcome-probe] outbox=${row.id} nick=${row.nick_id} AWAITING_NICK (race) — hold welcome: ${errMsg}`,
       );

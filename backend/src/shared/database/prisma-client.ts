@@ -137,9 +137,12 @@ export function tenantTransaction<T>(
   }, opts);
 }
 
-// Transaction client trong callback $transaction. Dùng alias `any` (call-site hiện hành
-// đều để `(tx)` untyped) — tránh suy luận type mong manh từ overload của $transaction.
-type TxClient = any;
+// Transaction client trong callback $transaction của client ĐÃ-extend — giữ nguyên type
+// như `prisma.$transaction(async (tx) => ...)` để call-site không mất type của tx.x.*.
+// Extract overload dạng-callback rồi lấy param đầu (tx). Ở ngoài createPrismaClient nên
+// không gây vòng lặp type.
+type InteractiveTxFn = Extract<Parameters<typeof prisma.$transaction>[0], (...a: never[]) => unknown>;
+type TxClient = Parameters<InteractiveTxFn>[0];
 
 export const prisma = globalForPrisma.prisma || createPrismaClient();
 
