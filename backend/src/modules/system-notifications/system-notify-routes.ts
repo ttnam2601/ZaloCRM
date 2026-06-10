@@ -6,6 +6,7 @@ import { normalizePhone } from '../../shared/utils/phone.js';
 import { zaloOps } from '../../shared/zalo-operations.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { requireGrant } from '../rbac/rbac-middleware.js';
+import { getZaloScope } from '../zalo/zalo-scope.js';
 import { resolveSystemNotifyRecipient, sendSystemNotificationToUser, resolveUidBySenderFindUser } from './system-notify-service.js';
 import { DEFAULT_WELCOME_TEMPLATE, buildWelcomeMessage, validateTemplate, toZaloStyles } from './welcome-message-builder.js';
 import { formatMessage } from '../../shared/text-formatter.js';
@@ -100,20 +101,29 @@ export async function systemNotifyRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireGrant('settings', 'access') },
     async (request: FastifyRequest) => {
       const currentUser = request.user!;
-      const [org, nicks] = await Promise.all([
-        prisma.organization.findUnique({
-          where: { id: currentUser.orgId },
-          select: {
-            systemNotifyZaloAccountId: true,
-            systemNotifyNick: { select: { id: true, displayName: true, avatarUrl: true, zaloUid: true, status: true } },
-          },
-        }),
-        prisma.zaloAccount.findMany({
-          where: { orgId: currentUser.orgId },
-          select: { id: true, displayName: true, avatarUrl: true, zaloUid: true, phone: true, status: true },
-          orderBy: [{ status: 'asc' }, { displayName: 'asc' }],
-        }),
-      ]);
+      // 2026-06-10 FIX: dropdown chọn nick gửi — getZaloScope (Trưởng phòng/HR không
+      // thấy nick ngoài quyền) + ẩn nick đã xóa mềm. Union với nick gửi hiện tại để
+      // nick đang chọn vẫn render (dù org-wide ngoài scope cá nhân).
+      const scope = await getZaloScope(currentUser.id, currentUser.orgId, currentUser.role);
+      const org = await prisma.organization.findUnique({
+        where: { id: currentUser.orgId },
+        select: {
+          systemNotifyZaloAccountId: true,
+          systemNotifyNick: { select: { id: true, displayName: true, avatarUrl: true, zaloUid: true, status: true } },
+        },
+      });
+      const allowIds = scope.isOrgAdmin
+        ? null
+        : Array.from(new Set([...scope.accessibleIds, ...(org?.systemNotifyZaloAccountId ? [org.systemNotifyZaloAccountId] : [])]));
+      const nicks = await prisma.zaloAccount.findMany({
+        where: {
+          orgId: currentUser.orgId,
+          archivedAt: null,
+          ...(allowIds ? { id: { in: allowIds } } : {}),
+        },
+        select: { id: true, displayName: true, avatarUrl: true, zaloUid: true, phone: true, status: true },
+        orderBy: [{ status: 'asc' }, { displayName: 'asc' }],
+      });
 
       return {
         systemNotifyZaloAccountId: org?.systemNotifyZaloAccountId ?? null,

@@ -163,7 +163,8 @@ export async function registerPrivacyRoutes(app: FastifyInstance): Promise<void>
     const userId = user.userId ?? user.id;
 
     const nicks = await prisma.zaloAccount.findMany({
-      where: { orgId: user.orgId, ownerUserId: userId },
+      // 2026-06-10: ẩn nick đã xóa mềm khỏi list cấu hình Riêng tư của user.
+      where: { orgId: user.orgId, ownerUserId: userId, archivedAt: null },
       select: {
         id: true,
         zaloUid: true,
