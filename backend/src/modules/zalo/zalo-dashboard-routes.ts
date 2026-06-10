@@ -60,8 +60,9 @@ export async function zaloDashboardRoutes(app: FastifyInstance): Promise<void> {
     // RBAC scope 2026-05-22: stats chỉ tính trên nicks user được thấy.
     const scope = await getZaloScope(userId, user.orgId, user.role);
 
+    // 2026-06-10 FIX: KPI không đếm nick đã xóa mềm (archivedAt) — đồng bộ enriched/list.
     const accounts = await prisma.zaloAccount.findMany({
-      where: { orgId: user.orgId, id: { in: scope.accessibleIds } },
+      where: { orgId: user.orgId, id: { in: scope.accessibleIds }, archivedAt: null },
       select: { id: true, status: true, lastConnectedAt: true },
     });
     const accountIds = accounts.map((a) => a.id);
@@ -148,8 +149,17 @@ export async function zaloDashboardRoutes(app: FastifyInstance): Promise<void> {
     // RBAC scope 2026-05-22: chỉ trả nicks user được phép xem.
     const scope = await getZaloScope(userId, user.orgId, user.role);
 
+    // 2026-06-10 FIX: ẩn nick đã xóa mềm (archivedAt) — đồng bộ với GET /zalo-accounts.
+    // Bug cũ: enriched KHÔNG lọc archived → xóa nick xong vẫn hiện trong UI tab Đơn giản/Nâng cao.
+    // ?includeArchived=true để admin xem lại nick đã xóa (khôi phục).
+    const includeArchived = (request.query as Record<string, string>)?.includeArchived === 'true';
+
     const accounts = await prisma.zaloAccount.findMany({
-      where: { orgId: user.orgId, id: { in: scope.accessibleIds } },
+      where: {
+        orgId: user.orgId,
+        id: { in: scope.accessibleIds },
+        ...(includeArchived ? {} : { archivedAt: null }),
+      },
       select: {
         id: true,
         zaloUid: true,
