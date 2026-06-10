@@ -567,10 +567,10 @@ async function onCardReconnect(account: any) {
   }
 }
 function onConfirmDelete(account: any) {
-  // Xác nhận xóa MỀM (ẩn khỏi danh sách, giữ dữ liệu).
-  if (confirm(`Xóa nick "${account.displayName || account.phone || ''}" khỏi danh sách?\n(Dữ liệu hội thoại vẫn được giữ trong hệ thống.)`)) {
-    deleteAccount(account.id);
-  }
+  // 2026-06-10: mở modal xác nhận in-app (Atlas) thay confirm() native xấu —
+  // thống nhất với đường drawer ("Xoá nick khỏi CRM"). Xác nhận → handleDelete (xóa mềm).
+  deleteTargetId.value = account.id;
+  showDeleteDialog.value = true;
 }
 
 function onTableAction(payload: { account: any; action: 'reconnect' | 'sync' }) {

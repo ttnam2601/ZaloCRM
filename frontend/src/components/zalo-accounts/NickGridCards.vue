@@ -14,9 +14,17 @@
       </button>
     </div>
 
-    <div v-else class="ngc-grid">
+    <!-- Nhóm theo trạng thái nick (2026-06-10) -->
+    <div v-else class="ngc-groups">
+      <section v-for="g in groups" :key="g.key" class="ngc-group">
+        <header class="ngc-group-head" :class="`gh-${g.key}`">
+          <v-icon size="16">{{ g.icon }}</v-icon>
+          <span class="ngc-group-label">{{ g.label }}</span>
+          <span class="ngc-group-count">{{ g.items.length }}</span>
+        </header>
+        <div class="ngc-grid">
       <div
-        v-for="a in accounts"
+        v-for="a in g.items"
         :key="a.id"
         class="ngc-card"
         :class="stateClass(a)"
@@ -76,11 +84,14 @@
           <v-icon size="13">mdi-check-circle</v-icon> Đang hoạt động
         </div>
       </div>
+        </div>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 interface Crew { id: string; fullName: string | null }
 
 // accounts: EnrichedAccount[] từ parent — component chỉ đọc field hiển thị (type lỏng).
@@ -118,6 +129,20 @@ function stateLabel(a: any): string {
 function crewOf(a: any): Crew[] {
   return (a.crew || []).filter((c: Crew) => !!c);
 }
+
+// 2026-06-10 (anh chốt): nhóm card theo TRẠNG THÁI nick. Thứ tự ưu tiên:
+// online (quan trọng nhất, lên đầu) → pending (đang xử lý) → offline (cần re-login).
+const STATE_GROUPS = [
+  { key: 'online',  label: 'Đang hoạt động', icon: 'mdi-check-circle',     match: (a: any) => stateClass(a) === 'is-online' },
+  { key: 'pending', label: 'Đang kết nối',    icon: 'mdi-progress-clock',   match: (a: any) => stateClass(a) === 'is-pending' },
+  { key: 'offline', label: 'Mất kết nối',     icon: 'mdi-alert-circle-outline', match: (a: any) => stateClass(a) === 'is-offline' },
+] as const;
+
+const groups = computed(() =>
+  STATE_GROUPS
+    .map((g) => ({ ...g, items: props.accounts.filter(g.match) }))
+    .filter((g) => g.items.length > 0),
+);
 function initials(name?: string | null): string {
   if (!name) return '?';
   const parts = name.trim().split(/\s+/);
@@ -129,6 +154,23 @@ function initials(name?: string | null): string {
 .ngc { padding: 4px 0; }
 .ngc-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 56px; color: var(--ink-3, #6b7280); }
 .ngc-empty p { font-style: italic; }
+
+/* Nhóm theo trạng thái (2026-06-10) */
+.ngc-groups { display: flex; flex-direction: column; gap: 22px; }
+.ngc-group-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 700; color: #475569;
+  padding: 4px 2px 10px; margin-bottom: 2px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.ngc-group-count {
+  margin-left: 2px; min-width: 20px; text-align: center;
+  background: #f1f5f9; color: #64748b; border-radius: 10px;
+  font-size: 11.5px; padding: 1px 7px;
+}
+.ngc-group-head.gh-online  { color: #15803d; } .gh-online .ngc-group-count  { background: #dcfce7; color: #15803d; }
+.ngc-group-head.gh-pending { color: #b45309; } .gh-pending .ngc-group-count { background: #fef3c7; color: #b45309; }
+.ngc-group-head.gh-offline { color: #b91c1c; } .gh-offline .ngc-group-count { background: #fee2e2; color: #b91c1c; }
 
 .ngc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
 @media (min-width: 1366px) { .ngc-grid { grid-template-columns: repeat(3, 1fr); } }
