@@ -17,7 +17,14 @@
     <!-- Nhóm theo trạng thái nick (2026-06-10) -->
     <div v-else class="ngc-groups">
       <section v-for="g in groups" :key="g.key" class="ngc-group">
-        <header class="ngc-group-head" :class="`gh-${g.key}`">
+        <!-- Header nhóm: theo trạng thái (icon màu) hoặc theo user (avatar + vai trò) -->
+        <header v-if="g.kind === 'owner'" class="ngc-group-head gh-owner">
+          <span class="ngc-owner-av">{{ initials(g.label) }}</span>
+          <span class="ngc-group-label">{{ g.label }}</span>
+          <span class="ngc-group-count">{{ g.items.length }}</span>
+          <span class="ngc-owner-role">{{ ownerRole(g.owner) }}</span>
+        </header>
+        <header v-else class="ngc-group-head" :class="`gh-${g.key}`">
           <v-icon size="16">{{ g.icon }}</v-icon>
           <span class="ngc-group-label">{{ g.label }}</span>
           <span class="ngc-group-count">{{ g.items.length }}</span>
@@ -95,7 +102,8 @@ import { computed } from 'vue';
 interface Crew { id: string; fullName: string | null }
 
 // accounts: EnrichedAccount[] từ parent — component chỉ đọc field hiển thị (type lỏng).
-const props = defineProps<{ accounts: any[]; reconnectingIds?: Set<string> }>();
+// groupBy: 'status' (mặc định, nhóm theo trạng thái) | 'owner' (mục 1 2026-06-11, nhóm theo người dùng).
+const props = defineProps<{ accounts: any[]; reconnectingIds?: Set<string>; groupBy?: 'status' | 'owner' }>();
 function isReconnecting(id: string): boolean {
   return props.reconnectingIds?.has(id) ?? false;
 }
@@ -138,11 +146,42 @@ const STATE_GROUPS = [
   { key: 'offline', label: 'Mất kết nối',     icon: 'mdi-alert-circle-outline', match: (a: any) => stateClass(a) === 'is-offline' },
 ] as const;
 
-const groups = computed(() =>
+const statusGroups = computed(() =>
   STATE_GROUPS
-    .map((g) => ({ ...g, items: props.accounts.filter(g.match) }))
+    .map((g) => ({ key: g.key, label: g.label, icon: g.icon, kind: 'status' as const, owner: null as any, items: props.accounts.filter(g.match) }))
     .filter((g) => g.items.length > 0),
 );
+
+// Mục 1 (2026-06-11) — nhóm theo người dùng (owner). Header = avatar + tên sale + vai trò.
+const ownerGroups = computed(() => {
+  type OwnerGroup = { key: string; label: string; owner: any; items: any[] };
+  const map = new Map<string, OwnerGroup>();
+  for (const a of props.accounts) {
+    const oid = a.ownerUserId ?? a.owner?.id ?? 'unknown';
+    const g: OwnerGroup = map.get(oid) ?? {
+      key: oid,
+      label: a.owner?.fullName || a.owner?.email || 'Chưa gán chủ',
+      owner: a.owner ?? null,
+      items: [],
+    };
+    g.items.push(a);
+    map.set(oid, g);
+  }
+  return Array.from(map.values())
+    .map((g) => ({ ...g, kind: 'owner' as const, icon: '' }))
+    .sort((x, y) => x.label.localeCompare(y.label));
+});
+
+const groups = computed(() => (props.groupBy === 'owner' ? ownerGroups.value : statusGroups.value));
+
+// Vai trò sale hiển thị ở header nhóm owner.
+function ownerRole(owner: any): string {
+  const dm = owner?.departmentMember;
+  const r = dm?.deptRole;
+  if (r === 'leader') return 'Trưởng phòng';
+  if (r === 'deputy') return 'Phó phòng';
+  return 'Nhân viên';
+}
 function initials(name?: string | null): string {
   if (!name) return '?';
   const parts = name.trim().split(/\s+/);
@@ -171,6 +210,20 @@ function initials(name?: string | null): string {
 .ngc-group-head.gh-online  { color: #15803d; } .gh-online .ngc-group-count  { background: #dcfce7; color: #15803d; }
 .ngc-group-head.gh-pending { color: #b45309; } .gh-pending .ngc-group-count { background: #fef3c7; color: #b45309; }
 .ngc-group-head.gh-offline { color: #b91c1c; } .gh-offline .ngc-group-count { background: #fee2e2; color: #b91c1c; }
+
+/* Mục 1 — header nhóm theo người dùng (atlas v2) */
+.ngc-group-head.gh-owner { color: #334155; }
+.gh-owner .ngc-group-count { background: #eef0ff; color: #5e6ad2; }
+.ngc-owner-av {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: linear-gradient(135deg, #5e6ad2, #7c8af0); color: #fff;
+  font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.ngc-owner-role {
+  margin-left: 6px; font-size: 11.5px; font-weight: 600; color: #94a3b8;
+  background: #f1f5f9; padding: 2px 8px; border-radius: 6px;
+}
 
 .ngc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
 @media (min-width: 1366px) { .ngc-grid { grid-template-columns: repeat(3, 1fr); } }

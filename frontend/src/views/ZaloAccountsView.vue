@@ -71,9 +71,16 @@
 
     <!-- ===== TAB ĐƠN GIẢN: grid card ===== -->
     <template v-if="viewMode === 'simple'">
+      <!-- Mục 1 (2026-06-11): chuyển nhóm theo trạng thái ↔ theo người dùng -->
+      <div class="za-groupby">
+        <span class="za-groupby-lbl">Nhóm theo:</span>
+        <button class="za-groupby-opt" :class="{ active: simpleGroupBy === 'status' }" @click="simpleGroupBy = 'status'">Trạng thái</button>
+        <button class="za-groupby-opt" :class="{ active: simpleGroupBy === 'owner' }" @click="simpleGroupBy = 'owner'">Người dùng</button>
+      </div>
       <NickGridCards
         :accounts="visibleAccounts"
         :reconnecting-ids="reconnectingIds"
+        :group-by="simpleGroupBy"
         @reconnect="onCardReconnect"
         @delete="onConfirmDelete"
         @open-detail="openDrawer"
@@ -299,6 +306,8 @@ function limitFor(nickId: string, category: string): number {
 // Local UI state
 // 2026-06-09: sub-tab Đơn giản (grid card sale) / Nâng cao (bảng admin). Mặc định Đơn giản.
 const viewMode = ref<'simple' | 'advanced'>('simple');
+// Mục 1 (2026-06-11): nhóm grid card theo trạng thái (mặc định) hoặc theo người dùng.
+const simpleGroupBy = ref<'status' | 'owner'>('status');
 // Wizard kết nối 4 bước (thay 2 dialog Add+QR cũ).
 const wizardOpen = ref(false);
 const wizardStep = ref<'phone' | 'confirm' | 'qr' | 'done'>('phone');
@@ -740,6 +749,17 @@ onMounted(async () => {
   color: #5E6AD2; background: #FFFFFF;
   box-shadow: 0 1px 2px rgba(16,24,40,.08);
 }
+
+/* Mục 1 — gạt nhóm theo trạng thái / người dùng (atlas v2) */
+.za-groupby { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px; }
+.za-groupby-lbl { font-size: 12.5px; color: #6b7280; font-weight: 600; margin-right: 2px; }
+.za-groupby-opt {
+  background: #fff; border: 1px solid #e5e7eb; cursor: pointer;
+  padding: 6px 14px; font-family: inherit; font-size: 12.5px; font-weight: 600;
+  color: #6b7280; border-radius: 8px; transition: all .15s;
+}
+.za-groupby-opt:hover { border-color: #c7d2fe; color: #374151; }
+.za-groupby-opt.active { background: #eef0ff; border-color: #5e6ad2; color: #5e6ad2; }
 
 /* Phase 4 redesign 2026-05-22: filter chip Phòng ban + group-by toggle */
 .chip-multi { position: relative; }
