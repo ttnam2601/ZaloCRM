@@ -1047,7 +1047,11 @@ const selectedAccount = computed(() => {
 
 const folderSubLabel = computed(() => {
   if (selectedAccount.value) {
-    return selectedAccount.value.status === 'connected' ? 'Active · Nick Zalo' : 'Offline · Nick Zalo';
+    // 2026-06-11: dùng trạng thái LIVE (accountStatuses từ pool) thay vì status DB stale →
+    // hết cảnh nick đang online mà hiện "Offline · Nick Zalo".
+    const st = (props.accountStatuses || []).find((s) => s.id === selectedAccount.value!.id);
+    const online = st ? st.online : selectedAccount.value.status === 'connected';
+    return online ? 'Active · Nick Zalo' : 'Offline · Nick Zalo';
   }
   if (selectedFolder.value) {
     return `${selectedFolder.value.members.length} nick`;
