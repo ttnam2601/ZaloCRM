@@ -19,6 +19,12 @@ import { applyContactAggregateFromMessage, applyFriendAggregate } from '../../..
 import { resolveBlockContent, type ResolvedMessage } from '../../blocks/resolve-block-content.js';
 import { renderTemplate } from '../../blocks/render-template.js';
 import type { ActionContext, ActionResult } from '../types.js';
+// Phase Media GĐ3 2026-06-11 — Đường B: zca-js KHÔNG nhận URL (readFile string như
+// path), nên media trong Block phải DOWNLOAD về temp → gửi local path. Bug có sẵn:
+// engine cũ gửi {url} string → zca-js readFile('http://...') fail.
+import { downloadMediaToTemp } from '../../../chat/chat-media-helpers.js';
+import { sendNativeVideo } from '../../../../shared/video-processor.js';
+import { zaloPool } from '../../../zalo/zalo-pool.js';
 
 const STUB_MODE = process.env.AUTOMATION_STUB_MODE === 'true';
 
@@ -180,6 +186,8 @@ export async function sendMessageHandler(ctx: ActionContext): Promise<ActionResu
     let sdkResult: Record<string, unknown> = {};
     let persistContent: string;
     let persistContentType = 'text';
+    // Đường B: dọn temp media sau khi gửi (download URL → local path cho zca-js).
+    const tmpCleanups: Array<() => Promise<void>> = [];
 
     try {
       if (m.messageType === 'text') {
@@ -197,29 +205,47 @@ export async function sendMessageHandler(ctx: ActionContext): Promise<ActionResu
         persistContentType = 'text';
       } else if (m.messageType === 'image') {
         const caption = m.payload.caption ? await renderTemplate(m.payload.caption, ctx.contactId, ctx.assignedNickId) : '';
-        const raw = await zaloOps.sendImage(ctx.assignedNickId, threadId, threadType, [{ url: m.payload.url, caption }]);
+        // Đường B: download URL → local path (zca-js readFile path, KHÔNG nhận url).
+        const tmp = await downloadMediaToTemp({ url: m.payload.url }, 'image');
+        tmpCleanups.push(tmp.cleanup);
+        const raw = await zaloOps.sendFile(ctx.assignedNickId, threadId, threadType, [tmp.path], null, caption);
         sdkResult = (raw as Record<string, unknown>) || {};
         persistContent = JSON.stringify({ text: caption, attachments: [{ kind: 'image', url: m.payload.url, caption }] });
         persistContentType = 'image';
       } else if (m.messageType === 'album') {
         const items = m.payload.items.map((it) => ({ url: it.url, caption: it.caption ?? '' }));
-        const raw = await zaloOps.sendImage(ctx.assignedNickId, threadId, threadType, items);
+        // download tất cả ảnh album về temp rồi gửi 1 lần (attachments nhiều path).
+        const paths: string[] = [];
+        for (const it of items) {
+          const tmp = await downloadMediaToTemp({ url: it.url }, 'image');
+          tmpCleanups.push(tmp.cleanup);
+          paths.push(tmp.path);
+        }
+        const raw = await zaloOps.sendFile(ctx.assignedNickId, threadId, threadType, paths, null, items[0]?.caption ?? '');
         sdkResult = (raw as Record<string, unknown>) || {};
         persistContent = JSON.stringify({ text: '', attachments: items.map((it) => ({ kind: 'image', url: it.url, caption: it.caption })) });
         persistContentType = 'image';
       } else if (m.messageType === 'video') {
         const caption = m.payload.caption ? await renderTemplate(m.payload.caption, ctx.contactId, ctx.assignedNickId) : '';
-        const raw = await zaloOps.sendVideo(ctx.assignedNickId, threadId, threadType, {
-          videoUrl: m.payload.url,
-          thumbnailUrl: m.payload.thumbnailUrl ?? m.payload.url,
-          msg: caption,
-        });
+        const tmp = await downloadMediaToTemp({ url: m.payload.url }, 'video');
+        tmpCleanups.push(tmp.cleanup);
+        // video: ưu tiên sendNativeVideo (local path), fallback sendFile.
+        const inst = zaloPool.getInstance(ctx.assignedNickId);
+        let raw: unknown;
+        try {
+          if (!inst?.api) throw new Error('nick not connected');
+          raw = await sendNativeVideo({ api: inst.api as any, videoPath: tmp.path, threadId, threadType: threadType as 0 | 1, message: caption });
+        } catch {
+          raw = await zaloOps.sendFile(ctx.assignedNickId, threadId, threadType, [tmp.path], null, caption);
+        }
         sdkResult = (raw as Record<string, unknown>) || {};
         persistContent = JSON.stringify({ text: caption, attachments: [{ kind: 'video', url: m.payload.url, caption }] });
         persistContentType = 'video';
       } else if (m.messageType === 'file') {
         const caption = m.payload.caption ? await renderTemplate(m.payload.caption, ctx.contactId, ctx.assignedNickId) : '';
-        const raw = await zaloOps.sendFile(ctx.assignedNickId, threadId, threadType, [m.payload.url], null, caption);
+        const tmp = await downloadMediaToTemp({ url: m.payload.url, filename: m.payload.filename }, 'file');
+        tmpCleanups.push(tmp.cleanup);
+        const raw = await zaloOps.sendFile(ctx.assignedNickId, threadId, threadType, [tmp.path], null, caption);
         sdkResult = (raw as Record<string, unknown>) || {};
         persistContent = JSON.stringify({ text: caption, attachments: [{ kind: 'file', url: m.payload.url, filename: m.payload.filename, caption }] });
         persistContentType = 'file';
@@ -236,6 +262,9 @@ export async function sendMessageHandler(ctx: ActionContext): Promise<ActionResu
       if (code === 'RATE_LIMITED') return { outcome: 'failure', errorCode: 'RATE_LIMITED', errorMessage: msg, retryable: true };
       if (code === 'NOT_CONNECTED') return { outcome: 'failure', errorCode: 'NOT_CONNECTED', errorMessage: msg, retryable: true };
       return { outcome: 'failure', errorCode: 'SEND_MESSAGE_FAILED', errorMessage: msg, retryable: false };
+    } finally {
+      // Dọn temp media (Đường B) — chạy dù gửi OK hay lỗi.
+      for (const c of tmpCleanups) await c().catch(() => {});
     }
 
     const sr = sdkResult as { message?: { msgId?: number | string } | null; msgId?: number | string };
