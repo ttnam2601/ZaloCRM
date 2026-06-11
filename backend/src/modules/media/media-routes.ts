@@ -549,4 +549,41 @@ export async function mediaRoutes(app: FastifyInstance) {
       return { items, matchedTags: [...new Set(matched.flatMap((m) => m.hits))] };
     },
   );
+
+  // ── GET /api/v1/media/stats — top ảnh hay dùng + tổng quan (GĐ4 đo hiệu quả) ──
+  app.get(
+    '/api/v1/media/stats',
+    { preHandler: requireGrant('media', 'access') },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user!;
+      const userId = (user as any).userId ?? user.id;
+      const canViewAll = await userHasGrant(userId, 'media', 'view_all');
+      const scope = canViewAll ? {} : { OR: [{ ownerUserId: userId }, { visibility: 'public' }] };
+
+      // Top 10 ảnh dùng nhiều nhất.
+      const top = await prisma.mediaAsset.findMany({
+        where: { orgId: user.orgId, archivedAt: null, usageCount: { gt: 0 }, ...scope },
+        orderBy: { usageCount: 'desc' },
+        take: 10,
+        include: { blobs: { where: { variantType: 'original' }, take: 1 } },
+      });
+
+      // Tổng quan: số asset, tổng lượt dùng, ước lượng tiết kiệm (số blob vs số lần dùng).
+      const totalAssets = await prisma.mediaAsset.count({ where: { orgId: user.orgId, archivedAt: null, ...scope } });
+      const agg = await prisma.mediaAsset.aggregate({
+        where: { orgId: user.orgId, archivedAt: null, ...scope },
+        _sum: { usageCount: true },
+      });
+      const totalUsage = agg._sum.usageCount ?? 0;
+
+      return {
+        totalAssets,
+        totalUsage,
+        topUsed: top.map((a) => ({
+          id: a.id, name: a.name, kind: a.kind, usageCount: a.usageCount,
+          thumbnailUrl: a.thumbnailUrl ?? a.blobs[0]?.publicUrl ?? null,
+        })),
+      };
+    },
+  );
 }

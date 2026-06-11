@@ -43,6 +43,21 @@
 
       <!-- Grid / empty / loading -->
       <div class="m-grid-wrap">
+        <!-- Dải "Hay dùng nhất" (GĐ4 đo hiệu quả) -->
+        <div v-if="!loading && stats && stats.topUsed.length" class="m-stats">
+          <div class="ms-head">
+            <span>📊 Hay dùng nhất</span>
+            <span class="ms-sum">{{ stats.totalAssets }} ảnh · đã gửi {{ stats.totalUsage }} lần</span>
+          </div>
+          <div class="ms-row">
+            <div v-for="t in stats.topUsed.slice(0, 6)" :key="t.id" class="ms-item" :title="t.name">
+              <img v-if="t.thumbnailUrl" :src="t.thumbnailUrl" alt="" />
+              <span v-else class="ms-ph">🖼</span>
+              <span class="ms-badge">{{ t.usageCount }}</span>
+            </div>
+          </div>
+        </div>
+
         <div v-if="loading" class="m-empty"><div class="spin"></div> Đang tải…</div>
 
         <div v-else-if="items.length === 0" class="m-empty">
@@ -85,7 +100,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { listMedia, uploadMedia, listMediaFolders, createMediaFolder, type MediaAssetItem, type MediaFolder } from '@/api/media';
+import { listMedia, uploadMedia, listMediaFolders, createMediaFolder, mediaStats, type MediaAssetItem, type MediaFolder } from '@/api/media';
 import { useToast } from '@/composables/use-toast';
 import MediaDetailPanel from '@/components/media/MediaDetailPanel.vue';
 
@@ -186,7 +201,12 @@ function onAssetArchived(id: string) {
   toast.success('Đã xóa khỏi kho');
 }
 
-onMounted(() => { reload(); loadFolders(); });
+const stats = ref<{ totalAssets: number; totalUsage: number; topUsed: Array<{ id: string; name: string; kind: string; usageCount: number; thumbnailUrl: string | null }> } | null>(null);
+async function loadStats() {
+  try { stats.value = await mediaStats(); } catch { /* phụ */ }
+}
+
+onMounted(() => { reload(); loadFolders(); loadStats(); });
 </script>
 
 <style scoped>
@@ -240,4 +260,13 @@ onMounted(() => { reload(); loadFolders(); });
 .empty-hint { margin-top:10px; background:#f5e9d4; border:1px solid #e6d3ad; color:#6b5520; padding:6px 16px; border-radius:var(--pill); font-size:12px; }
 .spin { width:18px; height:18px; border:2px solid var(--strong); border-top-color:var(--ink); border-radius:50%; animation:spin .7s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
+/* Dải Hay dùng nhất (GĐ4) */
+.m-stats { background:var(--soft); border:1px solid var(--hairline); border-radius:var(--r-md); padding:10px 14px; margin-bottom:16px; }
+.ms-head { display:flex; align-items:center; justify-content:space-between; font-size:12.5px; color:var(--ink); font-weight:500; margin-bottom:8px; }
+.ms-sum { color:var(--muted); font-weight:400; font-size:11.5px; }
+.ms-row { display:flex; gap:10px; }
+.ms-item { position:relative; width:54px; height:54px; border-radius:var(--r-sm); overflow:hidden; border:1px solid var(--hairline); flex-shrink:0; }
+.ms-item img { width:100%; height:100%; object-fit:cover; }
+.ms-item .ms-ph { display:flex; align-items:center; justify-content:center; height:100%; font-size:20px; background:var(--strong); }
+.ms-badge { position:absolute; bottom:2px; right:2px; background:var(--ink); color:#fff; border-radius:9999px; padding:1px 6px; font-size:10px; font-weight:500; }
 </style>

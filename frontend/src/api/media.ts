@@ -104,6 +104,16 @@ export async function listMediaFolders(): Promise<MediaFolder[]> {
   return data.folders as MediaFolder[];
 }
 
+/** Thống kê kho: top ảnh hay dùng + tổng quan (đo hiệu quả). */
+export async function mediaStats(): Promise<{
+  totalAssets: number;
+  totalUsage: number;
+  topUsed: Array<{ id: string; name: string; kind: string; usageCount: number; thumbnailUrl: string | null }>;
+}> {
+  const { data } = await api.get('/media/stats');
+  return data;
+}
+
 /** Gợi ý ảnh theo ngữ cảnh hội thoại (match tag khách). */
 export async function suggestMedia(
   conversationId: string,
