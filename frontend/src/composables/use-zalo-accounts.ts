@@ -38,6 +38,8 @@ export function useZaloAccounts() {
   const scannedName = ref('');
   const qrError = ref('');
   const currentLoginAccountId = ref('');
+  // fix ②: nick quét trúng zaloUid đã tồn tại → BE emit 'zalo:duplicate' + dọn record rác.
+  const duplicateInfo = ref<{ owner: string | null; message: string } | null>(null);
 
   let socket: Socket | null = null;
 
@@ -70,18 +72,24 @@ export function useZaloAccounts() {
     }
   }
 
-  async function addAccount(displayName: string, proxyUrl?: string) {
+  // Trả về { ok, reused?, account?, error?, code?, message? } — fix ① cần phân biệt:
+  //   • 409 account_owned_by_other → báo nick thuộc người khác (chặn)
+  //   • 200 reused (nick của chính mình) → dùng lại record cũ, không tạo mới
+  async function addAccount(displayName: string, proxyUrl?: string, phone?: string) {
     adding.value = true;
     try {
-      await api.post('/zalo-accounts', {
+      const { data } = await api.post('/zalo-accounts', {
         displayName: displayName || undefined,
         proxyUrl: proxyUrl?.trim() || undefined,
+        phone: phone || undefined,
       });
       await fetchAccounts();
-      return true;
+      return { ok: true, reused: !!data?.reused, account: data };
     } catch (err: any) {
-      console.error('Failed to add account:', err);
-      return false;
+      const code = err?.response?.data?.code || err?.response?.data?.error;
+      const message = err?.response?.data?.message || 'Không tạo được nick.';
+      console.error('Failed to add account:', code || err);
+      return { ok: false, code, message };
     } finally {
       adding.value = false;
     }
@@ -183,13 +191,25 @@ export function useZaloAccounts() {
     });
 
     socket.on('zalo:reconnect-failed', (_data: { accountId: string }) => { fetchAccounts(); });
+
+    // fix ②: nick quét trúng zaloUid đã tồn tại (record rác đã bị BE xoá) → báo tử tế,
+    // đóng QR. Khác zalo:error ở chỗ đây là tình huống nghiệp vụ (nick trùng), không phải lỗi kỹ thuật.
+    socket.on('zalo:duplicate', (data: { accountId: string; owner: string | null; message: string }) => {
+      if (data.accountId === currentLoginAccountId.value) {
+        qrImage.value = '';
+        qrScanned.value = false;
+        duplicateInfo.value = { owner: data.owner ?? null, message: data.message };
+        showQRDialog.value = false;
+      }
+      fetchAccounts();
+    });
   }
 
   onUnmounted(() => { socket?.disconnect(); });
 
   return {
     accounts, loading, adding, deleting,
-    showQRDialog, qrImage, qrScanned, scannedName, qrError,
+    showQRDialog, qrImage, qrScanned, scannedName, qrError, duplicateInfo,
     statusColor, statusText,
     fetchAccounts, addAccount, loginAccount, reconnectAccount, deleteAccount,
     updateProxy, cancelQR, setupSocket,

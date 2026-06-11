@@ -44,10 +44,27 @@
             <div v-else class="cnw-avatar cnw-avatar-ph">{{ initials(checkInfo.info?.displayName) }}</div>
             <div class="cnw-confirm-name">{{ checkInfo.info?.displayName || 'Nick Zalo' }}</div>
             <div class="cnw-confirm-phone">{{ phone }}</div>
-            <div v-if="checkInfo.duplicate" class="cnw-warn">
-              ⚠️ Nick này đã được kết nối bởi {{ checkInfo.duplicate.owner || 'người khác' }}.
+
+            <!-- Trùng nick CỦA CHÍNH MÌNH → hướng Kết nối lại, không quét QR mới (fix ①) -->
+            <div v-if="dupOwnedByMe" class="cnw-info-box">
+              <v-icon size="18" color="#0f6ea3">mdi-information-outline</v-icon>
+              <div>
+                Nick này <b>bạn đã kết nối trước đó</b>. Không cần quét QR mới — hãy
+                <b>Kết nối lại</b> để khôi phục phiên cũ.
+              </div>
             </div>
-            <p class="cnw-confirm-q">Đúng nick bạn muốn kết nối chứ?</p>
+            <!-- Trùng nick NGƯỜI KHÁC → CHẶN, hướng chủ tổ chức chuyển giao (fix ① + ③) -->
+            <div v-else-if="dupOtherOwner" class="cnw-block-box">
+              <v-icon size="18" color="#b42318">mdi-account-lock-outline</v-icon>
+              <div>
+                Nick này <b>đang do {{ checkInfo.duplicate.owner || 'nhân viên khác' }} quản lý</b>.
+                Bạn không thể tự kết nối. Vui lòng <b>liên hệ chủ tổ chức</b> để được chuyển giao.
+              </div>
+            </div>
+
+            <p v-if="!dupOtherOwner" class="cnw-confirm-q">
+              {{ dupOwnedByMe ? 'Khôi phục kết nối nick này chứ?' : 'Đúng nick bạn muốn kết nối chứ?' }}
+            </p>
           </div>
           <div v-else class="cnw-confirm cnw-fallback">
             <v-icon size="40" color="#f5a524">mdi-help-circle-outline</v-icon>
@@ -109,7 +126,24 @@
         </button>
 
         <button v-if="step === 'confirm'" class="btn" @click="step = 'phone'">← Sửa SĐT</button>
-        <button v-if="step === 'confirm'" class="btn btn-primary" @click="$emit('confirm-connect')">
+        <!-- Trùng người khác → chỉ cho đóng, KHÔNG cho quét -->
+        <button v-if="step === 'confirm' && dupOtherOwner" class="btn btn-primary" @click="onClose">
+          Đã hiểu
+        </button>
+        <!-- Trùng nick mình → Kết nối lại record cũ (không đẻ record mới) -->
+        <button
+          v-else-if="step === 'confirm' && dupOwnedByMe"
+          class="btn btn-primary"
+          @click="$emit('reconnect-existing', checkInfo.duplicate.accountId)"
+        >
+          Kết nối lại →
+        </button>
+        <!-- Bình thường → quét QR -->
+        <button
+          v-else-if="step === 'confirm'"
+          class="btn btn-primary"
+          @click="$emit('confirm-connect')"
+        >
           Xác nhận, quét QR →
         </button>
 
@@ -138,6 +172,7 @@ const emit = defineEmits<{
   'update:step': [v: 'phone' | 'confirm' | 'qr' | 'done'];
   'checked': [payload: { phone: string; info: any }];   // sang B2
   'confirm-connect': [];                                  // B2 → B3 (parent tạo nick + login QR)
+  'reconnect-existing': [accountId: string];             // trùng nick mình → reconnect record cũ (fix ①)
   'retry-qr': [];
   close: [];
 }>();
@@ -152,6 +187,12 @@ const checking = ref(false);
 const phoneError = ref('');
 const checkInfo = ref<any>(null);
 const fallbackMsg = ref('');
+
+// Phân loại trùng nick theo chủ sở hữu (fix ① — BE check-phone trả duplicate.ownedByMe).
+const dupOwnedByMe = computed(() => checkInfo.value?.duplicate?.ownedByMe === true);
+const dupOtherOwner = computed(
+  () => !!checkInfo.value?.duplicate && checkInfo.value.duplicate.ownedByMe === false,
+);
 
 const stepLabels = ['Nhập SĐT', 'Xác nhận', 'Quét QR', 'Hoàn tất'];
 const stepIndex = computed(() => ({ phone: 0, confirm: 1, qr: 2, done: 3 }[props.step]));
@@ -225,6 +266,9 @@ defineExpose({ phone });
 .cnw-confirm-phone { font-size: 14px; color: #6b7280; font-variant-numeric: tabular-nums; }
 .cnw-confirm-q { margin-top: 8px; font-size: 13.5px; color: #374151; }
 .cnw-warn { font-size: 12.5px; color: #b45309; background: #fef4e6; padding: 6px 10px; border-radius: 8px; }
+/* fix ①: trùng nick mình (info xanh teal Atlas v2) / trùng người khác (block đỏ) */
+.cnw-info-box { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: #0f6ea3; background: #e6f3fb; border: 1px solid #bfe2f4; padding: 9px 11px; border-radius: 9px; line-height: 1.5; text-align: left; }
+.cnw-block-box { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: #b42318; background: #fef3f2; border: 1px solid #fecdca; padding: 9px 11px; border-radius: 9px; line-height: 1.5; text-align: left; }
 .cnw-fallback { text-align: center; }
 .cnw-fallback-msg { font-size: 14px; color: #374151; font-weight: 500; }
 .cnw-fallback-sub { font-size: 12.5px; color: #9ca3af; }

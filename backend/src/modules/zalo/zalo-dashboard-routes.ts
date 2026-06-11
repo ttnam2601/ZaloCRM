@@ -335,12 +335,13 @@ export async function zaloDashboardRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!account) return reply.status(404).send({ error: 'Account not found' });
 
-      // Permission gate: org admin/owner OR current owner.
-      const isAdmin = ['owner', 'admin'].includes(user.role);
-      const isCurrentOwner = account.ownerUserId === userId;
-      if (!isAdmin && !isCurrentOwner) {
+      // Permission gate (Anh siết 2026-06-11): CHỈ chủ tổ chức (role='owner') được chuyển
+      // giao nick. Trước cho admin + chính-chủ-nick → nay siết để chống lạm quyền + đúng
+      // luồng "giao số A→B do chủ tổ chức quyết". Chi tiết: 3 fix quét/trùng nick Zalo.
+      if (user.role !== 'owner') {
         return reply.status(403).send({
-          error: 'Chỉ org admin/owner hoặc chính chủ nick mới được re-assign owner',
+          error: 'Chỉ chủ tổ chức mới được chuyển giao (re-assign) nick',
+          code: 'only_org_owner',
         });
       }
 
@@ -365,6 +366,16 @@ export async function zaloDashboardRoutes(app: FastifyInstance): Promise<void> {
           where: { id },
           data: { ownerUserId: newOwnerUserId },
         });
+        // 2026-06-11: cấp quyền admin cho chủ MỚI trong ACL + gỡ chủ cũ — để chủ mới quản
+        // được nick ngay (nhất quán với POST /zalo-accounts auto-insert access cho owner).
+        await tx.zaloAccountAccess.upsert({
+          where: { zaloAccountId_userId: { zaloAccountId: id, userId: newOwnerUserId } },
+          create: { zaloAccountId: id, userId: newOwnerUserId, permission: 'admin' },
+          update: { permission: 'admin' },
+        });
+        if (oldOwnerId) {
+          await tx.zaloAccountAccess.deleteMany({ where: { zaloAccountId: id, userId: oldOwnerId } });
+        }
         // Phase Privacy v2 2026-05-23: cascade clear internalContactZaloAccountId của owner cũ
         // nếu trỏ tới nick này — sale cũ không còn own → phải re-pick.
         await tx.user.updateMany({

@@ -250,6 +250,10 @@ import { computed } from 'vue';
 import type { EnrichedAccount, UptimeBucket } from '@/composables/use-zalo-accounts-dashboard';
 import UptimeSparkline from './UptimeSparkline.vue';
 import NickAvatarLock from '@/components/privacy/NickAvatarLock.vue';
+import { useAuthStore } from '@/stores/auth';
+
+// Fix ③ (2026-06-11): chuyển nhượng nick CHỈ chủ tổ chức (khớp gate BE role='owner').
+const authStore = useAuthStore();
 
 const props = defineProps<{
   accounts: EnrichedAccount[];
@@ -342,8 +346,8 @@ function onActionClick(account: EnrichedAccount, action: 'reconnect' | 'sync') {
 }
 
 function onOwnerClick(account: EnrichedAccount) {
-  // Chỉ owner-of-nick HOẶC org admin được reassign. BE cũng gate, FE chỉ skip UX noise.
-  if (!account.canManage) return;
+  // Fix ③ 2026-06-11: chỉ CHỦ TỔ CHỨC được chuyển nhượng (BE đã siết role='owner').
+  if (!authStore.isOwner) return;
   emit('reassign-owner', account);
 }
 

@@ -151,7 +151,7 @@
         <section v-if="account.owner" class="d-section">
           <div class="h">
             <span>Chính chủ (Owner)</span>
-            <a v-if="account.canManage" class="link" @click="$emit('reassign-owner', account)">⚙ Chuyển nhượng</a>
+            <a v-if="authStore.isOwner" class="link" @click="$emit('reassign-owner', account)">⚙ Chuyển nhượng</a>
           </div>
           <div class="owner-row-detail">
             <div class="avatar-mini" :style="{ background: avatarColor(account.owner.fullName || account.owner.email, 0) }">
@@ -245,6 +245,10 @@
 <script setup lang="ts">
 import type { EnrichedAccount, UptimeBucket } from '@/composables/use-zalo-accounts-dashboard';
 import UptimeSparkline from './UptimeSparkline.vue';
+import { useAuthStore } from '@/stores/auth';
+
+// Fix ③ (2026-06-11): chuyển nhượng nick CHỈ chủ tổ chức (khớp gate BE đã siết role='owner').
+const authStore = useAuthStore();
 
 const props = defineProps<{
   modelValue: boolean;

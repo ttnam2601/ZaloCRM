@@ -211,6 +211,7 @@
       :connected-nick-name="connectedNickName"
       @checked="onWizardChecked"
       @confirm-connect="onWizardConfirmConnect"
+      @reconnect-existing="onWizardReconnectExisting"
       @retry-qr="onWizardRetryQr"
       @close="closeWizard"
     />
@@ -279,7 +280,7 @@ const {
   // helpers
   relativeTime, statusLabel, uptimeColor,
   // QR/socket from base composable
-  showQRDialog, qrImage, qrScanned, scannedName, qrError,
+  showQRDialog, qrImage, qrScanned, scannedName, qrError, duplicateInfo,
   deleting,
   addAccount, loginAccount, reconnectAccount, deleteAccount,
   cancelQR, setupSocket,
@@ -512,19 +513,47 @@ function onWizardChecked(payload: { phone: string; info: any }) {
   }
 }
 
-// B2→B3: sale xác nhận → tạo nick (không cần tên/proxy) + login QR ngay tại modal.
+// B2→B3: sale xác nhận → tạo nick (gửi kèm SĐT để BE check trùng owner) + login QR.
 async function onWizardConfirmConnect() {
   wizardStep.value = 'qr';
-  const ok = await addAccount('', undefined); // displayName/proxy để trống — lấy tên thật sau QR
-  if (!ok) {
-    wizardStep.value = 'phone';
-    alert('Không tạo được nick. Thử lại.');
+  // displayName/proxy để trống — lấy tên thật sau QR. phone giúp BE chặn trùng (fix ①).
+  const res = await addAccount('', undefined, wizardPhone.value);
+  if (!res.ok) {
+    // 409 trùng nick người khác → quay lại confirm, hiện thông báo chặn (fix ①).
+    if (res.code === 'account_owned_by_other') {
+      wizardStep.value = 'confirm';
+      alert(res.message); // box chặn đã hiện ở B2; alert backup nếu sale bỏ qua check
+    } else {
+      wizardStep.value = 'phone';
+      alert(res.message || 'Không tạo được nick. Thử lại.');
+    }
     return;
   }
-  // Nick vừa tạo là mới nhất → trigger QR login (socket cập qrImage/qrScanned ở composable).
+  // Nếu BE trả record cũ (nick của chính mình) → reconnect record đó, không tạo mới.
+  if (res.reused && res.account?.id) {
+    await onWizardReconnectExisting(res.account.id);
+    return;
+  }
+  // Nick mới → trigger QR login (socket cập qrImage/qrScanned ở composable).
   const list = await api.get('/zalo-accounts');
   const latest = list.data[list.data.length - 1];
   if (latest) await loginAccount(latest.id);
+}
+
+// Fix ①: trùng nick CỦA CHÍNH MÌNH → Kết nối lại record cũ (thử reconnect session;
+// nếu hết session thì rơi về quét QR trên chính record đó, KHÔNG đẻ record mới).
+async function onWizardReconnectExisting(accountId: string) {
+  connectedNickName.value = wizardPhone.value;
+  const r: any = await reconnectAccount(accountId);
+  if (r?.needsQR || r?.success === false) {
+    // Session cũ hết hạn → quét QR lại trên đúng record cũ.
+    wizardStep.value = 'qr';
+    await loginAccount(accountId);
+  } else {
+    // Reconnect thành công bằng session cũ → vào màn hoàn tất.
+    wizardStep.value = 'done';
+    await refreshAll();
+  }
 }
 
 function onWizardRetryQr() {
@@ -541,6 +570,15 @@ watch(showQRDialog, async (open, was) => {
     wizardStep.value = 'done';
     await refreshAll(); // refresh danh sách nick mới nhất
   }
+});
+
+// Fix ②: BE báo nick quét trúng zaloUid đã tồn tại (record rác đã bị dọn) → đóng wizard,
+// hiện thông báo tử tế. Người dùng biết rõ vì sao "quét mãi không xong".
+watch(duplicateInfo, (info) => {
+  if (!info) return;
+  closeWizard();
+  alert(info.message);
+  (duplicateInfo as any).value = null; // reset để lần sau còn trigger
 });
 
 // ── Grid card (tab Đơn giản) handlers ──

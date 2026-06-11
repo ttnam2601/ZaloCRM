@@ -57,14 +57,41 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // POST /api/v1/zalo-accounts — create a new account record
-  app.post<{ Body: { displayName?: string; proxyUrl?: string } }>(
+  app.post<{ Body: { displayName?: string; proxyUrl?: string; phone?: string } }>(
     '/api/v1/zalo-accounts',
     async (request, reply) => {
       const user = request.user!;
       const { displayName, proxyUrl } = request.body ?? {};
+      const userId = (user as any).userId ?? user.id;
 
       if (proxyUrl && !isValidProxyUrl(proxyUrl)) {
         return reply.status(400).send({ error: 'Invalid proxy URL format. Use: http://[user:pass@]host:port' });
+      }
+
+      // Check trùng phía SERVER (Anh chốt 2026-06-11) — phòng FE bỏ qua bước check-phone
+      // hoặc 2 sale quét cùng lúc. Chặn đẻ record qr_pending rác + chặn gán sai chủ.
+      // Chỉ chạy khi có phone hợp lệ (FE gửi kèm sau bước nhập SĐT). Không phone → giữ
+      // hành vi cũ (tạo record, fix ② sẽ dọn rác nếu quét trúng uid trùng).
+      const rawPhone = (request.body?.phone ?? '').trim();
+      const phone = rawPhone ? rawPhone.replace(/[\s.\-()]/g, '') : '';
+      if (phone) {
+        const dup = await prisma.zaloAccount.findFirst({
+          where: { orgId: user.orgId, phone, archivedAt: null },
+          select: { id: true, displayName: true, status: true, ownerUserId: true, owner: { select: { fullName: true } } },
+        });
+        if (dup) {
+          if (dup.ownerUserId === userId) {
+            // Nick của chính mình → KHÔNG đẻ record mới, trả lại record cũ để FE reconnect/login.
+            return reply.status(200).send({ ...dup, reused: true });
+          }
+          // Nick người khác → chặn, hướng chủ tổ chức chuyển giao (fix ③).
+          return reply.status(409).send({
+            error: 'account_owned_by_other',
+            code: 'account_owned_by_other',
+            message: `Nick này đang do ${dup.owner?.fullName ?? 'nhân viên khác'} quản lý. Liên hệ chủ tổ chức để chuyển giao.`,
+            owner: dup.owner?.fullName ?? null,
+          });
+        }
       }
 
       // FIX 2026-05-22 Bug A: tạo nick + auto-insert ZaloAccountAccess cho owner.
@@ -77,6 +104,9 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
             ownerUserId: user.id,
             displayName: displayName ?? null,
             proxyUrl: proxyUrl ?? null,
+            // Lưu phone đã nhập ở bước check (Anh chốt 2026-06-11) — để check trùng
+            // ổn định + đối chiếu sau khi quét QR (fix ②). Null nếu sale bỏ qua check.
+            phone: phone || null,
             status: 'qr_pending',
           },
         });
@@ -207,12 +237,6 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
         return { available: false, reason: 'system_nick_unavailable' };
       }
 
-      // Trùng nick đã kết nối trong org? (cảnh báo, vẫn cho tiếp)
-      const existing = await prisma.zaloAccount.findFirst({
-        where: { orgId: user.orgId, phone: normalized, archivedAt: null },
-        select: { id: true, displayName: true, owner: { select: { fullName: true } } },
-      });
-
       try {
         const { zaloOps } = await import('../../shared/zalo-operations.js');
         const found = await zaloOps.findUser(sysNick.id, normalized);
@@ -220,18 +244,62 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
           return { available: true, found: false, message: 'Số này chưa có Zalo (vẫn có thể quét QR nếu chắc chắn)' };
         }
         const u = found as any;
+        const foundUid: string | null = u.uid ?? null;
+
+        // Bước check trùng (Anh chốt 2026-06-11) — phân loại theo CHỦ SỞ HỮU để FE
+        // hướng đúng hành động, chặn record qr_pending rác:
+        //   • match nick CỦA CHÍNH MÌNH  → reuse: FE gọi reconnect/login trên record cũ
+        //   • match nick NGƯỜI KHÁC      → block: báo rõ chủ, hướng chủ tổ chức chuyển giao
+        //   • chưa có                    → tạo nick mới như cũ
+        // Match ưu tiên zaloUid (định danh thật của nick), fallback phone (số chưa từng quét QR).
+        const userId = (user as any).userId ?? user.id;
+        const existing = await prisma.zaloAccount.findFirst({
+          where: {
+            orgId: user.orgId,
+            archivedAt: null,
+            OR: [
+              ...(foundUid ? [{ zaloUid: foundUid }] : []),
+              { phone: normalized },
+            ],
+          },
+          select: {
+            id: true,
+            displayName: true,
+            status: true,
+            ownerUserId: true,
+            owner: { select: { id: true, fullName: true } },
+          },
+          // zaloUid match đáng tin hơn phone → ưu tiên record đã có uid.
+          orderBy: { zaloUid: { sort: 'desc', nulls: 'last' } },
+        });
+
+        let duplicate: {
+          accountId: string;
+          displayName: string | null;
+          status: string;
+          ownedByMe: boolean;
+          owner: string | null;
+        } | null = null;
+        if (existing) {
+          duplicate = {
+            accountId: existing.id,
+            displayName: existing.displayName,
+            status: existing.status,
+            ownedByMe: existing.ownerUserId === userId,
+            owner: existing.owner?.fullName ?? null,
+          };
+        }
+
         return {
           available: true,
           found: true,
           info: {
-            zaloUid: u.uid ?? null,
+            zaloUid: foundUid,
             displayName: u.display_name ?? u.zalo_name ?? u.username ?? null,
             avatarUrl: u.avatar ?? null,
             phone: normalized,
           },
-          duplicate: existing
-            ? { displayName: existing.displayName, owner: existing.owner?.fullName ?? null }
-            : null,
+          duplicate,
         };
       } catch (err) {
         request.log?.warn?.({ err }, '[check-phone] findUser failed');

@@ -181,9 +181,33 @@ class ZaloAccountPool {
         }
       } catch {}
 
+      // Fix ② (Anh chốt 2026-06-11): ghi zaloUid TRƯỚC khi attach listener / emit connected.
+      // Nếu nick này (ownId) đã thuộc record khác → updateAccountDB ném DUPLICATE_ZALO_UID;
+      // ta báo socket rõ ràng + dọn record qr_pending rác, KHÔNG để treo "đang quét" im lặng.
+      try {
+        await this.updateAccountDB(accountId, 'connected', ownId, 'qr_scan');
+      } catch (err) {
+        if ((err as { code?: string })?.code === 'DUPLICATE_ZALO_UID') {
+          const dup = await this.findOwnerOfZaloUid(ownId, accountId);
+          const ownerName = dup?.ownerName ?? null;
+          this.teardownExisting(accountId); // ngắt WS vừa mở của record rác
+          this.io?.to(`account:${accountId}`).emit('zalo:duplicate', {
+            accountId,
+            zaloUid: ownId,
+            existingAccountId: dup?.accountId ?? null,
+            owner: ownerName,
+            message: ownerName
+              ? `Nick này đang do ${ownerName} quản lý. Liên hệ chủ tổ chức để chuyển giao.`
+              : 'Nick này đã tồn tại trong hệ thống. Dùng "Kết nối lại" trên nick cũ.',
+          });
+          await this.cleanupGhostAccount(accountId);
+          return; // dừng luồng login — không attach listener cho record đã xoá
+        }
+        throw err;
+      }
+
       this.attachListener(accountId, api);
       this.io?.emit('zalo:connected', { accountId, zaloUid: ownId });
-      await this.updateAccountDB(accountId, 'connected', ownId, 'qr_scan');
       // Emit webhook (orgId lookup is async, fire-and-forget)
       prisma.zaloAccount.findUnique({ where: { id: accountId }, select: { orgId: true } })
         .then((rec) => rec && emitWebhook(rec.orgId, 'zalo.connected', { accountId }))
@@ -429,7 +453,58 @@ class ZaloAccountPool {
           );
       }
     } catch (err) {
+      // Fix ② (Anh chốt 2026-06-11): P2002 trên zalo_uid = nick này (zaloUid) ĐÃ tồn tại
+      // ở record khác → user quét trùng nick đã có. KHÔNG nuốt im như trước; ném lỗi có
+      // cấu trúc để caller (loginQR) báo socket tử tế + dọn record qr_pending rác.
+      if ((err as { code?: string })?.code === 'P2002') {
+        const target = (err as { meta?: { target?: string[] } })?.meta?.target ?? [];
+        const onZaloUid = Array.isArray(target) ? target.some((t) => String(t).includes('zalo_uid')) : true;
+        if (onZaloUid) {
+          logger.warn(`[zalo:${accountId}] updateAccountDB: zaloUid ${zaloUid} đã tồn tại ở nick khác (P2002)`);
+          const dupErr = new Error('zalo_uid_already_exists') as Error & { code: string; zaloUid: string | null };
+          dupErr.code = 'DUPLICATE_ZALO_UID';
+          dupErr.zaloUid = zaloUid;
+          throw dupErr;
+        }
+      }
       logger.error(`[zalo:${accountId}] updateAccountDB error:`, err);
+    }
+  }
+
+  /**
+   * Tra nick đang SỞ HỮU một zaloUid (để báo "nick đã thuộc ai" khi quét trùng). Fix ②.
+   */
+  private async findOwnerOfZaloUid(
+    zaloUid: string,
+    excludeAccountId: string,
+  ): Promise<{ accountId: string; ownerName: string | null; ownedByMe: false } | null> {
+    const rec = await prisma.zaloAccount.findFirst({
+      where: { zaloUid, archivedAt: null, NOT: { id: excludeAccountId } },
+      select: { id: true, owner: { select: { fullName: true } } },
+    });
+    return rec ? { accountId: rec.id, ownerName: rec.owner?.fullName ?? null, ownedByMe: false } : null;
+  }
+
+  /**
+   * Dọn record qr_pending RÁC vừa tạo khi quét trúng nick trùng (Fix ②). An toàn:
+   * chỉ xoá nếu record vẫn qr_pending VÀ chưa có zaloUid (chưa từng connect thành công)
+   * VÀ không có dữ liệu thật gắn vào (conversation/message). Tránh xoá nhầm nick thật.
+   */
+  private async cleanupGhostAccount(accountId: string): Promise<void> {
+    try {
+      const acc = await prisma.zaloAccount.findUnique({
+        where: { id: accountId },
+        select: { status: true, zaloUid: true, _count: { select: { conversations: true } } },
+      });
+      if (!acc || acc.zaloUid || acc.status === 'connected' || acc._count.conversations > 0) {
+        return; // không phải ghost → giữ lại
+      }
+      // Xoá access trước (FK) rồi xoá account. Hard delete OK vì đây là record rỗng vừa tạo.
+      await prisma.zaloAccountAccess.deleteMany({ where: { zaloAccountId: accountId } });
+      await prisma.zaloAccount.delete({ where: { id: accountId } });
+      logger.info(`[zalo:${accountId}] dọn record qr_pending rác sau khi quét trùng nick`);
+    } catch (err) {
+      logger.warn(`[zalo:${accountId}] cleanupGhostAccount lỗi (bỏ qua):`, err);
     }
   }
 
