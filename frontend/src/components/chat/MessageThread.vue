@@ -507,6 +507,9 @@
           <button class="icon-tool" title="Gửi file" @click="onPickFile">
             <PaperclipIcon :size="18" :stroke-width="1.5" />
           </button>
+          <button class="icon-tool" title="Chèn ảnh từ Kho" @click="showMediaPicker = !showMediaPicker">
+            <ImagesIcon :size="18" :stroke-width="1.5" />
+          </button>
           <span class="toolbar-divider"></span>
 
           <!-- Group 2: Contact / format -->
@@ -667,6 +670,14 @@
           @created="onAppointmentCreated"
         />
 
+        <!-- Picker chèn ảnh từ Kho phương tiện (GĐ2) -->
+        <MediaPickerPopover
+          v-if="showMediaPicker && conversation?.id"
+          :conversation-id="conversation.id"
+          @close="showMediaPicker = false"
+          @sent="showMediaPicker = false"
+        />
+
         <!-- Hidden file inputs cho upload ảnh / file -->
         <input
           ref="imageInputRef"
@@ -806,6 +817,7 @@ import type { Conversation, Message } from '@/composables/use-chat';
 import { formatInOrgTz, weekdayInOrgTz, getOrgParts } from '@/composables/use-org-timezone';
 import { api } from '@/api/index';
 import { saveFromChat } from '@/api/media';
+import MediaPickerPopover from '@/components/media/MediaPickerPopover.vue';
 import AISuggestBar from '@/components/chat/AISuggestBar.vue';
 // Mission Fix 2 (2026-05-30) — header picker GHI `Contact.statusId` (FK Status table)
 // để Wave 3 evaluateStatusGate đọc đúng cột. Trước đây CareStatusBadge ghi enum legacy
@@ -860,6 +872,7 @@ function onPrivacyUnlocked() {
 
 // Lucide icons (anh chốt 2026-05-22 — bộ icon đồng bộ thay MDI)
 import {
+  Images as ImagesIcon,
   Image as ImageIcon,
   Paperclip as PaperclipIcon,
   Contact as ContactIcon,
@@ -2042,6 +2055,7 @@ async function onSendSticker(sticker: { id: number; catId: number; type: number 
 // ── File / image upload ─────────────────────────────────────────────────────
 const imageInputRef = ref<HTMLInputElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
+const showMediaPicker = ref(false); // picker chèn ảnh từ Kho (GĐ2)
 const dragDepth = ref(0);
 const isDraggingFiles = ref(false);
 
