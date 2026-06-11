@@ -41,6 +41,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, resource: 'contact' },
   },
   {
+    path: '/media',
+    name: 'Media',
+    component: () => import('@/views/MediaView.vue'),
+    meta: { requiresAuth: true, resource: 'media' },
+  },
+  {
     // Legacy redirect — now nested under /settings
     path: '/zalo-accounts',
     redirect: '/settings/channels/zalo',

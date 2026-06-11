@@ -226,6 +226,7 @@ const primaryTabs: NavTab[] = [
   { path: '/friends',                label: 'Bạn bè',      icon: 'mdi-account-multiple-outline', resource: 'friend' },
   { path: '/contacts',               label: 'Khách hàng',  icon: 'mdi-account-outline', resource: 'contact' },
   { path: '/appointments',           label: 'Lịch hẹn',    icon: 'mdi-calendar-outline' },
+  { path: '/media',                  label: 'Kho ảnh',     icon: 'mdi-image-multiple-outline', resource: 'media' },
 ];
 
 // RBAC 2026-06-09 — tab Marketing là module gồm nhiều chức năng. Hiện nếu user có
