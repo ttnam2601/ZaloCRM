@@ -415,12 +415,11 @@ onUnmounted(() => {
 }
 .org-form-col { flex: 0 0 560px; max-width: 560px; min-width: 0; }
 /* Preview giữ ĐÚNG 880px (không co). Đủ chỗ cạnh form (màn ≥~1480px) thì nằm phải,
-   không đủ thì wrap xuống dòng riêng full width. Màn hẹp < 880 → cuộn ngang. */
+   không đủ thì wrap xuống dòng riêng full width. Không dùng overflow-x:auto để
+   khỏi hiện thanh cuộn xấu trong khung. */
 .org-preview-col {
   flex: 0 0 880px;
-  max-width: 100%;
   padding-top: 4px;
-  overflow-x: auto;
 }
 .org-preview-col :deep(.login-card) { flex-shrink: 0; }
 
