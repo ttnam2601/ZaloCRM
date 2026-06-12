@@ -340,6 +340,7 @@ async function processJob(
     nickId,
     triggerCfg,
     nickCap: nick.dailyMessageCap,
+    quotaKind: 'message', // FIX 2026-06-12 — đếm hạn mức GỬI TIN, tách khỏi quota kết bạn.
   });
 
   if (!guard.passed) {
@@ -439,7 +440,7 @@ async function processJob(
     (actionResult.data?.zaloMsgId as string | undefined) ??
     `unknown-${taskPseudoId}`;
 
-  await consumeQuotaAfterSend(nickId, nick.dailyMessageCap);
+  await consumeQuotaAfterSend(nickId, nick.dailyMessageCap, 'message'); // FIX 2026-06-12 — đếm vào quota gửi tin.
   await recordNickSend(nickId);
 
   // ── Sprint v3 (2026-06-03) — Clear hold khi nick hồi + gửi step xong ──
@@ -589,7 +590,12 @@ export function startSequenceStepWorker(): Worker {
     QUEUE_NAMES.SEQUENCE_STEP,
     // Phase 1a 2026-06-08 — bọc withTenant(job.data.orgId) để mọi query của job
     // mang tenant context (tenant-guard + RLS khi enforce).
-    (job: Job<SequenceStepJobData, SequenceStepResult>) => withTenant(job.data.orgId, () => processJob(job)),
+    // FIX 2026-06-12 — PHẢI truyền `token` của BullMQ xuống processJob. Thiếu nó,
+    // mọi nhánh hoãn (job.moveToDelayed cần token: nick offline :253, contact pause
+    // :319, ngoài giờ/quota :346) bị skip → rơi xuống `return skipped` → KHÔNG xếp
+    // step kế (enqueueNextStep :507) → luồng bám đuổi gãy giữa chừng, đứng im vĩnh viễn.
+    (job: Job<SequenceStepJobData, SequenceStepResult>, token?: string) =>
+      withTenant(job.data.orgId, () => processJob(job, token)),
     {
       connection: getBullMQRedis(),
       // Per-nick concurrency = 1 (BullMQ global concurrency cao hơn cho cross-nick parallel).

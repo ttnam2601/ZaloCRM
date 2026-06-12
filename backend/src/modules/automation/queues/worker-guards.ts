@@ -22,7 +22,7 @@
 import { prisma } from '../../../shared/database/prisma-client.js';
 import { logger } from '../../../shared/utils/logger.js';
 import { getBullMQRedis } from './redis-connection.js';
-import { incrQuotaAtomic, peekQuota } from './quota-lua.js';
+import { incrQuotaAtomic, peekQuota, type QuotaKind } from './quota-lua.js';
 
 export interface TriggerGuardConfig {
   triggerId: string;
@@ -122,9 +122,13 @@ export async function recordNickSend(nickId: string): Promise<void> {
 export async function checkDailyQuotaPeek(
   nickId: string,
   cap: number,
+  // FIX 2026-06-12 — tách bộ đếm: gửi tin ('message') vs kết bạn ('friend').
+  // Trước đây hard-code 'friend' cho cả 2 → tin nhắn (300/ngày) và kết bạn (30/ngày)
+  // chung 1 ô đếm → bóp nghẹt nhầm hạn mức của nhau.
+  kind: QuotaKind = 'friend',
 ): Promise<GuardResult> {
   if (cap <= 0) return { passed: true };
-  const { capped, remaining } = await peekQuota(nickId, 'friend', cap);
+  const { capped, remaining } = await peekQuota(nickId, kind, cap);
   if (capped) {
     // Defer đến 00:00 VN mai
     const now = new Date();
@@ -146,8 +150,10 @@ export async function checkDailyQuotaPeek(
 export async function consumeQuotaAfterSend(
   nickId: string,
   cap: number,
+  // FIX 2026-06-12 — đếm đúng kind tương ứng (gửi tin 'message' / kết bạn 'friend').
+  kind: QuotaKind = 'friend',
 ): Promise<boolean> {
-  return incrQuotaAtomic(nickId, 'friend', cap);
+  return incrQuotaAtomic(nickId, kind, cap);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -277,13 +283,16 @@ export async function runAllGuards(input: {
   contactId: string;
   nickId: string;
   triggerCfg: TriggerGuardConfig;
-  nickCap: number; // dailyFriendAddCap từ ZaloAccount
+  nickCap: number; // dailyFriendAddCap (kết bạn) HOẶC dailyMessageCap (gửi tin) tuỳ worker
+  // FIX 2026-06-12 — worker truyền kind để đếm đúng ô quota. Mặc định 'friend'
+  // (giữ nguyên hành vi friend-invite cũ); sequence-step-worker truyền 'message'.
+  quotaKind?: QuotaKind;
 }): Promise<GuardResult> {
-  const { contactId, nickId, triggerCfg, nickCap } = input;
+  const { contactId, nickId, triggerCfg, nickCap, quotaKind = 'friend' } = input;
   const guards: Array<{ name: string; run: () => Promise<GuardResult> | GuardResult }> = [
     { name: 'hour_window', run: () => checkHourWindow(triggerCfg) },
     { name: 'nick_gap', run: () => checkNickGap(nickId, triggerCfg.minFriendReqGapMs) },
-    { name: 'quota_peek', run: () => checkDailyQuotaPeek(nickId, nickCap) },
+    { name: 'quota_peek', run: () => checkDailyQuotaPeek(nickId, nickCap, quotaKind) },
     { name: 'recency', run: () => checkCrossNickRecency(contactId, triggerCfg.recencySkipDays) },
     {
       name: 'multi_nick',

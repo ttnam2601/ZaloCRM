@@ -152,6 +152,7 @@ async function processJob(
     nickId,
     triggerCfg,
     nickCap: nick.dailyFriendAddCap,
+    quotaKind: 'friend', // FIX 2026-06-12 — tường minh: đếm hạn mức KẾT BẠN.
   });
 
   if (!guard.passed) {
@@ -335,7 +336,7 @@ async function processJob(
   }
 
   // ── STEP 6: Success — INCR quota + mark entry sent + outbox ──
-  await consumeQuotaAfterSend(nickId, nick.dailyFriendAddCap);
+  await consumeQuotaAfterSend(nickId, nick.dailyFriendAddCap, 'friend'); // FIX 2026-06-12 — tường minh quota kết bạn.
   await recordNickSend(nickId);
 
   const zaloLeadgenId = (actionResult.data?.uid as string | undefined) ?? '';
@@ -376,7 +377,10 @@ export function startFriendInviteWorker(opts?: Partial<WorkerOptions>): Worker {
   workerInstance = new Worker<FriendInviteJobData, FriendInviteResult>(
     QUEUE_NAMES.FRIEND_INVITE,
     // Phase 1a 2026-06-08 — tenant context cho mọi query của job.
-    (job: Job<FriendInviteJobData, FriendInviteResult>) => withTenant(job.data.orgId, () => processJob(job)),
+    // FIX 2026-06-12 — truyền `token` BullMQ xuống processJob (đồng bộ với
+    // sequence-step-worker): các nhánh moveToDelayed cần token mới hoãn được job.
+    (job: Job<FriendInviteJobData, FriendInviteResult>, token?: string) =>
+      withTenant(job.data.orgId, () => processJob(job, token)),
     {
       connection: getBullMQRedis(),
       // Concurrency 1 per nick — sequential. Future: multi-worker per nick = Zalo ban risk.
