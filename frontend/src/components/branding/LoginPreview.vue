@@ -2,50 +2,46 @@
   <!-- Preview trang /login trong Cài đặt › Hồ sơ tổ chức. Dựng lại y hệt login
        (banner dùng chung LoginBrandBanner + form tĩnh) rồi scale gọn để vừa khung.
        Không tương tác — chỉ để xem trước branding sẽ hiển thị thế nào. -->
-  <div class="preview-viewport">
-    <div class="preview-stage">
-      <div class="login-card">
-        <LoginBrandBanner
-          :logo-url="logoUrl"
-          :name="name"
-          :slogan="slogan"
-          :copyright="copyright"
+  <div class="login-card">
+    <LoginBrandBanner
+      :logo-url="logoUrl"
+      :name="name"
+      :slogan="slogan"
+      :copyright="copyright"
+    />
+    <section class="login-form-wrap">
+      <div class="form-inner">
+        <h2 class="form-title">Đăng nhập</h2>
+        <p class="form-sub">Chào mừng Anh/Chị quay lại hệ thống</p>
+        <v-text-field
+          :model-value="''"
+          label="Email hoặc số điện thoại"
+          variant="outlined"
+          prepend-inner-icon="mdi-account-outline"
+          :placeholder="emailPlaceholder"
+          persistent-placeholder
+          readonly
+          hide-details
+          class="mb-4"
         />
-        <section class="login-form-wrap">
-          <div class="form-inner">
-            <h2 class="form-title">Đăng nhập</h2>
-            <p class="form-sub">Chào mừng Anh/Chị quay lại hệ thống</p>
-            <v-text-field
-              :model-value="''"
-              label="Email hoặc số điện thoại"
-              variant="outlined"
-              prepend-inner-icon="mdi-account-outline"
-              :placeholder="emailPlaceholder"
-              persistent-placeholder
-              readonly
-              hide-details
-              class="mb-4"
-            />
-            <v-text-field
-              :model-value="''"
-              label="Mật khẩu"
-              type="password"
-              variant="outlined"
-              prepend-inner-icon="mdi-lock-outline"
-              placeholder="Nhập mật khẩu"
-              persistent-placeholder
-              readonly
-              hide-details
-              class="mb-5"
-            />
-            <v-btn color="primary" block size="large" rounded="lg">
-              <v-icon start>mdi-login</v-icon>
-              Đăng nhập
-            </v-btn>
-          </div>
-        </section>
+        <v-text-field
+          :model-value="''"
+          label="Mật khẩu"
+          type="password"
+          variant="outlined"
+          prepend-inner-icon="mdi-lock-outline"
+          placeholder="Nhập mật khẩu"
+          persistent-placeholder
+          readonly
+          hide-details
+          class="mb-5"
+        />
+        <v-btn color="primary" block size="large" rounded="lg">
+          <v-icon start>mdi-login</v-icon>
+          Đăng nhập
+        </v-btn>
       </div>
-    </div>
+    </section>
   </div>
 </template>
 
@@ -62,26 +58,12 @@ defineProps<{
 </script>
 
 <style scoped>
-/* Viewport giữ tỉ lệ 880×460 của login card; stage scale 0.6 cho vừa cột phải. */
-.preview-viewport {
-  width: 528px;          /* 880 × 0.6 */
-  max-width: 100%;
-  height: 276px;         /* 460 × 0.6 */
-  overflow: hidden;
-  border-radius: 14px;
-}
-.preview-stage {
-  width: 880px;
-  height: 460px;
-  transform: scale(0.6);
-  transform-origin: top left;
-  pointer-events: none;  /* preview tĩnh, không click được */
-}
-
+/* Preview để KÍCH THƯỚC THẬT 880×460 (anh chốt 2026-06-12), không scale. */
 .login-card {
   display: flex;
   width: 880px;
   height: 460px;
+  pointer-events: none;  /* preview tĩnh, không click được */
   background: #fff;
   border-radius: 20px;
   overflow: hidden;

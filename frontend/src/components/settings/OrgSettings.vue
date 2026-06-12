@@ -140,17 +140,32 @@
         <v-card-title class="d-flex align-center">
           Chọn logo từ kho ảnh
           <v-spacer />
+          <v-btn
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-upload"
+            :loading="uploading"
+            class="mr-2"
+            @click="triggerUpload"
+          >
+            Tải ảnh lên
+          </v-btn>
           <v-btn icon="mdi-close" variant="text" @click="mediaDialog = false" />
+          <!-- input file ẩn — chọn ảnh từ máy để upload vào kho -->
+          <input ref="fileInput" type="file" accept="image/*" hidden @change="onFileChange" />
         </v-card-title>
         <v-card-text>
-          <div v-if="mediaLoading" class="text-center py-8">
-            <v-progress-circular indeterminate />
-          </div>
-          <v-alert v-else-if="mediaError" type="warning" variant="tonal" density="compact">
+          <v-alert v-if="mediaError" type="warning" variant="tonal" density="compact" class="mb-3">
             {{ mediaError }}
           </v-alert>
+          <div v-if="mediaLoading || uploading" class="text-center py-8">
+            <v-progress-circular indeterminate />
+            <div class="text-medium-emphasis text-body-2 mt-2">
+              {{ uploading ? 'Đang tải ảnh lên…' : 'Đang tải kho ảnh…' }}
+            </div>
+          </div>
           <div v-else-if="mediaItems.length === 0" class="text-medium-emphasis text-center py-8">
-            Kho ảnh trống. Hãy tải ảnh lên ở mục Kho phương tiện trước.
+            Kho ảnh trống. Bấm <strong>Tải ảnh lên</strong> để thêm logo mới.
           </div>
           <div v-else class="media-grid">
             <v-card
@@ -216,14 +231,20 @@ const mediaDialog = ref(false);
 const mediaLoading = ref(false);
 const mediaError = ref('');
 const mediaItems = ref<MediaItem[]>([]);
+const fileInput = ref<HTMLInputElement | null>(null);
+const uploading = ref(false);
+
+async function loadMedia() {
+  const res = await api.get('/media', { params: { kind: 'image', limit: 60 } });
+  mediaItems.value = (res.data.items ?? []).filter((m: MediaItem) => m.url || m.thumbnailUrl);
+}
 
 async function openMediaPicker() {
   mediaDialog.value = true;
   mediaLoading.value = true;
   mediaError.value = '';
   try {
-    const res = await api.get('/media', { params: { kind: 'image', limit: 60 } });
-    mediaItems.value = (res.data.items ?? []).filter((m: MediaItem) => m.url || m.thumbnailUrl);
+    await loadMedia();
   } catch (err: any) {
     mediaError.value =
       err.response?.status === 403
@@ -231,6 +252,42 @@ async function openMediaPicker() {
         : 'Không tải được kho ảnh.';
   } finally {
     mediaLoading.value = false;
+  }
+}
+
+function triggerUpload() {
+  fileInput.value?.click();
+}
+
+// Upload ảnh từ máy vào kho (visibility public → dùng làm logo trang login công khai),
+// rồi lấy publicUrl. Upload chỉ trả {id,name} (không có url) → re-list tìm theo id.
+async function onFileChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = ''; // reset để chọn lại cùng tệp vẫn kích hoạt change
+  if (!file) return;
+  uploading.value = true;
+  mediaError.value = '';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('visibility', 'public');
+    const up = await api.post('/media/upload', fd);
+    const id = up.data?.assets?.[0]?.id;
+    await loadMedia();
+    const just = mediaItems.value.find((m) => m.id === id);
+    if (just?.url) {
+      logoUrl.value = just.url;
+      logoBroken.value = false;
+      mediaDialog.value = false;
+    }
+  } catch (err: any) {
+    mediaError.value =
+      err.response?.status === 403
+        ? 'Bạn không có quyền tải ảnh lên kho (cần quyền media:create).'
+        : err.response?.data?.error || 'Tải ảnh lên thất bại.';
+  } finally {
+    uploading.value = false;
   }
 }
 
@@ -357,7 +414,15 @@ onUnmounted(() => {
   align-items: flex-start;
 }
 .org-form-col { flex: 0 0 560px; max-width: 560px; min-width: 0; }
-.org-preview-col { flex: 1 1 528px; min-width: 0; padding-top: 4px; }
+/* Preview giữ ĐÚNG 880px (không co). Đủ chỗ cạnh form (màn ≥~1480px) thì nằm phải,
+   không đủ thì wrap xuống dòng riêng full width. Màn hẹp < 880 → cuộn ngang. */
+.org-preview-col {
+  flex: 0 0 880px;
+  max-width: 100%;
+  padding-top: 4px;
+  overflow-x: auto;
+}
+.org-preview-col :deep(.login-card) { flex-shrink: 0; }
 
 .media-grid {
   display: grid;
