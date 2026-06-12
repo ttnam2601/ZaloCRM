@@ -90,15 +90,16 @@ describe('GET /api/v1/public/org-branding (public)', () => {
     expect(body.emailDomain).toBeNull();
   });
 
-  it('trường null → defaults chuẩn hoá', async () => {
+  it('org tồn tại + trường null → trả null (KHÔNG leak default)', async () => {
     prismaMock.organization.findFirst.mockResolvedValue({
       name: 'Acme', logoUrl: null, slogan: null, copyright: null, emailDomain: null,
     });
     const res = await buildApp().inject({ method: 'GET', url: PUB });
     const body = JSON.parse(res.body);
-    expect(body.name).toBe('Acme');                 // giữ name thật
-    expect(body.slogan).toBe('Bền vững · Trường tồn'); // null → default
-    expect(body.copyright).toContain('HS Holding');
+    expect(body.name).toBe('Acme');     // giữ name thật (cột NOT NULL)
+    expect(body.slogan).toBeNull();     // null → null, login tự ẩn (fix slogan leak)
+    expect(body.copyright).toBeNull();
+    expect(body.logoUrl).toBeNull();
   });
 
   it('lỗi DB → vẫn trả defaults 200', async () => {

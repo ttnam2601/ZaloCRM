@@ -1,5 +1,6 @@
 <template>
-  <div style="max-width: 560px;">
+  <div class="org-settings-layout">
+    <div class="org-form-col">
     <div class="text-h6 mb-4">Thông tin tổ chức</div>
 
     <v-card variant="outlined" class="pa-4">
@@ -96,7 +97,7 @@
         :disabled="!authStore.isOwner || saving"
         variant="outlined"
         class="mb-3"
-        hint="Dùng gợi ý ô đăng nhập: user@<tên miền>. Để trống nếu không cần."
+        hint="Dùng gợi ý ô đăng nhập: user@<tên miền> hoặc 0901 234 567. Để trống nếu không cần."
         persistent-hint
       />
 
@@ -116,6 +117,22 @@
         Chỉ chủ sở hữu mới có thể chỉnh sửa thông tin tổ chức.
       </p>
     </v-card>
+    </div>
+
+    <!-- Khung "Xem trước trang đăng nhập" — đổi realtime theo form bên trái -->
+    <div class="org-preview-col">
+      <div class="text-subtitle-2 mb-2">Xem trước trang đăng nhập</div>
+      <LoginPreview
+        :logo-url="logoUrl"
+        :name="orgName || 'HS Holding'"
+        :slogan="slogan"
+        :copyright="copyright"
+        :email-placeholder="previewEmailPlaceholder"
+      />
+      <p class="text-medium-emphasis text-caption mt-2">
+        Giao diện mô phỏng trang đăng nhập với cấu hình hiện tại.
+      </p>
+    </div>
 
     <!-- Media picker — chọn logo từ kho ảnh (GET /api/v1/media?kind=image) -->
     <v-dialog v-model="mediaDialog" max-width="720">
@@ -158,6 +175,10 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { api } from '@/api/index';
 import { useAuthStore } from '@/stores/auth';
 import { formatInOrgTz, refreshOrgTimezone } from '@/composables/use-org-timezone';
+import LoginPreview from '@/components/branding/LoginPreview.vue';
+
+// SĐT mẫu cố định trong gợi ý ô đăng nhập (khớp với LoginView).
+const SAMPLE_PHONE = '0901 234 567';
 
 // Offset cố định, không tự DST. Việt Nam đặt đầu danh sách + chọn mặc định.
 const TIMEZONE_OPTIONS = [
@@ -245,6 +266,12 @@ const canSave = computed(() => {
 // Đổi đường dẫn logo → reset cờ "ảnh hỏng" để preview thử lại.
 watch(logoUrl, () => { logoBroken.value = false; });
 
+// Placeholder email cho preview — khớp logic LoginView (#3: kèm SĐT mẫu).
+const previewEmailPlaceholder = computed(() => {
+  const d = emailDomain.value.trim();
+  return d ? `user@${d} hoặc ${SAMPLE_PHONE}` : `admin@hs.com hoặc ${SAMPLE_PHONE}`;
+});
+
 async function fetchOrg() {
   try {
     const res = await api.get('/organization');
@@ -322,6 +349,16 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* Bố cục 2 cột: form bên trái, preview login bên phải (khung đỏ). Hẹp → xuống dòng. */
+.org-settings-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  align-items: flex-start;
+}
+.org-form-col { flex: 0 0 560px; max-width: 560px; min-width: 0; }
+.org-preview-col { flex: 1 1 528px; min-width: 0; padding-top: 4px; }
+
 .media-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));

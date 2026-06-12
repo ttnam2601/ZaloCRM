@@ -42,13 +42,18 @@ export async function orgBrandingRoutes(app: FastifyInstance): Promise<void> {
         // Allowlist tường minh — chỉ 5 trường branding, không select gì khác.
         select: { name: true, logoUrl: true, slogan: true, copyright: true, emailDomain: true },
       });
+      // Chưa có org (cài lần đầu) → defaults đẹp để login không trống trơn.
       if (!org) return DEFAULTS;
+      // Org đã tồn tại → trả ĐÚNG giá trị admin cấu hình. KHÔNG nhồi default cho
+      // từng trường: nếu admin để slogan/copyright trống thì login ẩn luôn, tránh
+      // "leak" chữ mặc định (vd vẫn hiện "Bền vững · Trường tồn" dù đã xoá).
+      // Riêng name luôn có (cột NOT NULL) → fallback chỉ phòng chuỗi rỗng.
       return {
-        logoUrl: org.logoUrl ?? DEFAULTS.logoUrl,
+        logoUrl: org.logoUrl ?? null,
         name: org.name?.trim() || DEFAULTS.name,
-        slogan: org.slogan ?? DEFAULTS.slogan,
-        copyright: org.copyright ?? DEFAULTS.copyright,
-        emailDomain: org.emailDomain ?? DEFAULTS.emailDomain,
+        slogan: org.slogan ?? null,
+        copyright: org.copyright ?? null,
+        emailDomain: org.emailDomain ?? null,
       };
     } catch {
       // Lỗi DB không được làm vỡ trang login → trả defaults.
