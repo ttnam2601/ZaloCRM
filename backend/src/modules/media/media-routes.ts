@@ -859,7 +859,15 @@ export async function mediaRoutes(app: FastifyInstance) {
         return { message: msg, sent: assets.length };
       } catch (err: any) {
         logger.error('[media] album send error:', err);
-        return reply.status(500).send({ error: err?.message ?? 'gửi album lỗi' });
+        // Lỗi mạng tạm thời khi upload nhiều ảnh (đã retry 3 lần vẫn fail) → báo rõ cho sale.
+        const raw = String(err?.message ?? '');
+        const isNet = /fetch failed|other side closed|socket|econnreset|und_err/i.test(raw);
+        return reply.status(isNet ? 503 : 500).send({
+          error: isNet
+            ? `Gửi album ${assets.length} ảnh bị gián đoạn mạng (Zalo đóng kết nối khi tải nhiều ảnh). Thử lại, hoặc gửi ít ảnh hơn mỗi lần.`
+            : (raw || 'gửi album lỗi'),
+          code: isNet ? 'ALBUM_NETWORK' : undefined,
+        });
       } finally {
         for (const t of tmps) await t.cleanup().catch(() => {});
       }
