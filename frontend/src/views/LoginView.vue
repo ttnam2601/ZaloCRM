@@ -8,14 +8,14 @@
       <div class="brand-glow"></div>
       <div class="brand-inner">
         <div class="brand-logo">
-          <img src="/brand/hs-monogram.png" alt="HS Holding" />
+          <img :src="brandLogo" :alt="brandName" @error="onLogoError" />
         </div>
-        <h1 class="brand-name">HS Holding</h1>
+        <h1 class="brand-name">{{ brandName }}</h1>
         <div class="brand-product">ZaloCRM</div>
         <div class="brand-divider"></div>
-        <p class="brand-slogan">Bền vững <span class="dot">·</span> Trường tồn</p>
+        <p class="brand-slogan">{{ brandSlogan }}</p>
       </div>
-      <div class="brand-foot">© {{ year }} HS Holding</div>
+      <div class="brand-foot">{{ brandCopyright }}</div>
     </aside>
 
     <!-- ══ Cột phải: form đăng nhập ══ -->
@@ -33,7 +33,7 @@
             prepend-inner-icon="mdi-account-outline"
             required
             autocomplete="username"
-            placeholder="admin@hs.com hoặc 0987 654 321"
+            :placeholder="emailPlaceholder"
             persistent-placeholder
             class="mb-4"
           />
@@ -65,9 +65,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
+import { fetchPublicBranding } from '@/api/public-branding';
 
 const identifier = ref('');
 const password = ref('');
@@ -77,16 +78,43 @@ const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
 
-const year = computed(() => new Date().getFullYear());
+// ── Branding hiển thị (mặc định = giá trị hardcode HS Holding) ────────────────
+// Login chạy pre-auth: render mặc định NGAY, fetch org-branding xong mới thay vào
+// (D4-A). Nếu endpoint lỗi/chậm/chưa có org → giữ mặc định, login không bị chặn.
+const DEFAULT_LOGO = '/brand/hs-monogram.png';
+const brandLogo = ref(DEFAULT_LOGO);
+const brandName = ref('HS Holding');
+const brandSlogan = ref('Bền vững · Trường tồn');
+const brandCopyright = ref(`© ${new Date().getFullYear()} HS Holding`);
+const emailPlaceholder = ref('admin@hs.com hoặc 0987 654 321');
+
+// Logo cấu hình hỏng (404/URL sai) → fallback ảnh mặc định.
+function onLogoError() {
+  if (brandLogo.value !== DEFAULT_LOGO) brandLogo.value = DEFAULT_LOGO;
+}
 
 // Phase Onboarding v1 — sau khi force change password thành công, redirect về /login?password-changed=1
 const passwordChangedNotice = ref(route.query['password-changed'] === '1');
 
-onMounted(async () => {
-  try {
-    const needs = await authStore.checkSetup();
-    if (needs) router.replace('/setup');
-  } catch {}
+onMounted(() => {
+  // Setup-check (điều hướng /setup) và branding fetch chạy song song, độc lập.
+  authStore
+    .checkSetup()
+    .then((needs) => {
+      if (needs) router.replace('/setup');
+    })
+    .catch(() => {});
+
+  fetchPublicBranding()
+    .then((b) => {
+      if (!b) return;
+      if (b.logoUrl) brandLogo.value = b.logoUrl;
+      if (b.name) brandName.value = b.name;
+      if (b.slogan) brandSlogan.value = b.slogan;
+      if (b.copyright) brandCopyright.value = b.copyright;
+      if (b.emailDomain) emailPlaceholder.value = `user@${b.emailDomain}`;
+    })
+    .catch(() => {});
 });
 
 async function handleLogin() {

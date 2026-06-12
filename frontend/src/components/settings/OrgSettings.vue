@@ -35,6 +35,71 @@
         <span class="text-medium-emphasis"> (UTC{{ timezone }})</span>
       </v-alert>
 
+      <v-divider class="my-4" />
+      <div class="text-subtitle-2 mb-1">Thương hiệu trang đăng nhập</div>
+      <p class="text-medium-emphasis text-body-2 mb-3">
+        Logo, slogan, copyright và tên miền email hiển thị ngoài trang đăng nhập.
+      </p>
+
+      <!-- Logo: text field (path nội bộ /... hoặc https://) + chọn từ kho ảnh + preview -->
+      <div class="d-flex align-center mb-3" style="gap: 12px;">
+        <v-avatar v-if="logoUrl" rounded="lg" size="48" color="grey-lighten-3">
+          <v-img :src="logoUrl" cover @error="logoBroken = true" />
+        </v-avatar>
+        <v-avatar v-else rounded="lg" size="48" color="grey-lighten-3">
+          <v-icon>mdi-image-outline</v-icon>
+        </v-avatar>
+        <v-text-field
+          v-model="logoUrl"
+          label="Logo (đường dẫn ảnh)"
+          placeholder="/brand/hs-monogram.png hoặc https://..."
+          :disabled="!authStore.isOwner || saving"
+          variant="outlined"
+          density="compact"
+          hide-details
+          class="flex-grow-1"
+        />
+        <v-btn
+          v-if="authStore.isOwner"
+          variant="tonal"
+          @click="openMediaPicker"
+        >
+          Chọn từ kho
+        </v-btn>
+      </div>
+      <v-alert v-if="logoBroken && logoUrl" type="warning" density="compact" variant="tonal" class="mb-3">
+        Không tải được ảnh logo — kiểm tra lại đường dẫn.
+      </v-alert>
+
+      <v-text-field
+        v-model="slogan"
+        label="Slogan"
+        placeholder="Bền vững · Trường tồn"
+        :disabled="!authStore.isOwner || saving"
+        variant="outlined"
+        class="mb-3"
+        hide-details
+      />
+      <v-text-field
+        v-model="copyright"
+        label="Copyright"
+        placeholder="© 2026 HS Holding"
+        :disabled="!authStore.isOwner || saving"
+        variant="outlined"
+        class="mb-3"
+        hide-details
+      />
+      <v-text-field
+        v-model="emailDomain"
+        label="Tên miền email"
+        placeholder="tenmien.com"
+        :disabled="!authStore.isOwner || saving"
+        variant="outlined"
+        class="mb-3"
+        hint="Dùng gợi ý ô đăng nhập: user@<tên miền>. Để trống nếu không cần."
+        persistent-hint
+      />
+
       <v-alert v-if="error" type="error" density="compact" class="mb-3">{{ error }}</v-alert>
       <v-alert v-if="saved" type="success" density="compact" class="mb-3">Đã lưu thành công</v-alert>
 
@@ -51,11 +116,45 @@
         Chỉ chủ sở hữu mới có thể chỉnh sửa thông tin tổ chức.
       </p>
     </v-card>
+
+    <!-- Media picker — chọn logo từ kho ảnh (GET /api/v1/media?kind=image) -->
+    <v-dialog v-model="mediaDialog" max-width="720">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          Chọn logo từ kho ảnh
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" @click="mediaDialog = false" />
+        </v-card-title>
+        <v-card-text>
+          <div v-if="mediaLoading" class="text-center py-8">
+            <v-progress-circular indeterminate />
+          </div>
+          <v-alert v-else-if="mediaError" type="warning" variant="tonal" density="compact">
+            {{ mediaError }}
+          </v-alert>
+          <div v-else-if="mediaItems.length === 0" class="text-medium-emphasis text-center py-8">
+            Kho ảnh trống. Hãy tải ảnh lên ở mục Kho phương tiện trước.
+          </div>
+          <div v-else class="media-grid">
+            <v-card
+              v-for="m in mediaItems"
+              :key="m.id"
+              variant="outlined"
+              class="media-cell"
+              @click="pickMedia(m)"
+            >
+              <v-img :src="m.thumbnailUrl || m.url || undefined" :alt="m.name" height="96" cover />
+              <div class="media-name">{{ m.name }}</div>
+            </v-card>
+          </div>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { api } from '@/api/index';
 import { useAuthStore } from '@/stores/auth';
 import { formatInOrgTz, refreshOrgTimezone } from '@/composables/use-org-timezone';
@@ -76,10 +175,51 @@ const TIMEZONE_OPTIONS = [
 const authStore = useAuthStore();
 const orgName = ref('');
 const timezone = ref('+07:00');
-const original = ref({ name: '', timezone: '+07:00' });
+// Login branding fields
+const logoUrl = ref('');
+const slogan = ref('');
+const copyright = ref('');
+const emailDomain = ref('');
+const logoBroken = ref(false);
+const original = ref({
+  name: '', timezone: '+07:00',
+  logoUrl: '', slogan: '', copyright: '', emailDomain: '',
+});
 const saving = ref(false);
 const error = ref('');
 const saved = ref(false);
+
+// ── Media picker (chọn logo từ kho ảnh) ──────────────────────────────────────
+interface MediaItem { id: string; name: string; url: string | null; thumbnailUrl: string | null }
+const mediaDialog = ref(false);
+const mediaLoading = ref(false);
+const mediaError = ref('');
+const mediaItems = ref<MediaItem[]>([]);
+
+async function openMediaPicker() {
+  mediaDialog.value = true;
+  mediaLoading.value = true;
+  mediaError.value = '';
+  try {
+    const res = await api.get('/media', { params: { kind: 'image', limit: 60 } });
+    mediaItems.value = (res.data.items ?? []).filter((m: MediaItem) => m.url || m.thumbnailUrl);
+  } catch (err: any) {
+    mediaError.value =
+      err.response?.status === 403
+        ? 'Bạn không có quyền truy cập kho ảnh. Có thể dán trực tiếp đường dẫn logo.'
+        : 'Không tải được kho ảnh.';
+  } finally {
+    mediaLoading.value = false;
+  }
+}
+
+function pickMedia(m: MediaItem) {
+  if (m.url) {
+    logoUrl.value = m.url;
+    logoBroken.value = false;
+  }
+  mediaDialog.value = false;
+}
 
 
 // Tick mỗi giây để preview "Bây giờ tại tổ chức" cập nhật theo offset chọn.
@@ -93,18 +233,34 @@ const previewNow = computed(() =>
 const canSave = computed(() => {
   if (!orgName.value.trim()) return false;
   return (
-    orgName.value.trim() !== original.value.name || timezone.value !== original.value.timezone
+    orgName.value.trim() !== original.value.name ||
+    timezone.value !== original.value.timezone ||
+    logoUrl.value.trim() !== original.value.logoUrl ||
+    slogan.value.trim() !== original.value.slogan ||
+    copyright.value.trim() !== original.value.copyright ||
+    emailDomain.value.trim() !== original.value.emailDomain
   );
 });
+
+// Đổi đường dẫn logo → reset cờ "ảnh hỏng" để preview thử lại.
+watch(logoUrl, () => { logoBroken.value = false; });
 
 async function fetchOrg() {
   try {
     const res = await api.get('/organization');
     orgName.value = res.data.name ?? '';
     timezone.value = res.data.timezone ?? '+07:00';
+    logoUrl.value = res.data.logoUrl ?? '';
+    slogan.value = res.data.slogan ?? '';
+    copyright.value = res.data.copyright ?? '';
+    emailDomain.value = res.data.emailDomain ?? '';
     original.value = {
       name: orgName.value,
       timezone: timezone.value,
+      logoUrl: logoUrl.value,
+      slogan: slogan.value,
+      copyright: copyright.value,
+      emailDomain: emailDomain.value,
     };
   } catch {
     // endpoint có thể chưa tồn tại lần đầu — giữ default +07:00
@@ -120,14 +276,28 @@ async function handleSave() {
     const res = await api.put('/organization', {
       name: orgName.value.trim(),
       timezone: timezone.value,
+      logoUrl: logoUrl.value.trim(),
+      slogan: slogan.value.trim(),
+      copyright: copyright.value.trim(),
+      emailDomain: emailDomain.value.trim(),
     });
+    orgName.value = res.data.name ?? orgName.value;
+    timezone.value = res.data.timezone ?? timezone.value;
+    logoUrl.value = res.data.logoUrl ?? '';
+    slogan.value = res.data.slogan ?? '';
+    copyright.value = res.data.copyright ?? '';
+    emailDomain.value = res.data.emailDomain ?? '';
     original.value = {
-      name: res.data.name ?? orgName.value,
-      timezone: res.data.timezone ?? timezone.value,
+      name: orgName.value,
+      timezone: timezone.value,
+      logoUrl: logoUrl.value,
+      slogan: slogan.value,
+      copyright: copyright.value,
+      emailDomain: emailDomain.value,
     };
     // Cập nhật cache offset toàn app + auth store để các component khác đổi format luôn.
-    refreshOrgTimezone(original.value.timezone);
-    if (authStore.user) authStore.user.orgTimezone = original.value.timezone;
+    refreshOrgTimezone(timezone.value);
+    if (authStore.user) authStore.user.orgTimezone = timezone.value;
     saved.value = true;
     setTimeout(() => {
       saved.value = false;
@@ -150,3 +320,20 @@ onUnmounted(() => {
   if (tickTimer) clearInterval(tickTimer);
 });
 </script>
+
+<style scoped>
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+}
+.media-cell { cursor: pointer; transition: box-shadow 0.15s; }
+.media-cell:hover { box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18); }
+.media-name {
+  font-size: 12px;
+  padding: 4px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+</style>
