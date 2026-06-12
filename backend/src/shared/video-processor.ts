@@ -107,7 +107,7 @@ export function parseVideoProbeOutput(raw: string): VideoProbeMetadata {
   };
 }
 
-async function probeVideoFile(filePath: string): Promise<VideoProbeMetadata> {
+export async function probeVideoFile(filePath: string): Promise<VideoProbeMetadata> {
   try {
     const raw = await runBinary('ffprobe', [
       '-v', 'error',

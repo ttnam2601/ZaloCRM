@@ -1,18 +1,52 @@
 <template>
   <div class="mp-pop" @click.self="$emit('close')">
     <div class="mp-card">
+      <!-- Hàng 1: tìm + nút lọc sâu + đóng -->
       <div class="mp-row1">
-        <div class="seg">
-          <span :class="{ on: tab === 'recent' }" @click="setTab('recent')">Gần đây</span>
-          <span :class="{ on: tab === 'fav' }" @click="setTab('fav')">⭐ Yêu thích</span>
-          <span :class="{ on: tab === 'all' }" @click="setTab('all')">Tất cả kho</span>
-        </div>
         <input v-model="search" class="mp-search" placeholder="🔍 Tìm trong kho…" @input="debouncedReload" />
+        <button class="mp-filter-btn" :class="{ on: showLever2 }" title="Lọc sâu" @click="showLever2 = !showLever2">⚙ Lọc</button>
         <button class="mp-x" @click="$emit('close')">✕</button>
       </div>
 
-      <!-- Thanh chọn nhiều (album): hiện khi đã chọn ≥1 ảnh hoặc bật chế độ chọn -->
-      <div class="mp-multibar">
+      <!-- LEVER 1: Loại (Ảnh/Video/Tệp) + Quyền (Riêng/Công) -->
+      <div class="mp-lever1">
+        <div class="seg">
+          <span :class="{ on: kindFilter === 'image' }" @click="setKind('image')">🖼 Ảnh</span>
+          <span :class="{ on: kindFilter === 'video' }" @click="setKind('video')">🎬 Video</span>
+          <span :class="{ on: kindFilter === 'file' }" @click="setKind('file')">📄 Tệp</span>
+        </div>
+        <div class="seg vis">
+          <span :class="{ on: visFilter === '' }" @click="setVis('')">Tất cả</span>
+          <span :class="{ on: visFilter === 'public' }" @click="setVis('public')">🌐 Công</span>
+          <span :class="{ on: visFilter === 'private' }" @click="setVis('private')">🔒 Riêng</span>
+        </div>
+      </div>
+
+      <!-- LEVER 2: Sắp xếp / Thời gian / Size / Tag (ẩn/hiện) -->
+      <div v-if="showLever2" class="mp-lever2">
+        <select v-model="sortBy" class="mp-sel" @change="reload">
+          <option value="recent">⏱ Gần đây dùng</option>
+          <option value="newest">🆕 Mới tải lên</option>
+          <option value="most_used">🔥 Hay dùng nhất</option>
+          <option value="name">🔤 Tên A→Z</option>
+        </select>
+        <select v-model="sinceBy" class="mp-sel" @change="reload">
+          <option value="">📅 Mọi lúc</option>
+          <option value="7d">7 ngày</option>
+          <option value="30d">30 ngày</option>
+          <option value="90d">90 ngày</option>
+        </select>
+        <select v-model="sizeBy" class="mp-sel" @change="reload">
+          <option value="">⚖ Mọi cỡ</option>
+          <option value="small">&lt; 1MB</option>
+          <option value="medium">1–10MB</option>
+          <option value="large">&gt; 10MB</option>
+        </select>
+        <input v-model="tagFilter" class="mp-tag-input" placeholder="🏷 tag" @input="debouncedReload" />
+      </div>
+
+      <!-- Thanh chọn nhiều (album) — CHỈ khi đang lọc ẢNH (Zalo album = ảnh) -->
+      <div v-if="kindFilter === 'image'" class="mp-multibar">
         <label class="mp-toggle">
           <input type="checkbox" :checked="multiMode" @change="toggleMultiMode" />
           Chọn nhiều ảnh (gửi cả album)
@@ -27,7 +61,7 @@
 
       <div v-if="loading" class="mp-empty">Đang tải…</div>
       <div v-else-if="items.length === 0" class="mp-empty">
-        Kho trống. Tải ảnh ở trang <b>Kho ảnh</b> hoặc chuột phải tin nhắn → Lưu vào Media.
+        Không có {{ kindLabel }} nào khớp. Tải lên ở trang <b>Kho ảnh</b> hoặc chuột phải tin nhắn → Lưu vào Media.
       </div>
       <div v-else class="mp-grid">
         <button
@@ -40,10 +74,8 @@
         >
           <img v-if="a.thumbnailUrl" :src="a.thumbnailUrl" loading="lazy" alt="" />
           <span v-else class="ph">{{ a.kind === 'video' ? '🎬' : a.kind === 'file' ? '📄' : '🖼' }}</span>
+          <span v-if="a.kind === 'video'" class="mp-play">▶</span>
           <span class="mp-name">{{ a.name }}</span>
-          <!-- Số thứ tự theo lượt chọn (anh chốt): tick ảnh nào trước → số nhỏ hơn.
-               Bỏ ảnh số 3 → các ảnh 4,5,6 tự dồn về 3,4,5 (số = vị trí trong picked).
-               CHỈ hiện trên ảnh ĐÃ chọn — ảnh chưa chọn KHÔNG có vòng tròn (gọn UI). -->
           <span v-if="multiMode && picked.has(a.id)" class="mp-check on">{{ pickIndex(a.id) }}</span>
           <span v-if="sending === a.id" class="mp-sending">Đang gửi…</span>
         </button>
@@ -53,43 +85,74 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { listMedia, listFavorites, sendMediaToConversation, sendAlbumToConversation, type MediaAssetItem } from '@/api/media';
+import { ref, computed, onMounted } from 'vue';
+import { listMedia, sendMediaToConversation, sendAlbumToConversation, type MediaAssetItem, type ListMediaParams } from '@/api/media';
 import { useToast } from '@/composables/use-toast';
 
 const props = defineProps<{ conversationId: string }>();
 const emit = defineEmits<{ close: []; sent: [] }>();
 const toast = useToast();
 
-const tab = ref<'recent' | 'fav' | 'all'>('recent');
 const items = ref<MediaAssetItem[]>([]);
 const loading = ref(false);
 const search = ref('');
 const sending = ref<string | null>(null);
 
-// Chọn nhiều ảnh để gửi cả album 1 lần (GĐ5 — nối UI gửi album từ chat).
+// LEVER 1
+const kindFilter = ref<'image' | 'video' | 'file'>('image');
+const visFilter = ref<'' | 'public' | 'private'>('');
+// LEVER 2
+const showLever2 = ref(false);
+const sortBy = ref<'recent' | 'newest' | 'most_used' | 'name'>('recent');
+const sinceBy = ref<'' | '7d' | '30d' | '90d'>('');
+const sizeBy = ref<'' | 'small' | 'medium' | 'large'>('');
+const tagFilter = ref('');
+
+// Chọn nhiều ảnh để gửi cả album 1 lần.
 const multiMode = ref(false);
 const picked = ref<Set<string>>(new Set());
 const sendingAlbum = ref(false);
 
+const kindLabel = computed(() => ({ image: 'ảnh', video: 'video', file: 'tệp' }[kindFilter.value]));
+
 let timer: ReturnType<typeof setTimeout> | null = null;
 function debouncedReload() { if (timer) clearTimeout(timer); timer = setTimeout(reload, 300); }
-function setTab(t: any) { tab.value = t; reload(); }
+
+function setKind(k: 'image' | 'video' | 'file') {
+  kindFilter.value = k;
+  if (k !== 'image') { multiMode.value = false; picked.value = new Set(); } // album chỉ cho ảnh
+  reload();
+}
+function setVis(v: '' | 'public' | 'private') { visFilter.value = v; reload(); }
 
 function toggleMultiMode() {
   multiMode.value = !multiMode.value;
   if (!multiMode.value) picked.value = new Set();
 }
 
+// Map size bucket → byte min/max.
+function sizeRange(): { sizeMin?: number; sizeMax?: number } {
+  const MB = 1024 * 1024;
+  if (sizeBy.value === 'small') return { sizeMax: MB };
+  if (sizeBy.value === 'medium') return { sizeMin: MB, sizeMax: 10 * MB };
+  if (sizeBy.value === 'large') return { sizeMin: 10 * MB };
+  return {};
+}
+
 async function reload() {
   loading.value = true;
   try {
-    // GĐ5: tab Yêu thích dùng data thật; Gần đây = sort lastUsed; Tất cả = toàn kho ảnh.
-    if (tab.value === 'fav') {
-      items.value = await listFavorites();
-    } else {
-      items.value = await listMedia({ kind: 'image', q: search.value || undefined, limit: 24 });
-    }
+    const params: ListMediaParams = {
+      kind: kindFilter.value,
+      q: search.value || undefined,
+      visibility: visFilter.value || undefined,
+      tag: tagFilter.value || undefined,
+      since: sinceBy.value || undefined,
+      sort: sortBy.value,
+      limit: 40,
+      ...sizeRange(),
+    };
+    items.value = await listMedia(params);
   } catch (e: any) {
     toast.warning(e?.response?.data?.error || 'Không tải được kho');
   } finally {
@@ -98,7 +161,7 @@ async function reload() {
 }
 
 function onCellClick(a: MediaAssetItem) {
-  if (multiMode.value) { togglePick(a); return; }
+  if (multiMode.value && a.kind === 'image') { togglePick(a); return; }
   send(a);
 }
 
@@ -113,8 +176,8 @@ function togglePick(a: MediaAssetItem) {
   picked.value = next;
 }
 
-// Số thứ tự ảnh trong album = vị trí trong Set picked (insertion order) + 1.
-// Bỏ 1 ảnh → các ảnh sau tự dồn số (Set re-iterate theo thứ tự còn lại). '' nếu chưa chọn.
+// Số thứ tự theo lượt chọn (anh chốt): tick trước → số nhỏ. Bỏ giữa → số sau dồn lại.
+// CHỈ hiện trên ảnh ĐÃ chọn (chưa chọn không có vòng tròn).
 function pickIndex(id: string): string {
   const idx = [...picked.value].indexOf(id);
   return idx >= 0 ? String(idx + 1) : '';
@@ -157,18 +220,24 @@ onMounted(reload);
 <style scoped>
 .mp-pop { position:absolute; inset:0 0 auto 0; bottom:100%; z-index:40; }
 .mp-card {
-  --ink:#181d26; --muted:#41454d; --hairline:#dddddd; --canvas:#fff; --soft:#f8fafc; --coral:#aa2d00;
+  --ink:#181d26; --muted:#41454d; --hairline:#dddddd; --canvas:#fff; --soft:#f8fafc; --coral:#aa2d00; --forest:#006400;
   background:var(--soft); border:1px solid var(--hairline); border-radius:10px 10px 0 0;
-  border-bottom:none; padding:12px 14px; max-height:360px; display:flex; flex-direction:column;
+  border-bottom:none; padding:12px 14px; max-height:400px; display:flex; flex-direction:column;
   box-shadow:0 -4px 16px rgba(0,0,0,.06);
 }
-.mp-row1 { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
-.seg { display:inline-flex; border:1px solid var(--hairline); border-radius:9999px; overflow:hidden; font-size:12px; background:var(--canvas); }
-.seg span { padding:4px 12px; cursor:pointer; color:var(--muted); }
-.seg span.on { background:var(--ink); color:#fff; }
-.mp-search { margin-left:auto; border:1px solid var(--hairline); border-radius:6px; padding:4px 10px; font-size:12px; width:150px; outline:none; }
+.mp-row1 { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.mp-search { flex:1; border:1px solid var(--hairline); border-radius:6px; padding:5px 10px; font-size:12px; outline:none; }
+.mp-filter-btn { border:1px solid var(--hairline); background:var(--canvas); border-radius:6px; padding:5px 10px; font-size:11.5px; cursor:pointer; color:var(--muted); }
+.mp-filter-btn.on { background:var(--ink); color:#fff; border-color:var(--ink); }
 .mp-x { border:none; background:none; cursor:pointer; color:var(--muted); }
-.mp-multibar { display:flex; align-items:center; gap:12px; margin-bottom:9px; font-size:12px; color:var(--muted); }
+.mp-lever1 { display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+.seg { display:inline-flex; border:1px solid var(--hairline); border-radius:9999px; overflow:hidden; font-size:11.5px; background:var(--canvas); }
+.seg span { padding:4px 11px; cursor:pointer; color:var(--muted); white-space:nowrap; }
+.seg span.on { background:var(--ink); color:#fff; }
+.mp-lever2 { display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap; }
+.mp-sel { border:1px solid var(--hairline); border-radius:6px; padding:4px 8px; font-size:11.5px; color:var(--ink); background:var(--canvas); outline:none; }
+.mp-tag-input { border:1px solid var(--hairline); border-radius:6px; padding:4px 9px; font-size:11.5px; width:90px; outline:none; }
+.mp-multibar { display:flex; align-items:center; gap:12px; margin-bottom:8px; font-size:12px; color:var(--muted); }
 .mp-toggle { display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }
 .mp-toggle input { accent-color:var(--ink); cursor:pointer; }
 .mp-count { color:var(--ink); font-weight:500; }
@@ -180,6 +249,7 @@ onMounted(reload);
 .mp-cell.picked { border-color:var(--ink); box-shadow:0 0 0 2px var(--ink) inset; }
 .mp-cell img { width:100%; height:56px; object-fit:cover; display:block; }
 .mp-cell .ph { display:flex; align-items:center; justify-content:center; height:56px; font-size:22px; background:#e0e2e6; color:var(--muted); }
+.mp-play { position:absolute; top:50%; left:50%; transform:translate(-50%,-58%); width:24px; height:24px; border-radius:9999px; background:rgba(0,0,0,.5); color:#fff; font-size:11px; display:flex; align-items:center; justify-content:center; pointer-events:none; }
 .mp-name { display:block; font-size:10px; padding:3px 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
 .mp-check { position:absolute; top:4px; right:4px; width:19px; height:19px; border-radius:9999px; border:1.5px solid #fff; background:rgba(24,29,38,.35); color:#fff; font-size:11.5px; font-weight:700; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,.25); }
 .mp-check.on { background:var(--ink); }

@@ -18,11 +18,13 @@
  */
 import sharp from 'sharp';
 import { imageSize } from 'image-size';
-import { readFile } from 'node:fs/promises';
-import { resolve as resolvePath } from 'node:path';
+import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
+import { resolve as resolvePath, join as joinPath } from 'node:path';
+import { tmpdir } from 'node:os';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { uploadBuffer } from '../../shared/storage/minio-client.js';
 import { candidateDownloadUrls } from '../chat/chat-media-helpers.js';
+import { generateThumbnail, probeVideoFile } from '../../shared/video-processor.js';
 import { logger } from '../../shared/utils/logger.js';
 import type { MediaAsset, MediaBlob } from '@prisma/client';
 
@@ -118,6 +120,47 @@ export async function compressImage(
  *   2. DB: upsert MediaBlob theo [orgId,contentHash]; nếu trùng → đọc lại,
  *      tăng usageCount của asset đang trỏ tới (KHÔNG tạo asset mới).
  */
+/**
+ * Sinh thumbnail + metadata (duration/width/height) cho VIDEO upload vào kho (ffmpeg).
+ * Trả thumbnailUrl (đã mirror lên MinIO) + durationSec/width/height. Lỗi ffmpeg → trả rỗng
+ * (không chặn upload — video vẫn lưu, chỉ thiếu ảnh đại diện). KHÔNG throw.
+ */
+async function extractVideoMeta(buffer: Buffer): Promise<{
+  thumbnailUrl: string | null; durationSec: number | null; width: number | null; height: number | null;
+}> {
+  const empty = { thumbnailUrl: null, durationSec: null, width: null, height: null };
+  let dir: string | null = null;
+  try {
+    dir = await mkdtemp(joinPath(tmpdir(), 'zalocrm-media-vid-'));
+    const vidPath = joinPath(dir, 'video.mp4');
+    await writeFile(vidPath, buffer);
+    // Probe metadata (ffprobe) — không chặn nếu lỗi.
+    const meta = await probeVideoFile(vidPath).catch(() => ({} as any));
+    // Thumbnail (ffmpeg) → mirror lên MinIO.
+    let thumbnailUrl: string | null = null;
+    try {
+      const gen = await generateThumbnail(vidPath);
+      const thumbBuf = await readFile(gen.path);
+      const up = await uploadBuffer(thumbBuf, 'image/jpeg', 'video-thumb.jpg');
+      thumbnailUrl = up.url;
+      await gen.cleanup().catch(() => {});
+    } catch (e) {
+      logger.warn('[media] extractVideoMeta thumbnail failed:', (e as Error)?.message ?? e);
+    }
+    return {
+      thumbnailUrl,
+      durationSec: meta.durationMs ? Math.round(meta.durationMs / 1000) : null,
+      width: meta.width ?? null,
+      height: meta.height ?? null,
+    };
+  } catch (e) {
+    logger.warn('[media] extractVideoMeta failed:', (e as Error)?.message ?? e);
+    return empty;
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export async function registerAsset(input: RegisterAssetInput): Promise<RegisterAssetResult> {
   const {
     orgId,
@@ -136,6 +179,11 @@ export async function registerAsset(input: RegisterAssetInput): Promise<Register
   const processed = kind === 'image'
     ? await compressImage(input.buffer, mimeType)
     : { buffer: input.buffer, mimeType, width: undefined, height: undefined, compressed: false };
+
+  // 1b. VIDEO: sinh thumbnail + metadata (ffmpeg) để kho hiển thị đẹp (anh chốt 2026-06-12).
+  const videoMeta = kind === 'video'
+    ? await extractVideoMeta(input.buffer)
+    : { thumbnailUrl: null, durationSec: null, width: null, height: null };
 
   const originalFilename = input.originalFilename ?? null;
   const name = input.name ?? originalFilename ?? 'Media';
@@ -177,6 +225,8 @@ export async function registerAsset(input: RegisterAssetInput): Promise<Register
           folderId,
           tagIds,
           originalFilename,
+          // VIDEO: ảnh đại diện (ffmpeg) để kho không hiện <img> vỡ.
+          thumbnailUrl: videoMeta.thumbnailUrl,
         },
       });
       const blob = await tx.mediaBlob.create({
@@ -189,8 +239,9 @@ export async function registerAsset(input: RegisterAssetInput): Promise<Register
           publicUrl: up.url,
           mimeType: up.mimeType,
           sizeBytes: up.size,
-          width: processed.width ?? null,
-          height: processed.height ?? null,
+          width: processed.width ?? videoMeta.width ?? null,
+          height: processed.height ?? videoMeta.height ?? null,
+          durationSec: videoMeta.durationSec,
         },
       });
       return { asset, blob };

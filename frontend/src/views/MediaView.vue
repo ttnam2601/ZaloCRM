@@ -18,15 +18,39 @@
       <button v-for="t in tabs" :key="t.kind" class="tab" :class="{ on: activeKind === t.kind }" @click="setKind(t.kind)">{{ t.label }}</button>
     </nav>
 
-    <!-- Filter row -->
+    <!-- Filter row — LEVER 1: Quyền (Loại = tabs ở trên) + nút Lọc sâu -->
     <div class="m-filter">
       <span class="crumb">Tất cả<template v-if="activeFolder"> ▸ <b>{{ activeFolderName }}</b></template></span>
       <span v-for="tag in activeTags" :key="tag" class="chip coral" @click="toggleTag(tag)">● {{ tag }} ✕</span>
+      <button class="lvl2-btn" :class="{ on: showLever2 }" @click="showLever2 = !showLever2">⚙ Lọc sâu</button>
       <div class="vis-toggle">
         <span :class="{ on: visFilter === '' }" @click="setVis('')">Tất cả</span>
-        <span :class="{ on: visFilter === 'public' }" @click="setVis('public')">Công khai</span>
-        <span :class="{ on: visFilter === 'private' }" @click="setVis('private')">Riêng tư</span>
+        <span :class="{ on: visFilter === 'public' }" @click="setVis('public')">🌐 Công khai</span>
+        <span :class="{ on: visFilter === 'private' }" @click="setVis('private')">🔒 Riêng tư</span>
       </div>
+    </div>
+
+    <!-- LEVER 2: Sắp xếp / Thời gian / Size / Tag (ẩn/hiện) -->
+    <div v-if="showLever2" class="m-lever2">
+      <select v-model="sortBy" class="lv2-sel" @change="reload">
+        <option value="recent">⏱ Gần đây dùng</option>
+        <option value="newest">🆕 Mới tải lên</option>
+        <option value="most_used">🔥 Hay dùng nhất</option>
+        <option value="name">🔤 Tên A→Z</option>
+      </select>
+      <select v-model="sinceBy" class="lv2-sel" @change="reload">
+        <option value="">📅 Mọi lúc</option>
+        <option value="7d">7 ngày</option>
+        <option value="30d">30 ngày</option>
+        <option value="90d">90 ngày</option>
+      </select>
+      <select v-model="sizeBy" class="lv2-sel" @change="reload">
+        <option value="">⚖ Mọi cỡ</option>
+        <option value="small">&lt; 1MB</option>
+        <option value="medium">1–10MB</option>
+        <option value="large">&gt; 10MB</option>
+      </select>
+      <input v-model="tagInput" class="lv2-tag" placeholder="🏷 lọc theo tag" @keyup.enter="applyTagFilter" @input="debouncedReload" />
     </div>
 
     <div class="m-work">
@@ -73,6 +97,8 @@
             <div class="thumb">
               <img v-if="a.thumbnailUrl" :src="a.thumbnailUrl" loading="lazy" alt="" />
               <span v-else class="ph">{{ a.kind === 'video' ? '🎬' : a.kind === 'file' ? '📄' : '🖼' }}</span>
+              <span v-if="a.kind === 'video'" class="play-ic">▶</span>
+              <span v-if="a.kind === 'video' && a.durationSec" class="dur">{{ fmtDuration(a.durationSec) }}</span>
               <span v-if="a.visibility === 'private'" class="badge">🔒</span>
             </div>
             <div class="meta">
@@ -123,7 +149,28 @@ const activeTags = ref<string[]>([]);
 const selected = ref<MediaAssetItem | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 
+// LEVER 2 (lọc sâu — anh chốt 2026-06-12).
+const showLever2 = ref(false);
+const sortBy = ref<'recent' | 'newest' | 'most_used' | 'name'>('recent');
+const sinceBy = ref<'' | '7d' | '30d' | '90d'>('');
+const sizeBy = ref<'' | 'small' | 'medium' | 'large'>('');
+const tagInput = ref('');
+
 const activeFolderName = computed(() => folders.value.find((f) => f.id === activeFolder.value)?.name ?? '');
+
+function sizeRange(): { sizeMin?: number; sizeMax?: number } {
+  const MB = 1024 * 1024;
+  if (sizeBy.value === 'small') return { sizeMax: MB };
+  if (sizeBy.value === 'medium') return { sizeMin: MB, sizeMax: 10 * MB };
+  if (sizeBy.value === 'large') return { sizeMin: 10 * MB };
+  return {};
+}
+function applyTagFilter() {
+  const t = tagInput.value.trim();
+  if (t && !activeTags.value.includes(t)) activeTags.value = [...activeTags.value, t];
+  tagInput.value = '';
+  reload();
+}
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 function debouncedReload() {
@@ -141,7 +188,11 @@ async function reload() {
       q: search.value || undefined,
       visibility: visFilter.value || undefined,
       folderId: activeFolder.value || undefined,
-      tag: activeTags.value[0] || undefined,
+      tag: activeTags.value[0] || tagInput.value.trim() || undefined,
+      // Lever 2.
+      sort: sortBy.value,
+      since: sinceBy.value || undefined,
+      ...sizeRange(),
     });
   } catch (e: any) {
     toast.warning(e?.response?.data?.error || 'Không tải được kho');
@@ -159,6 +210,13 @@ function setVis(v: any) { visFilter.value = v; reload(); }
 function setFolder(id: string | null) { activeFolder.value = id; reload(); }
 function toggleTag(tag: string) { activeTags.value = activeTags.value.filter((t) => t !== tag); reload(); }
 function select(a: MediaAssetItem) { selected.value = a; }
+
+// Định dạng thời lượng video: 95s → "1:35".
+function fmtDuration(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 
 function triggerUpload() { fileInput.value?.click(); }
 async function onFilesPicked(e: Event) {
@@ -233,6 +291,13 @@ onMounted(() => { reload(); loadFolders(); loadStats(); });
 .vis-toggle { margin-left:auto; display:inline-flex; border:1px solid var(--hairline); border-radius:var(--pill); overflow:hidden; font-size:12.5px; }
 .vis-toggle span { padding:5px 13px; cursor:pointer; color:var(--muted); }
 .vis-toggle span.on { background:var(--ink); color:#fff; }
+.lvl2-btn { border:1px solid var(--hairline); background:var(--canvas); border-radius:var(--pill); padding:5px 12px; font-size:12.5px; cursor:pointer; color:var(--muted); }
+.lvl2-btn.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+.m-lever2 { display:flex; gap:8px; align-items:center; padding:10px 24px; border-bottom:1px solid var(--hairline); flex-wrap:wrap; background:var(--soft); }
+.lv2-sel { border:1px solid var(--hairline); border-radius:var(--r-sm,6px); padding:5px 10px; font-size:12.5px; color:var(--ink); background:var(--canvas); outline:none; }
+.lv2-tag { border:1px solid var(--hairline); border-radius:var(--r-sm,6px); padding:5px 11px; font-size:12.5px; width:150px; outline:none; }
+.thumb .play-ic { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:34px; height:34px; border-radius:9999px; background:rgba(0,0,0,.5); color:#fff; font-size:14px; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+.thumb .dur { position:absolute; bottom:6px; right:6px; background:rgba(0,0,0,.7); color:#fff; border-radius:4px; padding:1px 6px; font-size:10.5px; font-variant-numeric:tabular-nums; }
 .m-work { display:flex; flex:1; overflow:hidden; min-height:0; }
 .m-tree { width:180px; border-right:1px solid var(--hairline); padding:14px 12px; flex-shrink:0; overflow:auto; }
 .tree-ttl { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-bottom:8px; font-weight:500; display:flex; justify-content:space-between; align-items:center; }

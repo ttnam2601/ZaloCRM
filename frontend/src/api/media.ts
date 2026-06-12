@@ -14,6 +14,7 @@ export interface MediaAssetItem {
   url: string | null;
   thumbnailUrl: string | null;
   sizeBytes: number | null;
+  durationSec?: number | null;
   createdAt: string;
   // Watermark per-ảnh (GĐ2) — backend trả khi list/detail.
   watermarkEnabled?: boolean;
@@ -32,6 +33,11 @@ export interface ListMediaParams {
   visibility?: string;
   q?: string;
   limit?: number;
+  // Lever 2 (lọc sâu) — anh chốt 2026-06-12.
+  since?: '7d' | '30d' | '90d';
+  sizeMin?: number;
+  sizeMax?: number;
+  sort?: 'recent' | 'newest' | 'most_used' | 'name';
 }
 
 /** Liệt kê kho (scope theo owner + visibility ở backend). */

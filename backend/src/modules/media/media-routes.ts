@@ -22,6 +22,9 @@ import { registerAsset, bumpUsage, resolveSavedVisibility, generateWatermarkVari
 import { downloadMediaToTemp } from '../chat/chat-media-helpers.js';
 import { createMediaMessage, getUserFullName } from '../chat/chat-helpers.js';
 import { emitChatMessage } from '../../shared/realtime/emit-chat.js';
+import { generateThumbnail, sendNativeVideo } from '../../shared/video-processor.js';
+import { uploadBuffer } from '../../shared/storage/minio-client.js';
+import { readFile } from 'node:fs/promises';
 import { logger } from '../../shared/utils/logger.js';
 
 const ALLOWED_IMAGE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -99,10 +102,21 @@ async function saveOneMessageToMedia(args: {
   const ct = message.contentType;
   const kind: MediaKind = ct === 'image' ? 'image' : ct === 'video' ? 'video' : 'file';
 
+  // Validation file (audit 2026-06-12): save-from-chat KHÔNG qua classify() như /upload.
+  // Chặn đuôi nguy hiểm (thực thi) để file độc không vào kho rồi gửi lại khách. KHÔNG dùng
+  // whitelist cứng vì file Zalo nhiều khi mime=octet-stream hợp lệ (pdf/excel) sẽ bị chặn nhầm.
+  if (kind === 'file') {
+    const fname = String(parsed.name || url || '').toLowerCase();
+    const DANGEROUS = ['.exe', '.bat', '.cmd', '.scr', '.com', '.pif', '.msi', '.js', '.jar', '.vbs', '.ps1', '.sh'];
+    if (DANGEROUS.some((ext) => fname.endsWith(ext))) {
+      logger.warn(`[media][audit] chặn lưu file nguy hiểm user=${userId} name=${fname}`);
+      return { messageId, status: 'blocked', reason: 'Loại tệp này không được phép lưu vào kho (bảo mật).' };
+    }
+  }
+
   let tmp: { path: string; cleanup: () => Promise<void> } | null = null;
   try {
     tmp = await downloadMediaToTemp({ url, filename: parsed.name }, ct);
-    const { readFile } = await import('node:fs/promises');
     const buf = await readFile(tmp.path);
     const mimeType = parsed.mime
       || (kind === 'image' ? 'image/jpeg' : kind === 'video' ? 'video/mp4' : 'application/octet-stream');
@@ -143,6 +157,10 @@ export async function mediaRoutes(app: FastifyInstance) {
       const q = request.query as {
         kind?: string; tag?: string; folderId?: string;
         visibility?: string; q?: string; limit?: string;
+        // Lever 2 (anh chốt 2026-06-12): lọc sâu.
+        since?: string;        // '7d' | '30d' | '90d' — tải lên/dùng trong N ngày
+        sizeMin?: string; sizeMax?: string; // byte
+        sort?: string;         // 'recent' (mặc định, theo lastUsedAt) | 'newest' (createdAt) | 'most_used' | 'name'
       };
 
       // view_all → xem cả org; thường → chỉ asset của mình HOẶC public.
@@ -161,11 +179,33 @@ export async function mediaRoutes(app: FastifyInstance) {
       if (q.folderId) where.folderId = q.folderId;
       if (q.tag) where.tagIds = { has: q.tag };
       if (q.q) where.name = { contains: q.q, mode: 'insensitive' };
+      // Thời gian: tải lên trong N ngày (createdAt).
+      if (q.since) {
+        const days = { '7d': 7, '30d': 30, '90d': 90 }[q.since];
+        if (days) where.createdAt = { gte: new Date(Date.now() - days * 86400_000) };
+      }
+      // Size: lọc theo sizeBytes của blob 'original'.
+      const sizeMin = q.sizeMin ? parseInt(q.sizeMin, 10) : null;
+      const sizeMax = q.sizeMax ? parseInt(q.sizeMax, 10) : null;
+      if (sizeMin || sizeMax) {
+        where.blobs = { some: { variantType: 'original',
+          ...(sizeMin ? { sizeBytes: { gte: sizeMin } } : {}),
+          ...(sizeMax ? { sizeBytes: { lte: sizeMax } } : {}),
+        } };
+      }
+
+      // Sắp xếp (Lever 2): recent (lastUsed) | newest (createdAt) | most_used | name.
+      const orderBy: any = {
+        recent: [{ lastUsedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+        newest: [{ createdAt: 'desc' }],
+        most_used: [{ usageCount: 'desc' }, { createdAt: 'desc' }],
+        name: [{ name: 'asc' }],
+      }[q.sort ?? 'recent'] ?? [{ lastUsedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }];
 
       const limit = Math.min(parseInt(q.limit ?? '60', 10) || 60, 200);
       const assets = await prisma.mediaAsset.findMany({
         where,
-        orderBy: [{ lastUsedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+        orderBy,
         take: limit,
         include: { blobs: { where: { variantType: { in: ['original', 'watermarked'] } } } },
       });
@@ -194,8 +234,11 @@ export async function mediaRoutes(app: FastifyInstance) {
           tagIds: a.tagIds,
           usageCount: a.usageCount,
           url: blob?.publicUrl ?? null,
-          thumbnailUrl: a.thumbnailUrl ?? blob?.publicUrl ?? null,
+          // VIDEO/FILE KHÔNG fallback thumbnail = URL gốc (mp4/pdf) → tránh <img> vỡ.
+          // Chỉ ẢNH mới dùng blob.publicUrl làm thumbnail. Video dùng thumbnailUrl thật (ffmpeg).
+          thumbnailUrl: a.thumbnailUrl ?? (a.kind === 'image' ? blob?.publicUrl ?? null : null),
           sizeBytes: blob?.sizeBytes ?? null,
+          durationSec: blob?.durationSec ?? null,
           createdAt: a.createdAt,
           // Watermark per-ảnh (GĐ2).
           watermarkEnabled: a.watermarkEnabled,
@@ -402,15 +445,44 @@ export async function mediaRoutes(app: FastifyInstance) {
           );
           zaloMsgId = String(sendResult?.msgId || sendResult?.data?.msgId || '');
           content = JSON.stringify({ href: blob.publicUrl, thumb: blob.publicUrl, size: blob.sizeBytes });
+        } else if (asset.kind === 'video') {
+          // VIDEO: gửi NATIVE (player + thumbnail + duration) như chat thường — KHÔNG sendFile
+          // (sendFile làm video thành "file .mp4 tải về", mất player). Sinh thumbnail bằng ffmpeg,
+          // mirror lên MinIO để lưu vào content. Native lỗi → fallback sendFile (vẫn gửi được).
+          // (anh chốt 2026-06-12: video gửi từ kho phải đẹp như chat.)
+          let thumbUrl: string = asset.thumbnailUrl ?? blob.publicUrl;
+          let thumbPath: string | undefined;
+          try {
+            const gen = await generateThumbnail(tmp.path);
+            thumbPath = gen.path;
+            const thumbBuf = await readFile(gen.path);
+            const up = await uploadBuffer(thumbBuf, 'image/jpeg', `${asset.name || 'video'}-thumb.jpg`);
+            thumbUrl = up.url;
+          } catch (e) {
+            logger.warn('[media] video thumbnail gen failed (gửi từ kho):', (e as Error)?.message ?? e);
+          }
+          try {
+            if (!instance?.api) throw new Error('nick api null');
+            const sendResult: any = await sendNativeVideo({
+              api: instance.api as any, videoPath: tmp.path, thumbnailPath: thumbPath,
+              threadId, threadType: threadType as 0 | 1, message: caption,
+            });
+            zaloMsgId = String(sendResult?.msgId || sendResult?.data?.msgId || '');
+          } catch (e) {
+            logger.warn('[media] sendNativeVideo lỗi → fallback sendFile:', (e as Error)?.message ?? e);
+            const sendResult: any = await zaloOps.sendFile(
+              conversation.zaloAccountId, threadId, threadType as 0 | 1, [tmp.path], io, caption,
+            );
+            zaloMsgId = String(sendResult?.msgId || sendResult?.data?.msgId || '');
+          }
+          content = JSON.stringify({ href: blob.publicUrl, thumb: thumbUrl, thumbUrl, thumbnail: thumbUrl, size: blob.sizeBytes });
         } else {
-          // VIDEO/FILE: gửi qua sendFile (zca-js đọc local path → đính kèm file/video).
+          // FILE (pdf/excel/doc/zip): sendFile (zca-js đọc local path → đính kèm file).
           const sendResult: any = await zaloOps.sendFile(
             conversation.zaloAccountId, threadId, threadType as 0 | 1, [tmp.path], io, caption,
           );
           zaloMsgId = String(sendResult?.msgId || sendResult?.data?.msgId || '');
-          content = asset.kind === 'video'
-            ? JSON.stringify({ href: blob.publicUrl, thumb: asset.thumbnailUrl ?? blob.publicUrl, size: blob.sizeBytes })
-            : JSON.stringify({ href: blob.publicUrl, name: asset.name, size: blob.sizeBytes, mime: blob.mimeType });
+          content = JSON.stringify({ href: blob.publicUrl, name: asset.name, size: blob.sizeBytes, mime: blob.mimeType });
         }
 
         const msg = await createMediaMessage({
