@@ -538,6 +538,7 @@
     <MediaPickerDialog
       v-if="mediaPickerFor"
       :multiple="mediaPickerFor.album"
+      :kind="mediaPickerFor.kind"
       :public-only="true"
       @pick="onMediaPicked"
       @close="mediaPickerFor = null"
@@ -961,24 +962,40 @@ function removeAlbumItemOf(compIdx: number, i: number) {
 }
 
 // Media GĐ3: chèn ảnh từ Kho phương tiện vào component (thay vì dán URL tay).
-const mediaPickerFor = ref<{ compIdx: number; album: boolean } | null>(null);
+// 2026-06-13 (anh báo): picker phải lọc ĐÚNG LOẠI (file→tệp, video→video, không phải toàn ảnh)
+// + ảnh đơn cho chọn NHIỀU → tự gộp thành album. mediaPickerFor giữ kind của kho cần lọc +
+// album=true khi cho chọn nhiều (component album HOẶC component ảnh muốn gộp album).
+const mediaPickerFor = ref<{ compIdx: number; album: boolean; kind: string } | null>(null);
 function openMediaPicker(compIdx: number, album = false) {
-  mediaPickerFor.value = { compIdx, album };
+  const c = components.value[compIdx] as any;
+  // kind kho: album/image → 'image'; video → 'video'; file → 'file'. Ảnh đơn cũng cho chọn nhiều
+  // (multiple) để gộp album, nên album=true cho cả image lẫn album.
+  const kind = c?.kind === 'video' ? 'video' : c?.kind === 'file' ? 'file' : 'image';
+  const allowMulti = album || c?.kind === 'image' || c?.kind === 'album';
+  mediaPickerFor.value = { compIdx, album: allowMulti, kind };
 }
 function onMediaPicked(assets: Array<{ id: string; url: string | null; name: string }>) {
   const target = mediaPickerFor.value;
   if (!target) return;
   const c = components.value[target.compIdx] as any;
   if (!c) return;
-  if (target.album && c.kind === 'album') {
+  const valid = assets.filter((a) => a.url);
+
+  if (c.kind === 'album') {
     if (!c.items) c.items = [];
-    for (const a of assets) {
-      if (a.url && c.items.length < 10) c.items.push({ url: a.url, mediaAssetId: a.id });
+    for (const a of valid) {
+      if (c.items.length < 10) c.items.push({ url: a.url, mediaAssetId: a.id });
     }
-  } else if (assets[0]?.url) {
-    // single: set url + mediaAssetId (engine resolve url; mediaAssetId để đếm dùng GĐ4).
-    c.url = assets[0].url;
-    c.mediaAssetId = assets[0].id;
+  } else if (c.kind === 'image' && valid.length > 1) {
+    // ẢNH ĐƠN + chọn NHIỀU → TỰ CHUYỂN component sang ALBUM (anh muốn chèn nhiều ảnh = 1 album).
+    components.value[target.compIdx] = {
+      kind: 'album',
+      items: valid.slice(0, 10).map((a) => ({ url: a.url as string, mediaAssetId: a.id })),
+    } as any;
+  } else if (valid[0]?.url) {
+    // single (image 1 / video / file): set url + mediaAssetId (engine resolve url; id để đếm dùng).
+    c.url = valid[0].url;
+    c.mediaAssetId = valid[0].id;
   }
   markDirty();
   mediaPickerFor.value = null;
