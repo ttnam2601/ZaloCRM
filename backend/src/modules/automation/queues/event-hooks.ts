@@ -777,6 +777,13 @@ export async function onManualStop(input: {
 }): Promise<void> {
   await setContactPauseFlag(input.triggerId, input.contactId, 24 * 365); // forever
   await cancelPendingStepsForContact(input.triggerId, input.contactId);
+  // FIX code-review #6: ĐÓNG phiên (reason='sale_resolved') + CLEAR pausedAtStepIdx. Nếu
+  // để phiên active → janitor sau này đóng nó là 'janitor_silence' → resume worker hồi
+  // sinh luồng sale đã chủ ý dừng. closedReason != janitor_silence → resume KHÔNG quét.
+  await prisma.careSession.updateMany({
+    where: { orgId: input.orgId, contactId: input.contactId, sourceTriggerId: input.triggerId, state: 'active' },
+    data: { state: 'closed', closedReason: 'sale_resolved', closedAt: new Date(), pausedAtStepIdx: null },
+  }).catch((e) => logger.warn(`[event-hooks] onManualStop close session failed: ${(e as Error).message}`));
   await prisma.automationEventLog.create({
     data: {
       orgId: input.orgId,

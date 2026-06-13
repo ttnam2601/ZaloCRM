@@ -82,6 +82,9 @@ export async function pickSequenceNickForContact(args: {
       orgId,
       contactId,
       strangerBlocked: { not: true }, // bỏ cặp KH đã bật chặn tin lạ
+      // FIX code-review #4: loại KH đã CHẶN/XÓA/TỪ CHỐI nick (filter cũ OR[accepted|
+      // pending+chat] ngầm loại các status này — filter mới phải loại lại tường minh).
+      friendshipStatus: { notIn: ['blocked', 'removed', 'rejected'] },
       zaloAccount: { status: 'connected' },
     },
     select: {

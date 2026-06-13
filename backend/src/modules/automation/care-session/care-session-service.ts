@@ -495,6 +495,8 @@ export async function resumePausedSequences(): Promise<{ resumed: number }> {
       sourceTriggerId: true,
       sourceSequenceId: true,
       pausedAtStepIdx: true,
+      lastCustomerActivityAt: true,
+      closedAt: true,
     },
     take: 200,
   });
@@ -505,6 +507,13 @@ export async function resumePausedSequences(): Promise<{ resumed: number }> {
 
   for (const s of stuck) {
     if (!s.sourceTriggerId || !s.sourceSequenceId || s.pausedAtStepIdx == null) continue;
+    // Codex #2 (chống "close cũ hồi sinh send sau reply mới"): nếu khách có activity SAU
+    // khi phiên đóng → KHÔNG resume (khách lại đang chat, đừng gửi đè). Chỉ clear marker.
+    if (s.lastCustomerActivityAt && s.closedAt && s.lastCustomerActivityAt > s.closedAt) {
+      await prisma.careSession.update({ where: { id: s.id }, data: { pausedAtStepIdx: null } }).catch(() => null);
+      logger.info(`[care-session] resume SKIP session=${s.id} — khách có activity sau khi đóng (clear marker)`);
+      continue;
+    }
     try {
       const seq = await prisma.automationSequence.findUnique({
         where: { id: s.sourceSequenceId },

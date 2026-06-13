@@ -158,30 +158,32 @@ export async function sendMessageHandler(ctx: ActionContext): Promise<ActionResu
       retryable: false,
     };
   }
-  // FIX A5: send_message restricted to friendshipStatus='accepted' ONLY.
-  // Previously allowed pending_sent/pending_received/none which Zalo policy
-  // either silently drops or marks as spam. send_message is for confirmed
-  // friends; cold-message via 'none' should use request_friend action instead.
-  // Exception: 'pending_sent' with hasConversation=true (KH đã reply qua stranger
-  // window) — Zalo allows that path. Worker check below.
-  //
-  // Phase Friend Invite 2026-05-28 — `allowStrangerMessage` flag in rulesSnapshot
-  // bypass FRIENDSHIP_NOT_ACCEPTED check cho friend-invite sequences (KH reject vẫn
-  // bám đuổi vào tin nhắn lạ). Anh chốt SKIP safeguard, cap 300 tin lạ/nick/ngày.
-  const allowStranger =
-    (ctx.rulesSnapshot as { allowStrangerMessage?: boolean } | undefined)?.allowStrangerMessage ===
-    true;
+  // 2026-06-13 (Sequence recode Đợt 1 — GỬI BẤT CHẤP, FIX code-review #1+#4):
+  //   - Đường sequence/manual bám đuổi MẶC ĐỊNH cho gửi bất chấp bạn/lạ (anh chốt trụ
+  //     cột 2). KHÔNG còn phụ thuộc runtimeRules.allowStrangerMessage (bug cũ: sequence
+  //     manual không set cờ → KH lạ status='none' fail FRIENDSHIP_NOT_ACCEPTED → gửi-bất-
+  //     chấp chết). allowStranger bật khi đây là đường automation (ctx.sequenceMeta có).
+  //   - NHƯNG chặn cứng 'blocked'/'removed'/'rejected' (KH đã CHẶN/XÓA nick — code-review
+  //     #4): nick-selector cũ lọc OR[accepted|pending+chat] ngầm loại các status này;
+  //     filter strangerBlocked mới là cờ KHÁC → phải chặn lại ở đây.
+  const HOSTILE_STATUSES = new Set(['blocked', 'removed', 'rejected']);
+  if (HOSTILE_STATUSES.has(friend.friendshipStatus)) {
+    return {
+      outcome: 'failure',
+      errorCode: 'FRIENDSHIP_HOSTILE',
+      errorMessage: `Khách đã ${friend.friendshipStatus === 'blocked' ? 'chặn' : friend.friendshipStatus === 'removed' ? 'xóa kết bạn' : 'từ chối'} nick này — không bám đuổi được.`,
+      retryable: false,
+    };
+  }
 
-  if (friend.friendshipStatus !== 'accepted') {
-    if (allowStranger) {
-      logger.info(
-        `[send-message] stranger mode: friend.status='${friend.friendshipStatus}' allowed by sequence rules for contact=${ctx.contactId}`,
-      );
-      // proceed — tin sẽ vào "Tin nhắn từ người lạ" của KH
-    } else if (friend.friendshipStatus === 'pending_sent' && friend.hasConversation) {
-      // Allow: KH replied while friend req pending — Zalo allows continued chat
-      logger.info(`[send-message] proceeding with pending_sent + hasConversation for contact=${ctx.contactId}`);
-    } else {
+  // allowStranger: đường automation (sequenceMeta) hoặc rules bật cờ → gửi vào hộp lạ.
+  const allowStranger =
+    !!ctx.sequenceMeta ||
+    (ctx.rulesSnapshot as { allowStrangerMessage?: boolean } | undefined)?.allowStrangerMessage === true;
+
+  if (friend.friendshipStatus !== 'accepted' && !allowStranger) {
+    // Không phải automation + không bật cờ + chưa accepted → giữ chặn cũ (gửi tay lẻ).
+    if (!(friend.friendshipStatus === 'pending_sent' && friend.hasConversation)) {
       return {
         outcome: 'failure',
         errorCode: 'FRIENDSHIP_NOT_ACCEPTED',
@@ -194,6 +196,11 @@ export async function sendMessageHandler(ctx: ActionContext): Promise<ActionResu
   const threadId = friend.zaloUidInNick;
   const threadType = 0; // 0 = user, 1 = group (only user supported)
   // (Render template {gender}/{name}/{sale} thực hiện PER-TIN trong loop ở Step 3.)
+
+  // FIX code-review #1 (tầng 2): KH chưa accepted + gửi bất chấp → payload PHẢI kèm
+  // allowStrangerMessage:true để Zalo nhận vào hộp "tin nhắn từ người lạ" (giống
+  // sendStrangerFollowUp event-hooks.ts:260). Thiếu cờ → Zalo thả tin (success giả).
+  const sendStranger = allowStranger && friend.friendshipStatus !== 'accepted';
 
   // Step 2: get-or-create Conversation
   let conversation = await prisma.conversation.findUnique({
@@ -253,6 +260,7 @@ export async function sendMessageHandler(ctx: ActionContext): Promise<ActionResu
         const msgPayload: Record<string, unknown> = { msg: rendered };
         const useStyles = styles.length > 0;
         if (useStyles) msgPayload.styles = styles;
+        if (sendStranger) msgPayload.allowStrangerMessage = true; // FIX #1 tầng 2: vào hộp người lạ
         const raw = await zaloOps.sendMessage(ctx.assignedNickId, threadId, threadType, msgPayload);
         sdkResult = (raw as Record<string, unknown>) || {};
         persistContent = useStyles

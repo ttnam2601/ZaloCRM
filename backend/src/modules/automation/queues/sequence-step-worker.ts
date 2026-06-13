@@ -46,6 +46,7 @@ import {
 } from './worker-guards.js';
 import { classifyError } from './error-classify.js';
 import { sendMessageHandler } from '../engine/action-handlers/send-message.js';
+import { stepDelayMs, nextAllowedTime } from '../engine/schedule-calculator.js';
 import type { ActionContext } from '../engine/types.js';
 
 export interface SequenceStepJobData {
@@ -56,6 +57,10 @@ export interface SequenceStepJobData {
   orgId: string;
   stepIdx: number;
   totalSteps: number;
+  // FIX code-review #2: snapshot runtimeRules (sendGap luật 2 + allowedHourRange luật 1)
+  // chuyền theo job → enqueueNextStep tính delay đúng (trước đây dùng step.delayMinutes
+  // thô → sendGap dead config). Optional: job cũ thiếu field → fallback step.delayMinutes.
+  runtimeRules?: Record<string, unknown>;
 }
 
 export interface SequenceStepResult {
@@ -146,7 +151,14 @@ async function enqueueNextStep(
 
   const queue = getSequenceStepQueue();
   const nextJobId = buildSequenceStepJobId(data.triggerId, data.sequenceId, data.contactId, nextStepIdx);
-  const delayMs = Math.max(0, delayMinutes * 60_000);
+
+  // FIX code-review #2: LUẬT 2 (sendGap) — delay từ schedule-calculator (rules.sendGap
+  // giây→ngày), fallback step.delayMinutes nếu chưa set. LUẬT 1 (giờ) — dời mốc gửi vào
+  // khung allowedHourRange (nếu rơi ngoài giờ → đầu khung kế). Trước đây cả 2 là dead config.
+  const rules = (data.runtimeRules ?? undefined) as import('../sequences/types.js').SequenceRuntimeRules | undefined;
+  const baseDelayMs = stepDelayMs(rules, delayMinutes);
+  const runAt = nextAllowedTime(new Date(Date.now() + baseDelayMs), rules?.allowedHourRange);
+  const delayMs = Math.max(0, runAt.getTime() - Date.now());
 
   // Idempotent enqueue — jobId dedup (Issue #5 5A POC verified).
   // Nếu sweeper retry hoặc race, BullMQ dedup theo jobId.
@@ -313,15 +325,31 @@ async function processJob(
   }
   const step = steps[stepIdx];
 
-  // ── STEP 2: M5 pause flag check ──
+  // ── STEP 2: pause check (Redis flag NHANH + CareSession CHÂN LÝ) ──
+  // FIX code-review #3: Redis pause flag TTL ngắn (24h) nhưng phiên đóng sau im-lặng (7
+  // ngày) → khoảng hở 6 ngày job tỉnh dậy gửi đè khách đang chat. Bổ sung check DB:
+  // nếu CareSession của cặp này còn pausedAtStepIdx (khách đã reply, CHƯA resume) → defer.
+  // resume worker (cron) sẽ re-enqueue khi phiên đóng. CareSession là nguồn chân lý pause.
   const redis = getBullMQRedis();
   const pauseKey = `contact:paused:${triggerId}:${contactId}`;
   const pauseTtl = await redis.pttl(pauseKey);
   if (pauseTtl > 0 && token) {
     const resumeAt = Date.now() + pauseTtl;
     await job.moveToDelayed(resumeAt, token);
-    logger.info(`${tag} paused contact ${contactId}, defer ${pauseTtl}ms`);
+    logger.info(`${tag} paused contact ${contactId} (redis flag), defer ${pauseTtl}ms`);
     throw new DelayedError();
+  }
+  if (token) {
+    const pausedSession = await prisma.careSession.findFirst({
+      where: { orgId, contactId, sourceSequenceId: sequenceId, pausedAtStepIdx: { not: null } },
+      select: { id: true },
+    });
+    if (pausedSession) {
+      // Khách đã reply, chưa hết phiên → defer 1h, kiểm lại (resume sẽ lo khi phiên đóng).
+      await job.moveToDelayed(Date.now() + 60 * 60_000, token);
+      logger.info(`${tag} LUẬT 4: phiên còn pausedAtStepIdx (khách đã reply) → defer 1h chờ resume contact=${contactId}`);
+      throw new DelayedError();
+    }
   }
 
   // ── STEP 3: Run 5 guards ──
@@ -408,9 +436,18 @@ async function processJob(
     // sau khi khách đã trả lời). Tiến độ giữ ở pausedAtStepIdx (message-handler đã ghi).
     if (token) {
       const pauseTtlNow = await redis.pttl(pauseKey);
-      if (pauseTtlNow > 0) {
-        logger.info(`${tag} LUẬT 4: KH vừa reply trước send — defer ${pauseTtlNow}ms (active-send race guard)`);
-        await job.moveToDelayed(Date.now() + pauseTtlNow, token);
+      // FIX #3: check CẢ Redis flag LẪN CareSession.pausedAtStepIdx (chân lý, không hết
+      // hạn sau 24h). Khách reply giữa STEP 2 và đây → 1 trong 2 bắt được.
+      const pausedNow = pauseTtlNow > 0
+        ? true
+        : !!(await prisma.careSession.findFirst({
+            where: { orgId, contactId, sourceSequenceId: sequenceId, pausedAtStepIdx: { not: null } },
+            select: { id: true },
+          }));
+      if (pausedNow) {
+        const deferMs = pauseTtlNow > 0 ? pauseTtlNow : 60 * 60_000;
+        logger.info(`${tag} LUẬT 4: KH vừa reply trước send — defer ${deferMs}ms (active-send race guard)`);
+        await job.moveToDelayed(Date.now() + deferMs, token);
         throw new DelayedError();
       }
     }
@@ -663,7 +700,7 @@ export async function enqueueSequenceStart(input: {
 }): Promise<void> {
   const seq = await prisma.automationSequence.findUnique({
     where: { id: input.sequenceId },
-    select: { steps: true, enabled: true },
+    select: { steps: true, enabled: true, runtimeRules: true },
   });
 
   if (!seq || !seq.enabled) {
@@ -679,7 +716,12 @@ export async function enqueueSequenceStart(input: {
 
   const queue = getSequenceStepQueue();
   const jobId = buildSequenceStepJobId(input.triggerId, input.sequenceId, input.contactId, 0);
-  const delayMs = Math.max(0, (input.startDelayMinutes ?? 60) * 60_000);
+  // FIX #2: bước 0 cũng né ngoài giờ (luật 1). startDelayMinutes=0 (manual gửi ngay) → chỉ
+  // dời nếu hiện tại ngoài khung giờ hoạt động.
+  const startRules = (seq.runtimeRules ?? undefined) as import('../sequences/types.js').SequenceRuntimeRules | undefined;
+  const startBaseMs = Math.max(0, (input.startDelayMinutes ?? 60) * 60_000);
+  const startRunAt = nextAllowedTime(new Date(Date.now() + startBaseMs), startRules?.allowedHourRange);
+  const delayMs = Math.max(0, startRunAt.getTime() - Date.now());
 
   try {
     await queue.add(
@@ -692,6 +734,7 @@ export async function enqueueSequenceStart(input: {
         orgId: input.orgId,
         stepIdx: 0,
         totalSteps: steps.length,
+        runtimeRules: (seq.runtimeRules as Record<string, unknown>) ?? undefined, // FIX #2 chuyền rules
       },
       { jobId, delay: delayMs },
     );
@@ -752,22 +795,34 @@ export async function sweepMissingNextSteps(): Promise<{ recovered: number }> {
     if (enqueuedExists) continue;
 
     // Sweeper recovery: enqueue step N+1 với jobId dedup.
-    // 2026-06-13: jobId cần sequenceId → load trigger TRƯỚC khi build jobId.
+    // 2026-06-13 (FIX code-review #5): jobId cần sequenceId. trigger.sequenceId NULL cho
+    // system trigger gắn tay → KHÔNG dùng được. Nguồn chân lý "khách đang chạy luồng nào"
+    // = CareSession active (sourceSequenceId). Fallback trigger.sequenceId cho trigger thường.
     const queue = getSequenceStepQueue();
     const trigger = await prisma.automationTrigger.findUnique({
       where: { id: evt.triggerId },
       select: { sequenceId: true, orgId: true },
     });
-    if (!trigger?.sequenceId) continue;
+    if (!trigger) continue;
+    let sequenceId = trigger.sequenceId;
+    if (!sequenceId) {
+      const session = await prisma.careSession.findFirst({
+        where: { contactId: evt.contactId, sourceTriggerId: evt.triggerId, state: 'active', sourceSequenceId: { not: null } },
+        orderBy: { openedAt: 'desc' },
+        select: { sourceSequenceId: true },
+      });
+      sequenceId = session?.sourceSequenceId ?? null;
+    }
+    if (!sequenceId) continue; // không xác định được luồng → bỏ qua an toàn
 
-    const nextJobId = buildSequenceStepJobId(evt.triggerId, trigger.sequenceId, evt.contactId, nextStepIdx);
+    const nextJobId = buildSequenceStepJobId(evt.triggerId, sequenceId, evt.contactId, nextStepIdx);
     const existingJob = await queue.getJob(nextJobId);
     if (existingJob) {
       logger.info(`[sweeper] job ${nextJobId} exists in queue, skip`);
       continue;
     }
 
-    const steps = await loadSequenceSteps(trigger.sequenceId); // 2026-06-04 dual-read
+    const steps = await loadSequenceSteps(sequenceId); // 2026-06-04 dual-read
     if (nextStepIdx >= steps.length) continue;
 
     // Find current nick assigned (from outbox or entry)
@@ -777,16 +832,23 @@ export async function sweepMissingNextSteps(): Promise<{ recovered: number }> {
     });
     if (!outbox) continue;
 
+    // FIX #5: lấy runtimeRules để job recovery cũng đúng luật 1+2 (giống enqueue thường).
+    const seqRules = await prisma.automationSequence.findUnique({
+      where: { id: sequenceId },
+      select: { runtimeRules: true },
+    });
+
     await queue.add(
       'sequence-step',
       {
         triggerId: evt.triggerId,
         contactId: evt.contactId,
-        sequenceId: trigger.sequenceId,
+        sequenceId,
         nickId: outbox.nickId,
         orgId: trigger.orgId,
         stepIdx: nextStepIdx,
         totalSteps: steps.length,
+        runtimeRules: (seqRules?.runtimeRules as Record<string, unknown>) ?? undefined,
       },
       { jobId: nextJobId, delay: (steps[nextStepIdx].delayMinutes ?? 60) * 60_000 },
     );
