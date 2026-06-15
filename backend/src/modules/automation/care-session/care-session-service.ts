@@ -76,16 +76,25 @@ function computeWindowUntil(silenceDays: number): Date {
  * Luật 3 (chống spam, anh chốt D2+D3 + race guard Codex #6): KH đã được gắn CÙNG luồng
  * này trong X ngày qua → CHẶN enroll lại. Mốc = CareSession.openedAt (lần gắn gần nhất).
  *
- * @returns { blocked:true, lastOpenedAt } nếu trong cooldown; { blocked:false } nếu cho enroll.
+ * @returns blocked + chi tiết để báo sale rõ: ngày gắn (lastOpenedAt), ngày đóng phiên
+ *          (lastClosedAt — null nếu đang chạy), ngày được gắn lại (unlockAt), còn N ngày.
  */
 export async function checkReEnrollCooldown(args: {
   orgId: string;
   contactId: string;
   sequenceId: string;
   cooldownDays: number;
-}): Promise<{ blocked: boolean; lastOpenedAt?: Date }> {
+}): Promise<{
+  blocked: boolean;
+  lastOpenedAt?: Date;
+  lastClosedAt?: Date | null;
+  unlockAt?: Date;
+  daysLeft?: number;
+  cooldownDays?: number;
+}> {
   const days = args.cooldownDays > 0 ? args.cooldownDays : DEFAULT_REENROLL_COOLDOWN_DAYS;
-  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const cutoff = new Date(Date.now() - days * dayMs);
   const recent = await prisma.careSession.findFirst({
     where: {
       orgId: args.orgId,
@@ -94,9 +103,20 @@ export async function checkReEnrollCooldown(args: {
       openedAt: { gte: cutoff },
     },
     orderBy: { openedAt: 'desc' },
-    select: { openedAt: true },
+    select: { openedAt: true, closedAt: true },
   });
-  return recent ? { blocked: true, lastOpenedAt: recent.openedAt } : { blocked: false };
+  if (!recent) return { blocked: false };
+  // Được gắn lại = openedAt + cooldown. Còn lại = unlockAt - now (làm tròn LÊN ngày).
+  const unlockAt = new Date(recent.openedAt.getTime() + days * dayMs);
+  const daysLeft = Math.max(0, Math.ceil((unlockAt.getTime() - Date.now()) / dayMs));
+  return {
+    blocked: true,
+    lastOpenedAt: recent.openedAt,
+    lastClosedAt: recent.closedAt,
+    unlockAt,
+    daysLeft,
+    cooldownDays: days,
+  };
 }
 
 /**

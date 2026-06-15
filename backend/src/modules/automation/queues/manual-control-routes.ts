@@ -552,10 +552,28 @@ export async function registerManualControlRoutes(app: FastifyInstance): Promise
       const cooldownDays = typeof seqRules?.reEnrollCooldownDays === 'number' ? seqRules.reEnrollCooldownDays : 30;
       const cool = await checkReEnrollCooldown({ orgId, contactId: cid, sequenceId: sequence.id, cooldownDays });
       if (cool.blocked) {
+        // Thông báo rõ (anh chốt 2026-06-15): tên luồng + ngày gắn + ngày hoàn thành
+        // (hoặc "đang chạy" nếu phiên chưa đóng) + đếm ngược số ngày còn lại.
+        const fmt = (d?: Date | null) => (d ? d.toLocaleDateString('vi-VN') : null);
+        const startStr = fmt(cool.lastOpenedAt) ?? '—';
+        const doneStr = cool.lastClosedAt ? fmt(cool.lastClosedAt) : 'đang chạy (chưa đóng phiên)';
         reply.code(409);
         return {
           error: 'reenroll_cooldown',
-          detail: `Khách vừa được gắn luồng này trong ${cooldownDays} ngày qua (lần trước: ${cool.lastOpenedAt?.toLocaleDateString('vi-VN')}). Chờ hết ${cooldownDays} ngày hoặc chọn luồng khác.`,
+          detail:
+            `Khách hàng này đã được bám đuổi luồng "${sequence.name}" vào ngày ${startStr}, ` +
+            `hoàn thành ${doneStr}. ` +
+            `Nếu muốn gắn lại luồng này cho khách, còn ${cool.daysLeft} ngày ` +
+            `(được gắn lại từ ${fmt(cool.unlockAt) ?? '—'}).`,
+          // Dữ liệu thô để FE tự render badge/đếm ngược nếu muốn.
+          meta: {
+            sequenceName: sequence.name,
+            startedAt: cool.lastOpenedAt?.toISOString() ?? null,
+            completedAt: cool.lastClosedAt?.toISOString() ?? null,
+            unlockAt: cool.unlockAt?.toISOString() ?? null,
+            daysLeft: cool.daysLeft ?? 0,
+            cooldownDays: cool.cooldownDays ?? cooldownDays,
+          },
         };
       }
 
