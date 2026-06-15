@@ -25,18 +25,18 @@
         <span class="dot" />
         Mất kết nối realtime — đang thử kết nối lại...
       </div>
-      <!-- work-scope 2026-06-15 — "N tin nick khác": có tin ở nick NGOÀI Phạm vi xem.
-           Không bỏ lỡ khách. Bấm nick → khóa scope sang nick đó + reload. Chỉ nick có quyền. -->
-      <div v-if="outOfScopeTotal > 0" class="out-of-scope-bar">
-        <span class="oos-label">📥 {{ outOfScopeTotal }} tin ở nick khác:</span>
-        <button
-          v-for="b in outOfScopeBadges"
-          :key="b.id"
-          class="oos-chip"
-          :title="`Xem ${b.count} tin ở nick ${b.name}`"
-          @click="onPickOutOfScopeNick(b.id)"
-        >{{ b.name }} <span class="oos-count">{{ b.count }}</span></button>
-      </div>
+      <!-- work-scope 2026-06-15 — 1 DÒNG tóm tắt "N tin ở M nick khác" (anh chốt: gọn,
+           không liệt kê từng nick, icon hệ thống không emoji). Ẩn khi không có tin.
+           Bấm → về "Toàn bộ" (xem tất cả nick) + reload. Chỉ đếm nick CÓ QUYỀN. -->
+      <button
+        v-if="outOfScopeTotal > 0"
+        class="out-of-scope-bar"
+        :title="`Có ${outOfScopeTotal} tin ở ${outOfScopeNickCount} nick khác — bấm để xem tất cả`"
+        @click="onShowAllOutOfScope"
+      >
+        <v-icon size="16" class="oos-icon">mdi-bell-outline</v-icon>
+        <span class="oos-text">{{ outOfScopeTotal }} tin ở {{ outOfScopeNickCount }} nick khác</span>
+      </button>
       <ConversationList
         :conversations="conversations"
         :selected-id="selectedConvId"
@@ -216,25 +216,25 @@ function restoreScope() {
   const saved = loadScopeRaw();
   inboxFilters.setFolder(saved.folderId);
 }
-// work-scope 2026-06-15 — badge "N tin nick khác": gom outOfScopeCounts → {nick, tên, số}.
-// CHỈ hiện nick CÓ QUYỀN (join với zaloAccounts đã qua getZaloScope) — bảo mật, không lộ
-// nick ngoài quyền. Bấm 1 badge → khóa scope sang nick đó + reload (đúng quy tắc nav).
-const outOfScopeBadges = computed(() => {
-  const out: Array<{ id: string; name: string; count: number }> = [];
+// work-scope 2026-06-15 — tóm tắt "N tin ở M nick khác" (anh chốt: 1 dòng, không liệt kê).
+// CHỈ đếm nick CÓ QUYỀN (join zaloAccounts đã qua getZaloScope) — bảo mật, không lộ/đếm
+// nick ngoài quyền.
+const outOfScopeAccessible = computed(() => {
+  const out: Array<{ id: string; count: number }> = [];
   for (const [id, count] of outOfScopeCounts.value) {
     const acc = (zaloAccounts.value || []).find(a => a.id === id);
-    if (!acc) continue; // nick ngoài quyền/đã gỡ → KHÔNG hiện (bảo mật)
-    out.push({ id, name: acc.displayName || 'Nick khác', count });
+    if (!acc) continue; // nick ngoài quyền/đã gỡ → KHÔNG đếm (bảo mật)
+    out.push({ id, count });
   }
   return out;
 });
-const outOfScopeTotal = computed(() => outOfScopeBadges.value.reduce((s, b) => s + b.count, 0));
-function onPickOutOfScopeNick(id: string) {
-  clearOutOfScopeBadge(id);
-  if (workScope.setScope([id])) {
-    // scope đổi → reload để nạp cột 2 đúng nick (đồng nhất với luồng nav-bug).
-    window.location.reload();
-  }
+const outOfScopeTotal = computed(() => outOfScopeAccessible.value.reduce((s, b) => s + b.count, 0));
+const outOfScopeNickCount = computed(() => outOfScopeAccessible.value.length);
+// Bấm dòng → về "Toàn bộ" (scope rỗng = tất cả nick có quyền) + reload (anh chốt).
+function onShowAllOutOfScope() {
+  for (const b of outOfScopeAccessible.value) clearOutOfScopeBadge(b.id);
+  workScope.setScope([]); // [] = TẤT CẢ nick có quyền
+  window.location.reload();
 }
 
 const currentAccount = computed(() => {
@@ -723,42 +723,25 @@ watch(searchQuery, () => {
   background: var(--smax-bg);
 }
 
-/* work-scope 2026-06-15 — bar "N tin nick khác" ở đầu cột 2 */
+/* work-scope 2026-06-15 — 1 DÒNG "N tin ở M nick khác" ở đầu cột 2 (anh chốt: gọn) */
 .out-of-scope-bar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 6px;
+  width: 100%;
   padding: 6px 12px;
   background: #eff6ff;
+  border: none;
   border-bottom: 1px solid #bfdbfe;
-}
-.out-of-scope-bar .oos-label {
   font-size: 12px;
   font-weight: 600;
   color: #1e40af;
-}
-.out-of-scope-bar .oos-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  font-size: 12px;
-  border-radius: 999px;
-  border: 1px solid #93c5fd;
-  background: #fff;
-  color: #1e40af;
   cursor: pointer;
+  text-align: left;
 }
-.out-of-scope-bar .oos-chip:hover { background: #dbeafe; }
-.out-of-scope-bar .oos-count {
-  font-weight: 700;
-  background: #1e40af;
-  color: #fff;
-  border-radius: 999px;
-  padding: 0 5px;
-  font-size: 11px;
-}
+.out-of-scope-bar:hover { background: #dbeafe; }
+.out-of-scope-bar .oos-icon { color: #1e40af; }
+.out-of-scope-bar .oos-text { line-height: 1.2; }
 
 /* FIX socket-chết v2 — banner mất kết nối realtime ở đầu cột 2 */
 .realtime-offline-banner {
