@@ -170,7 +170,10 @@ export async function updateContactAggregate(contactId: string): Promise<void> {
       where: { id: contactId },
       data: {
         leadScore: result.leadScore,
-        statusId: result.statusId,
+        // FIFO 2026-06-16 — KHÔNG ghi đè Contact.statusId về null khi không Friend nào có status
+        // (vd lead Pool KH-không-Zalo: status được set thẳng vào Contact, chưa có Friend mang status).
+        // Chỉ cập nhật khi aggregate ra status thật (≥1 Friend có status). Giữ status sale đã set.
+        ...(result.statusId !== null ? { statusId: result.statusId } : {}),
         ownerFriendId: result.ownerFriendId,
         aggregateBreakdown: result.aggregateBreakdown as any,
         autoTags: result.autoTags,

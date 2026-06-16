@@ -61,6 +61,8 @@ services:
       POSTGRES_USER: ${DB_USER:-crmuser}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME:-zalocrm}
+      # TZ giờ VN cho OS container + log. Storage vẫn UTC (xem -c timezone bên dưới).
+      TZ: Asia/Ho_Chi_Minh
     volumes:
       - pg_data:/var/lib/postgresql/data
     ports:
@@ -70,16 +72,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # ── Timezone (Cách 2 — giờ VN cho ops/log, 2026-06-14) ──────────────────────
+    #   log_timezone=Asia/Ho_Chi_Minh → log Postgres hiện giờ VN, dễ đối chiếu UI.
+    #   timezone=UTC (GIỮ NGUYÊN)     → CURRENT_TIMESTAMP / @default(now()) lưu UTC.
+    #   ĐỪNG đổi timezone sang Asia/Ho_Chi_Minh: Prisma đọc cột timestamp như UTC
+    #   → toàn bộ mốc thời gian sẽ lệch +7h (xem notes/claude-memory timezone).
     command: >
       postgres
       -c shared_buffers=128MB
       -c effective_cache_size=256MB
       -c max_connections=50
+      -c timezone=UTC
+      -c log_timezone=Asia/Ho_Chi_Minh
 
   redis:
     image: redis:7-alpine
     container_name: zalo-crm-redis
     restart: unless-stopped
+    environment:
+      - TZ=Asia/Ho_Chi_Minh   # log Redis giờ VN (Cách 2); Redis không lưu thời gian nghiệp vụ
     # ── Luồng Mục Tiêu M1 (2026-06-01) ──
     # AOF every 1s (Issue #5 5A — crash recovery survive: BullMQ jobs delayed/waiting
     # persist even if container kill -9). Verified POC spike 5/5 PASS 2026-06-01.
@@ -112,6 +123,7 @@ services:
       # minioadmin which let anyone with network access pop the admin console.
       MINIO_ROOT_USER:     "${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set in .env}"
       MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set in .env}"
+      TZ: Asia/Ho_Chi_Minh   # log MinIO giờ VN (Cách 2)
     volumes:
       - minio_data:/data
     ports:
@@ -163,6 +175,9 @@ services:
     volumes:
       - ./backups:/backups
     environment:
+      # TZ giờ VN → SCHEDULE '@daily' chạy 00:00 giờ VN (trước đây UTC = 07:00 sáng VN);
+      # tên file backup cũng theo giờ VN. Dữ liệu dump vẫn là UTC y như DB lưu.
+      TZ: Asia/Ho_Chi_Minh
       POSTGRES_HOST: db
       POSTGRES_DB: ${DB_NAME:-zalocrm}
       POSTGRES_USER: ${DB_USER:-crmuser}
@@ -182,6 +197,8 @@ services:
     image: clamav/clamav:1.3
     container_name: zalo-crm-clamav
     restart: unless-stopped
+    environment:
+      - TZ=Asia/Ho_Chi_Minh   # log ClamAV giờ VN (Cách 2)
     # KHÔNG mở port ra host — chỉ app trong cùng network gọi clamav:3310.
     volumes:
       - clamav_data:/var/lib/clamav   # giữ DB virus qua restart (đỡ tải lại mỗi lần)

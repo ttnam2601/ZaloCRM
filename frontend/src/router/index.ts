@@ -335,3 +335,84 @@ router.beforeEach(async (to, _from, next) => {
 
   next();
 });
+
+// ── Tiêu đề tab trình duyệt theo màn hình (2026-06-16) ─────────────────────────
+// Map route.name → tên màn hình hiển thị trên tab Chrome. Gom 1 chỗ cho dễ bảo
+// trì (khỏi rải meta.title khắp ~70 route). Route không có trong map → chỉ hiện
+// brand. Title dạng "Tên màn hình · ZaloCRM".
+const BRAND = 'ZaloCRM';
+const ROUTE_TITLES: Record<string, string> = {
+  // Top-level
+  Login: 'Đăng nhập',
+  Setup: 'Khởi tạo',
+  SetupPassword: 'Đổi mật khẩu',
+  Dashboard: 'Tổng quan',
+  Chat: 'Hội thoại',
+  Contacts: 'Khách hàng',
+  Media: 'Kho phương tiện',
+  Profile: 'Hồ sơ cá nhân',
+  Appointments: 'Lịch hẹn',
+  Reports: 'Báo cáo',
+  Analytics: 'Phân tích',
+  CustomerActivityLog: 'Nhật ký hoạt động KH',
+  ContactProfile: 'Hồ sơ khách hàng',
+  StuckLeads: 'Lead bị kẹt',
+  Automation: 'Tự động hóa',
+  Groups: 'Nhóm',
+  Friends: 'Bạn bè',
+  NotFound: 'Không tìm thấy trang',
+  // Cài đặt
+  Settings: 'Cài đặt',
+  'Settings.Profile': 'Tài khoản của tôi',
+  'Settings.Notifications': 'Thông báo',
+  'Settings.Theme': 'Giao diện',
+  'Settings.Sessions': 'Phiên đăng nhập',
+  'Settings.OrgProfile': 'Hồ sơ tổ chức',
+  'Settings.SystemNotifications': 'Thông báo hệ thống',
+  'Settings.Billing': 'Thanh toán',
+  'Settings.Audit': 'Nhật ký kiểm toán',
+  'Settings.RbacDepartments': 'Phòng ban',
+  'Settings.RbacPermissionGroups': 'Nhóm quyền',
+  'Settings.RbacUsers': 'Người dùng',
+  'Settings.Statuses': 'Trạng thái',
+  'Settings.Tags': 'Thẻ (tag)',
+  'Settings.TagsV2': 'Thẻ (taxonomy)',
+  'Settings.ZaloLabels': 'Nhãn Zalo',
+  'Settings.Scoring': 'Chấm điểm tương tác',
+  'Settings.Stuck': 'KH bị kẹt',
+  'Settings.Folders': 'Thư mục',
+  'Settings.Templates': 'Mẫu tin',
+  'Settings.LeadPool': 'Lead Pool',
+  'Settings.AiAssistant': 'Trợ lý AI',
+  'Settings.ZaloAccounts': 'Tài khoản Zalo',
+  'Settings.FacebookLeadAds': 'Facebook Lead Ads',
+  'Settings.RateLimit': 'Giới hạn tốc độ',
+  'Settings.Automation': 'Cài đặt Automation',
+  'Settings.Integrations': 'Tích hợp',
+  'Settings.Api': 'API & Webhook',
+  'Settings.PublicToken': 'Public Token',
+  'Settings.FeatureFlags': 'Feature Flags',
+  'Settings.Backup': 'Sao lưu',
+  // Marketing
+  'Marketing.MucTieuList': 'Mục tiêu',
+  'Marketing.MucTieuCreate': 'Tạo Mục tiêu',
+  'Marketing.MucTieuDetail': 'Chi tiết Mục tiêu',
+  'Marketing.FriendInviteCreate': 'Tạo lời mời kết bạn',
+  'Marketing.ManualFollowup': 'Bám đuổi thủ công',
+  'Marketing.CareSessions': 'Phiên chăm sóc',
+  'Marketing.Blocks': 'Khối',
+  'Marketing.Templates': 'Mẫu tin nhắn',
+  'Marketing.Sequences': 'Luồng kịch bản',
+  'Marketing.SequenceStats': 'Thống kê luồng',
+  'Marketing.Broadcasts': 'Broadcast',
+  'Marketing.BroadcastWizard': 'Tạo Broadcast',
+  'Marketing.BroadcastDetail': 'Chi tiết Broadcast',
+  'Marketing.Lists': 'Danh sách KH',
+  'Marketing.ListDetail': 'Chi tiết danh sách',
+};
+
+router.afterEach((to) => {
+  const key = typeof to.name === 'string' ? to.name : '';
+  const screen = ROUTE_TITLES[key];
+  document.title = screen ? `${screen} · ${BRAND}` : BRAND;
+});

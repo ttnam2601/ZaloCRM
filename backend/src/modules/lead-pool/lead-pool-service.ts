@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma, tenantTransaction } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { logActivity } from '../activity/activity-logger.js';
+import { updateContactAggregate } from '../scoring/aggregate-contact.js';
 
 export type LeadSource = 'forgotten' | 'customer_list' | 'external_sync';
 export type ReleaseReason = 'completed' | 'auto_return' | 'manual_return';
@@ -1279,10 +1280,17 @@ function eligibilityMessage(e: EligibilityResult): string {
 /**
  * Submit note cho LeadRequest → unlock xin tiếp.
  * Phase Lead Pool FIFO 2026-06-15 — kèm statusId (tùy chọn): sau Lưu Note sale chọn
- * trạng thái KH (load từ /crm/statuses model Status). Lưu vào Contact.statusId để admin
- * LỌC tệp pool đã giao theo chất lượng trạng thái (Anh chốt cấp khách, không per-nick).
+ * trạng thái KH (load từ /crm/statuses model Status).
+ *
+ * Trạng thái ghi PER-NICK (Anh chốt 2026-06-16, ĐẢO quyết định "cấp khách" cũ): mỗi cặp
+ * (nick Zalo × KH) có trạng thái RIÊNG ở Friend row — sale dùng nick A chat KH X thì status
+ * theo Friend(A×X); nick B vẫn có thể status khác ở Friend(B×X). updateContactAggregate
+ * đẩy lên Contact.statusId = status order cao nhất của các Friend (để admin lọc tệp pool).
+ * KH không tìm ra Zalo (không có Friend row) → fallback ghi thẳng Contact.statusId.
+ *
+ *   nickId  = nick sale đang chat KH (FE truyền autoLookup.nickId). null → fallback Contact.
  */
-export async function submitNote(args: { userId: string; leadRequestId: string; noteContent: string; statusId?: string | null }) {
+export async function submitNote(args: { userId: string; leadRequestId: string; noteContent: string; statusId?: string | null; nickId?: string | null }) {
   const lr = await prisma.leadRequest.findUnique({
     where: { id: args.leadRequestId },
     include: {
@@ -1293,16 +1301,19 @@ export async function submitNote(args: { userId: string; leadRequestId: string; 
   if (lr.requestedByUserId !== args.userId) {
     throw new LeadPoolError(403, 'not_owner', 'Bạn không phải người nhận lead này');
   }
-  if (lr.noteSubmittedAt !== null) {
-    throw new LeadPoolError(400, 'already_noted', 'Lead này đã có note rồi');
-  }
   if (lr.releaseReason !== null) {
     throw new LeadPoolError(400, 'already_released', 'Lead này đã được trả về pool');
   }
 
+  // FIFO 2026-06-16 — IDEMPOTENT: lead ĐÃ noted bởi chính sale này thì KHÔNG ném already_noted
+  // nữa (response lần đầu rớt / double-fire / retry → tránh kẹt màn chọn trạng thái). Vẫn cho
+  // áp trạng thái lần này, chỉ BỎ tạo lại Note để khỏi trùng audit-trail.
+  const alreadyNoted = lr.noteSubmittedAt !== null;
+
   const config = await getOrCreateConfig(lr.contact.orgId);
   const trimmed = args.noteContent.trim();
-  if (trimmed.length < config.noteMinLength) {
+  // Validate độ dài CHỈ khi thực sự ghi note (lần đầu). Idempotent retry bỏ qua check này.
+  if (!alreadyNoted && trimmed.length < config.noteMinLength) {
     throw new LeadPoolError(400, 'note_too_short', `Note phải dài ít nhất ${config.noteMinLength} ký tự (hiện ${trimmed.length}).`);
   }
 
@@ -1317,38 +1328,61 @@ export async function submitNote(args: { userId: string; leadRequestId: string; 
     validStatusId = st.id;
   }
 
+  // Tìm Friend row đúng cặp (nick sale chat × KH) để ghi status per-nick. Không có nick / chưa
+  // có Friend (KH không Zalo) → targetFriendId=null → fallback ghi Contact.statusId bên dưới.
+  let targetFriendId: string | null = null;
+  if (validStatusId && args.nickId) {
+    const fr = await prisma.friend.findFirst({
+      where: { contactId: lr.contactId, zaloAccountId: args.nickId },
+      select: { id: true },
+    });
+    targetFriendId = fr?.id ?? null;
+  }
+
   const now = new Date();
-  // Codex MEDIUM-3 fix: conditional update để chống double-submit race.
-  // updateMany với where note_submitted_at IS NULL — chỉ row đầu tiên success;
-  // count=0 = race lose, abort tạo Note để tránh duplicate.
   await tenantTransaction(async (tx) => {
-    const updated = await tx.leadRequest.updateMany({
-      where: { id: lr.id, noteSubmittedAt: null, releaseReason: null },
-      data: { noteContent: trimmed, noteSubmittedAt: now },
-    });
-    if (updated.count === 0) {
-      throw new LeadPoolError(409, 'race_lost', 'Lead đã được note hoặc trả ở request khác');
+    if (!alreadyNoted) {
+      // Codex MEDIUM-3: conditional update chống double-submit race.
+      // count=0 = request khác vừa note xong → coi như đã noted (idempotent), KHÔNG tạo Note trùng.
+      const updated = await tx.leadRequest.updateMany({
+        where: { id: lr.id, noteSubmittedAt: null, releaseReason: null },
+        data: { noteContent: trimmed, noteSubmittedAt: now },
+      });
+      if (updated.count > 0) {
+        await tx.note.create({
+          data: {
+            id: randomUUID(),
+            orgId: lr.contact.orgId,
+            contactId: lr.contactId,
+            authorUserId: args.userId,
+            body: `[Lead Pool] ${trimmed}`,
+          },
+        });
+      }
     }
-    await tx.note.create({
-      data: {
-        id: randomUUID(),
-        orgId: lr.contact.orgId,
-        contactId: lr.contactId,
-        authorUserId: args.userId,
-        body: `[Lead Pool] ${trimmed}`,
-      },
-    });
-    await tx.contact.update({
-      where: { id: lr.contactId },
-      data: {
-        lastActivity: now,
-        // Lưu trạng thái sale chọn (nếu có) — để admin lọc tệp pool theo chất lượng.
-        ...(validStatusId ? { statusId: validStatusId } : {}),
-      },
-    });
+
+    // Ghi trạng thái: ưu tiên Friend row của nick (per-nick); fallback Contact.statusId.
+    if (validStatusId && targetFriendId) {
+      await tx.friend.update({ where: { id: targetFriendId }, data: { statusId: validStatusId } });
+      await tx.contact.update({ where: { id: lr.contactId }, data: { lastActivity: now } });
+    } else {
+      await tx.contact.update({
+        where: { id: lr.contactId },
+        data: {
+          lastActivity: now,
+          ...(validStatusId ? { statusId: validStatusId } : {}),
+        },
+      });
+    }
   });
 
-  return { ok: true, statusId: validStatusId };
+  // SAU commit (đọc dữ liệu đã commit, không phải trong tx): đẩy status Friend → Contact Cha
+  // (Contact.statusId = order cao nhất các Friend). Chỉ cần khi ghi vào Friend.
+  if (validStatusId && targetFriendId) {
+    await updateContactAggregate(lr.contactId);
+  }
+
+  return { ok: true, statusId: validStatusId, target: targetFriendId ? 'friend' : 'contact' };
 }
 
 /**

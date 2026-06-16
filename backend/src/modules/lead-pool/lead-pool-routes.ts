@@ -59,10 +59,10 @@ export async function leadPoolRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/v1/lead-pool/:id/note', async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user!;
     const { id } = request.params as { id: string };
-    const body = (request.body ?? {}) as { noteContent?: string; statusId?: string | null };
+    const body = (request.body ?? {}) as { noteContent?: string; statusId?: string | null; nickId?: string | null };
     if (!body.noteContent) return reply.status(400).send({ error: 'noteContent là bắt buộc' });
     try {
-      return await submitNote({ userId: user.id, leadRequestId: id, noteContent: body.noteContent, statusId: body.statusId ?? null });
+      return await submitNote({ userId: user.id, leadRequestId: id, noteContent: body.noteContent, statusId: body.statusId ?? null, nickId: body.nickId ?? null });
     } catch (err) {
       return handle(err, reply);
     }

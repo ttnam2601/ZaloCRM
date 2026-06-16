@@ -138,15 +138,22 @@ export function useLeadPool() {
 
   // Phase Lead Pool FIFO 2026-06-15 — kèm statusId (trạng thái KH sale chọn ở màn khóa
   // sau Lưu Note). Lưu vào Contact.statusId để admin lọc tệp pool theo chất lượng.
-  async function submitNote(leadRequestId: string, noteContent: string, statusId?: string | null) {
+  async function submitNote(
+    leadRequestId: string,
+    noteContent: string,
+    statusId?: string | null,
+    nickId?: string | null,
+  ): Promise<{ ok: boolean; code?: string; message?: string }> {
     error.value = '';
     try {
-      await api.post(`/lead-pool/${leadRequestId}/note`, { noteContent, statusId: statusId ?? null });
+      await api.post(`/lead-pool/${leadRequestId}/note`, { noteContent, statusId: statusId ?? null, nickId: nickId ?? null });
       await fetchEligibility();
-      return true;
+      return { ok: true };
     } catch (err: any) {
-      error.value = err?.response?.data?.error || 'Không lưu được note';
-      return false;
+      const code = err?.response?.data?.code as string | undefined;
+      const message = err?.response?.data?.error as string | undefined;
+      error.value = message || 'Không lưu được note';
+      return { ok: false, code, message };
     }
   }
 

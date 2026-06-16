@@ -385,6 +385,9 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
         recencyDays?: number;
         multinickThreshold?: number;
         delayAfterFriendRequestMin?: number;
+        // 2026-06-16 — bản GIÂY của delay trên (Wizard B3 cho nhập giây, mặc định 10s).
+        // Ưu tiên field này khi có; giữ delayAfterFriendRequestMin cho tương thích cũ.
+        delayAfterFriendRequestSeconds?: number;
         pauseHoursOnReply?: number;
         // #3 2026-06-06 — nhịp gửi lời mời (phút) + sàn welcome + cửa sổ warm (Anh nhập trên UI)
         friendReqIntervalMinMinutes?: number;
@@ -539,8 +542,21 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
       multiNickThreshold = Math.round(v);
     }
 
+    // 2026-06-16 — delay sau lời mời → bước 1 bám đuổi. Ưu tiên GIÂY (Wizard B3),
+    // set cả 2 cột: seconds = chính xác, minutes = làm tròn (cho reader cũ). NULL không
+    // xảy ra ở create (luôn có default 60 phút / 3600 giây).
     let sequenceStartDelayMinutes = 60;
-    if (sr.delayAfterFriendRequestMin !== undefined) {
+    let sequenceStartDelaySeconds: number = 3600;
+    if (sr.delayAfterFriendRequestSeconds !== undefined) {
+      const v = Number(sr.delayAfterFriendRequestSeconds);
+      if (!Number.isFinite(v) || v < 0 || v > 604800)
+        return reply.status(400).send({
+          error: 'delayAfterFriendRequestSeconds_invalid',
+          hint: 'Phải từ 0 đến 604800 giây (7 ngày)',
+        });
+      sequenceStartDelaySeconds = Math.round(v);
+      sequenceStartDelayMinutes = Math.round(v / 60);
+    } else if (sr.delayAfterFriendRequestMin !== undefined) {
       const v = Number(sr.delayAfterFriendRequestMin);
       if (!Number.isFinite(v) || v < 0 || v > 10080) {
         return reply.status(400).send({
@@ -549,6 +565,7 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
         });
       }
       sequenceStartDelayMinutes = Math.round(v);
+      sequenceStartDelaySeconds = sequenceStartDelayMinutes * 60;
     }
 
     let pauseOnActivityHours = 24;
@@ -662,6 +679,7 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
         recencySkipDays,
         multiNickThreshold,
         sequenceStartDelayMinutes,
+        sequenceStartDelaySeconds,
         pauseOnActivityHours,
         // #3 2026-06-06 — nhịp gửi + sàn welcome + cửa sổ warm (đọc từ UI, hết hardcode)
         friendReqIntervalMinMinutes,
@@ -1675,6 +1693,7 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
         recencySkipDays: true,
         multiNickThreshold: true,
         sequenceStartDelayMinutes: true,
+        sequenceStartDelaySeconds: true,
         pauseOnActivityHours: true,
         // #3 2026-06-06 — nhịp gửi + sàn welcome + cửa sổ warm cho edit prefill.
         friendReqIntervalMinMinutes: true,
@@ -1729,6 +1748,8 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
         recencyDays: trigger.recencySkipDays,
         multinickThreshold: trigger.multiNickThreshold,
         delayAfterFriendRequestMin: trigger.sequenceStartDelayMinutes,
+        // 2026-06-16 — bản giây để UI prefill ô "Delay sau lời mời" (fallback phút×60 cho Mục tiêu cũ).
+        delayAfterFriendRequestSeconds: trigger.sequenceStartDelaySeconds ?? trigger.sequenceStartDelayMinutes * 60,
         pauseHoursOnReply: trigger.pauseOnActivityHours,
         // #3 2026-06-06 — nhịp gửi + sàn welcome + cửa sổ warm để UI hiển thị lại
         friendReqIntervalMinMinutes: trigger.friendReqIntervalMinMinutes,
@@ -1780,6 +1801,7 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
         recencyDays?: number;
         multinickThreshold?: number;
         delayAfterFriendRequestMin?: number;
+        delayAfterFriendRequestSeconds?: number; // 2026-06-16 — bản giây (ưu tiên).
         pauseHoursOnReply?: number;
         // #3 2026-06-06 — nhịp gửi + sàn welcome + cửa sổ warm (edit).
         friendReqIntervalMinMinutes?: number;
@@ -1949,14 +1971,26 @@ export async function friendInviteRoutes(app: FastifyInstance): Promise<void> {
             .send({ error: 'multinickThreshold_invalid', hint: 'Phải từ 0 đến 100' });
         data.multiNickThreshold = Math.round(v);
       }
-      if (sr.delayAfterFriendRequestMin !== undefined) {
+      // 2026-06-16 — ưu tiên GIÂY khi PATCH (set cả 2 cột); fallback phút cho contract cũ.
+      if (sr.delayAfterFriendRequestSeconds !== undefined) {
+        const v = Number(sr.delayAfterFriendRequestSeconds);
+        if (!Number.isFinite(v) || v < 0 || v > 604800)
+          return reply.status(400).send({
+            error: 'delayAfterFriendRequestSeconds_invalid',
+            hint: 'Phải từ 0 đến 604800 giây (7 ngày)',
+          });
+        data.sequenceStartDelaySeconds = Math.round(v);
+        data.sequenceStartDelayMinutes = Math.round(v / 60);
+      } else if (sr.delayAfterFriendRequestMin !== undefined) {
         const v = Number(sr.delayAfterFriendRequestMin);
         if (!Number.isFinite(v) || v < 0 || v > 10080)
           return reply.status(400).send({
             error: 'delayAfterFriendRequestMin_invalid',
             hint: 'Phải từ 0 đến 10080 phút (1 tuần)',
           });
-        data.sequenceStartDelayMinutes = Math.round(v);
+        const mins = Math.round(v);
+        data.sequenceStartDelayMinutes = mins;
+        data.sequenceStartDelaySeconds = mins * 60;
       }
       if (sr.pauseHoursOnReply !== undefined) {
         const v = Number(sr.pauseHoursOnReply);

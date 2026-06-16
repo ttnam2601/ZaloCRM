@@ -352,12 +352,13 @@
           :placeholder="`Note tối thiểu ${noteMinLength} ký tự. Vd: Đã gọi điện, KH bận, hẹn lại 16h; KH đang xem dự án A...`"
         ></textarea>
         <div class="lrm-note-actions">
-          <span class="lrm-note-counter" :class="{ ok: noteText.length >= noteMinLength }">
-            {{ noteText.length }} / {{ noteMinLength }}
+          <span class="lrm-note-counter" :class="{ ok: noteText.trim().length >= noteMinLength }">
+            {{ noteText.trim().length }} / {{ noteMinLength }}
           </span>
           <!-- Phase FIFO 2026-06-15: bỏ nút "Trả lại pool" (Anh chốt thừa). Nút "Lưu Note"
-               full hàng → mở màn khóa chọn trạng thái (KHÔNG lưu thẳng). -->
-          <button class="lrm-btn-primary lrm-btn-save-full" :disabled="noteText.length < noteMinLength" @click="onSaveNoteThenStatus">
+               full hàng → mở màn khóa chọn trạng thái (KHÔNG lưu thẳng).
+               2026-06-16: validate theo trim() cho khớp BE (BE trim trước khi check độ dài). -->
+          <button class="lrm-btn-primary lrm-btn-save-full" :disabled="noteText.trim().length < noteMinLength" @click="onSaveNoteThenStatus">
             <span>💾 Lưu Note</span>
           </button>
         </div>
@@ -372,10 +373,15 @@
     <Teleport to="body">
       <div v-if="statusStepOpen" class="sss-backdrop">
         <div class="sss-card" role="dialog" aria-modal="true">
+          <button class="sss-back-x" type="button" :disabled="savingStatus" @click="onBackToNote" title="Quay lại sửa note" aria-label="Quay lại sửa note">←</button>
           <div class="sss-head">Chọn trạng thái cho nick này</div>
           <div v-if="statusLoading" class="sss-loading">Đang tải trạng thái…</div>
           <div v-else-if="statusList.length === 0" class="sss-empty">
-            Chưa cài trạng thái nào. Vào Cài đặt → CRM → Trạng thái để thêm.
+            <p class="sss-empty-msg">Chưa tải được trạng thái (có thể chưa cài ở Cài đặt → CRM → Trạng thái, hoặc lỗi mạng).</p>
+            <div class="sss-empty-actions">
+              <button type="button" class="sss-empty-btn" :disabled="savingStatus" @click="reloadStatuses">↻ Thử lại</button>
+              <button type="button" class="sss-empty-btn primary" :disabled="savingStatus" @click="onSkipStatus">Lưu, bỏ qua trạng thái</button>
+            </div>
           </div>
           <div v-else class="sss-grid">
             <button
@@ -390,7 +396,10 @@
               <span class="sss-num">#{{ i + 1 }}</span>
             </button>
           </div>
-          <div class="sss-foot">Chọn trạng thái để chuyển qua Lead tiếp theo</div>
+          <div class="sss-foot">
+            <button type="button" class="sss-back-link" :disabled="savingStatus" @click="onBackToNote">← Quay lại sửa note</button>
+            <span v-if="statusList.length" class="sss-foot-hint">Chọn trạng thái để chuyển qua Lead tiếp theo</span>
+          </div>
           <div v-if="savingStatus" class="sss-saving">Đang lưu…</div>
           <div v-if="actionError" class="sss-error">⚠ {{ actionError }}</div>
         </div>
@@ -791,35 +800,70 @@ const savingStatus = ref(false);
 
 async function onSaveNoteThenStatus() {
   if (!props.lead) return;
-  if (noteText.value.length < noteMinLength.value) return;
+  // 2026-06-16: validate theo trim() cho khớp BE (BE trim trước khi check độ dài).
+  if (noteText.value.trim().length < noteMinLength.value) return;
   statusStepOpen.value = true;
+  await reloadStatuses();
+}
+
+// Tải (hoặc tải lại) danh sách trạng thái. Dùng cho cả lần mở màn + nút "Thử lại".
+async function reloadStatuses() {
   statusLoading.value = true;
+  actionError.value = '';
   statusList.value = await fetchStatuses();
-  // Sắp theo order (đúng thứ tự admin cài ở /crm/statuses).
   statusList.value.sort((a, b) => a.order - b.order);
   statusLoading.value = false;
 }
 
-// Bước 2: bấm 1 trong các trạng thái = LƯU LUÔN (note + status) rồi đóng. Màn khóa,
-// không X, không bấm nền thoát — bắt buộc chọn 1 (Anh chốt 2026-06-15).
-// Nền nhạt từ màu trạng thái (giống ảnh Anh: card màu pastel theo status).
+// Bước 2: bấm 1 trong các trạng thái = LƯU LUÔN (note + status) rồi đóng.
+// 2026-06-16: KHÔNG còn lock cứng — có nút "← Quay lại sửa note" + Esc thoát (note CHƯA submit
+// lúc này nên back an toàn). Nền nhạt từ màu trạng thái (card pastel theo status).
 function cardStyle(color: string | null) {
   const c = color || '#9CA3AF';
   return { background: c + '22', border: `1px solid ${c}33` };
+}
+
+// already_noted / race_lost = note thực ra ĐÃ lưu (response lần đầu rớt / double-fire) →
+// coi như thành công, đóng + qua lead tiếp. Tránh kẹt vĩnh viễn ở màn chọn trạng thái.
+function isSubmitSuccess(res: { ok: boolean; code?: string }): boolean {
+  return res.ok || res.code === 'already_noted' || res.code === 'race_lost';
 }
 
 async function onPickStatus(statusId: string) {
   if (!props.lead || savingStatus.value) return;
   savingStatus.value = true;
   actionError.value = '';
-  const ok = await submitNote(props.lead.leadRequestId, noteText.value, statusId);
+  // nickId = nick sale đang chat KH → BE ghi status vào Friend(nick×KH). null = fallback Contact.
+  const res = await submitNote(props.lead.leadRequestId, noteText.value, statusId, resolveDirectChatNickId());
   savingStatus.value = false;
-  if (ok) {
+  if (isSubmitSuccess(res)) {
     statusStepOpen.value = false;
     emit('note-submitted');
   } else {
-    actionError.value = 'Lưu note + trạng thái thất bại';
+    actionError.value = res.message || 'Lưu note + trạng thái thất bại';
   }
+}
+
+// Lưu note KHÔNG kèm trạng thái (khi chưa cài status / lỗi tải) — không để sale kẹt.
+async function onSkipStatus() {
+  if (!props.lead || savingStatus.value) return;
+  savingStatus.value = true;
+  actionError.value = '';
+  const res = await submitNote(props.lead.leadRequestId, noteText.value, null, null);
+  savingStatus.value = false;
+  if (isSubmitSuccess(res)) {
+    statusStepOpen.value = false;
+    emit('note-submitted');
+  } else {
+    actionError.value = res.message || 'Lưu note thất bại';
+  }
+}
+
+// Quay lại màn note (note chưa submit → an toàn, không mất gì).
+function onBackToNote() {
+  if (savingStatus.value) return;
+  statusStepOpen.value = false;
+  actionError.value = '';
 }
 
 // Phase Lead Pool FIFO 2026-06-15 — gỡ toàn bộ Return Dialog (Anh chốt bỏ nút Trả lại pool).
@@ -831,15 +875,26 @@ function onDocumentClick(e: MouseEvent) {
   activePopup.value = null;
 }
 
+// Esc trên màn chọn trạng thái = quay lại sửa note (không kẹt). Không xử lý khi đang lưu.
+function onDocumentKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && statusStepOpen.value && !savingStatus.value) {
+    onBackToNote();
+  }
+}
+
 // Pre-populate zaloProfile từ auto-lookup BE (2026-05-28) — câu chào personalize ngay
 // khi modal mở, không cần sale bấm "Tìm Zalo qua SĐT".
 onMounted(() => {
   document.addEventListener('click', onDocumentClick);
+  document.addEventListener('keydown', onDocumentKeydown);
   if (props.lead?.autoLookup?.zaloProfile) {
     zaloProfile.value = props.lead.autoLookup.zaloProfile;
   }
 });
-onBeforeUnmount(() => { document.removeEventListener('click', onDocumentClick); });
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocumentClick);
+  document.removeEventListener('keydown', onDocumentKeydown);
+});
 </script>
 
 <style scoped>
@@ -1143,10 +1198,20 @@ onBeforeUnmount(() => { document.removeEventListener('click', onDocumentClick); 
   font-family: "Plus Jakarta Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 .sss-card {
+  position: relative;
   width: 460px; max-width: 100%; border-radius: 16px; overflow: hidden;
   box-shadow: 0 16px 48px rgba(20,26,36,.28); background: #fff; padding: 22px;
 }
-.sss-head { font-size: 17px; font-weight: 800; color: #141a24; margin-bottom: 16px; }
+.sss-back-x {
+  position: absolute; top: 14px; left: 14px;
+  width: 30px; height: 30px; border-radius: 8px; border: none; cursor: pointer;
+  background: #f1f3f8; color: #475066; font-size: 17px; line-height: 1;
+  font-family: inherit; display: flex; align-items: center; justify-content: center;
+  transition: background .12s;
+}
+.sss-back-x:hover:not(:disabled) { background: #e4e8f0; color: #141a24; }
+.sss-back-x:disabled { opacity: .5; cursor: not-allowed; }
+.sss-head { font-size: 17px; font-weight: 800; color: #141a24; margin-bottom: 16px; padding-left: 38px; }
 .sss-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .sss-card-btn {
   display: flex; align-items: center; justify-content: space-between;
@@ -1158,9 +1223,28 @@ onBeforeUnmount(() => { document.removeEventListener('click', onDocumentClick); 
 .sss-name { font-size: 14.5px; font-weight: 700; }
 .sss-num { font-size: 12px; font-weight: 600; color: #97a0b3; }
 .sss-foot {
-  margin-top: 16px; text-align: center; font-size: 12.5px; font-weight: 600;
-  color: #6b7488; background: #f7f9fc; border: 1px solid #eef1f6; border-radius: 10px; padding: 11px;
+  margin-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 12.5px; font-weight: 600;
+  color: #6b7488; background: #f7f9fc; border: 1px solid #eef1f6; border-radius: 10px; padding: 9px 12px;
 }
+.sss-foot-hint { flex: 1; text-align: right; }
+.sss-back-link {
+  background: none; border: none; cursor: pointer; font-family: inherit;
+  font-size: 12.5px; font-weight: 700; color: #5E6AD2; padding: 2px 4px; flex-shrink: 0;
+}
+.sss-back-link:hover:not(:disabled) { text-decoration: underline; }
+.sss-back-link:disabled { opacity: .5; cursor: not-allowed; }
 .sss-loading, .sss-empty, .sss-saving { font-size: 13px; color: #6b7488; padding: 16px; text-align: center; }
+.sss-empty-msg { margin: 0 0 12px; }
+.sss-empty-actions { display: flex; gap: 8px; justify-content: center; }
+.sss-empty-btn {
+  padding: 8px 14px; border-radius: 9px; border: 1px solid #d8deea; cursor: pointer;
+  font-family: inherit; font-size: 12.5px; font-weight: 700; color: #475066; background: #fff;
+  transition: all .12s;
+}
+.sss-empty-btn:hover:not(:disabled) { background: #f1f3f8; }
+.sss-empty-btn.primary { background: #5E6AD2; border-color: #5E6AD2; color: #fff; }
+.sss-empty-btn.primary:hover:not(:disabled) { background: #4F46E5; }
+.sss-empty-btn:disabled { opacity: .5; cursor: not-allowed; }
 .sss-error { font-size: 12.5px; color: #c0291f; margin-top: 12px; text-align: center; }
 </style>

@@ -423,7 +423,7 @@ export async function materializeSequenceForContact(
   //    truth across both enrollment paths.
   const trigger = await prisma.automationTrigger.findUnique({
     where: { id: input.triggerId },
-    select: { sequenceStartDelayMinutes: true, state: true, enabled: true },
+    select: { sequenceStartDelayMinutes: true, sequenceStartDelaySeconds: true, state: true, enabled: true },
   });
 
   if (!trigger) {
@@ -454,7 +454,10 @@ export async function materializeSequenceForContact(
   //     Delay = trigger.sequenceStartDelayMinutes (wizard B3). The worker
   //     loads steps[0] fresh from DB at execution time, so we do NOT need to
   //     pass blockSnapshot here — worker re-fetches at STEP 4.
-  const delayMs = Math.max(0, trigger.sequenceStartDelayMinutes * 60_000);
+  // 2026-06-16 — ưu tiên cột GIÂY (Wizard B3 cho nhập giây, mặc định 10s). Mục tiêu cũ
+  // (seconds NULL) → fallback phút × 60 (hành vi không đổi). 0 = gửi ngay.
+  const effDelaySec = trigger.sequenceStartDelaySeconds ?? trigger.sequenceStartDelayMinutes * 60;
+  const delayMs = Math.max(0, effDelaySec * 1_000);
 
   try {
     await queue.add(
