@@ -72,19 +72,23 @@
 
     <!-- LEVER 2: Sắp xếp / Thời gian / Size / Tag (ẩn/hiện) -->
     <div v-if="showLever2 && !trashMode" class="m-lever2">
-      <select v-model="sortBy" class="lv2-sel" @change="reload">
+      <select v-model="ownerFilter" class="lv2-sel" @change="applyFilters">
+        <option value="">Mọi người sở hữu</option>
+        <option v-for="u in uploaders" :key="u.id" :value="u.id">{{ u.name }} ({{ u.count }})</option>
+      </select>
+      <select v-model="sortBy" class="lv2-sel" @change="applyFilters">
         <option value="recent">Gần đây dùng</option>
         <option value="newest">Mới tải lên</option>
         <option value="most_used">Hay dùng nhất</option>
         <option value="name">Tên A→Z</option>
       </select>
-      <select v-model="sinceBy" class="lv2-sel" @change="reload">
+      <select v-model="sinceBy" class="lv2-sel" @change="applyFilters">
         <option value="">Mọi lúc</option>
         <option value="7d">7 ngày</option>
         <option value="30d">30 ngày</option>
         <option value="90d">90 ngày</option>
       </select>
-      <select v-model="sizeBy" class="lv2-sel" @change="reload">
+      <select v-model="sizeBy" class="lv2-sel" @change="applyFilters">
         <option value="">Mọi cỡ</option>
         <option value="small">&lt; 1MB</option>
         <option value="medium">1–10MB</option>
@@ -173,6 +177,13 @@
             </div>
           </div>
         </div>
+
+        <!-- Phân trang (anh chốt 2026-06-16): nút chuyển trang + tổng số mục, tránh load lag. -->
+        <div v-if="!loading && total > 0" class="m-pager">
+          <button class="pg-btn" :disabled="page === 0" @click="goPage(-1)">‹ Trước</button>
+          <span class="pg-num">Trang {{ page + 1 }}/{{ totalPages }} · {{ total }} mục</span>
+          <button class="pg-btn" :disabled="page + 1 >= totalPages" @click="goPage(1)">Sau ›</button>
+        </div>
       </div>
 
       <!-- Detail panel (PA3) -->
@@ -191,7 +202,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import {
-  listMedia, uploadMedia, listMediaFolders, createMediaFolder,
+  listMediaPaged, listMediaUploaders, uploadMedia, listMediaFolders, createMediaFolder,
   listTrash, restoreMedia, permanentDeleteMedia, emptyTrash,
   archiveMedia, bulkUpdateMedia,
   type MediaAssetItem, type MediaFolder, type TrashItem,
@@ -247,6 +258,15 @@ const sinceBy = ref<'' | '7d' | '30d' | '90d'>('');
 const sizeBy = ref<'' | 'small' | 'medium' | 'large'>('');
 const tagInput = ref('');
 
+// Lọc theo người sở hữu ảnh + phân trang (anh chốt 2026-06-16: /media load nhiều ảnh lag,
+// cần nút chuyển trang; thêm lọc theo người upload). Tái dùng BE skip/total/ownerUserId.
+const ownerFilter = ref('');
+const uploaders = ref<Array<{ id: string; name: string; count: number }>>([]);
+const PAGE_SIZE = 40;
+const page = ref(0);
+const total = ref(0);
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
+
 const activeFolderName = computed(() => folders.value.find((f) => f.id === activeFolder.value)?.name ?? '');
 
 function sizeRange(): { sizeMin?: number; sizeMax?: number } {
@@ -260,13 +280,22 @@ function applyTagFilter() {
   const t = tagInput.value.trim();
   if (t && !activeTags.value.includes(t)) activeTags.value = [...activeTags.value, t];
   tagInput.value = '';
-  reload();
+  applyFilters();
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 function debouncedReload() {
   if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(reload, 300);
+  debounceTimer = setTimeout(applyFilters, 300);
+}
+
+// Đổi bộ lọc → luôn về trang 1 (tránh kẹt ở "trang 5" rỗng khi kết quả co lại).
+function applyFilters() { page.value = 0; reload(); }
+function goPage(delta: number) {
+  const next = page.value + delta;
+  if (next < 0 || next >= totalPages.value) return;
+  page.value = next;
+  reload();
 }
 
 async function reload() {
@@ -274,17 +303,22 @@ async function reload() {
   try {
     // Album tab dùng folders; còn lại list assets theo kind.
     const kind = activeKind.value === 'album' ? undefined : activeKind.value;
-    items.value = await listMedia({
+    const res = await listMediaPaged({
       kind,
       q: search.value || undefined,
       visibility: visFilter.value || undefined,
       folderId: activeFolder.value || undefined,
       tag: activeTags.value[0] || tagInput.value.trim() || undefined,
+      ownerUserId: ownerFilter.value || undefined,
       // Lever 2.
       sort: sortBy.value,
       since: sinceBy.value || undefined,
+      limit: PAGE_SIZE,
+      skip: page.value * PAGE_SIZE,
       ...sizeRange(),
     });
+    items.value = res.items;
+    total.value = res.total;
   } catch (e: any) {
     toast.warning(e?.response?.data?.error || 'Không tải được kho');
   } finally {
@@ -292,14 +326,24 @@ async function reload() {
   }
 }
 
+// Danh sách người sở hữu ảnh (đổ vào dropdown lọc) — khớp kind + visibility đang xem.
+async function loadUploaders() {
+  try {
+    uploaders.value = await listMediaUploaders({
+      kind: activeKind.value === 'album' ? undefined : activeKind.value,
+      visibility: visFilter.value || undefined,
+    });
+  } catch { /* ignore — dropdown rỗng vẫn dùng lọc khác */ }
+}
+
 async function loadFolders() {
   try { folders.value = await listMediaFolders(); } catch { /* ignore */ }
 }
 
-function setKind(k: any) { activeKind.value = k; selected.value = null; if (trashMode.value) loadTrash(); else reload(); }
-function setVis(v: any) { visFilter.value = v; reload(); }
-function setFolder(id: string | null) { activeFolder.value = id; reload(); }
-function toggleTag(tag: string) { activeTags.value = activeTags.value.filter((t) => t !== tag); reload(); }
+function setKind(k: any) { activeKind.value = k; selected.value = null; if (trashMode.value) loadTrash(); else { applyFilters(); loadUploaders(); } }
+function setVis(v: any) { visFilter.value = v; applyFilters(); loadUploaders(); }
+function setFolder(id: string | null) { activeFolder.value = id; applyFilters(); }
+function toggleTag(tag: string) { activeTags.value = activeTags.value.filter((t) => t !== tag); applyFilters(); }
 function select(a: MediaAssetItem) { selected.value = a; }
 
 // ── GĐ12: Chọn nhiều + thao tác hàng loạt ───────────────────────────────────
@@ -470,7 +514,7 @@ async function onEmptyTrash() {
 
 // Dải "Hay dùng nhất" (mediaStats) đã GỠ 2026-06-15 — build module báo cáo riêng sau.
 
-onMounted(() => { reload(); loadFolders(); });
+onMounted(() => { reload(); loadFolders(); loadUploaders(); });
 </script>
 
 <style scoped>
@@ -512,6 +556,10 @@ onMounted(() => { reload(); loadFolders(); });
 .f.on { background:var(--soft); color:var(--ink); font-weight:500; }
 .f .lk { margin-left:auto; font-size:11px; }
 .m-grid-wrap { flex:1; padding:16px 24px; overflow:auto; min-width:0; }
+.m-pager { display:flex; align-items:center; justify-content:center; gap:14px; padding:16px 0 4px; }
+.pg-btn { border:1px solid var(--hairline); background:var(--canvas); border-radius:var(--r-sm,6px); padding:6px 14px; font-size:13px; cursor:pointer; color:var(--ink); }
+.pg-btn:disabled { opacity:.4; cursor:default; }
+.pg-num { font-size:12.5px; color:var(--muted,#8b93a7); font-variant-numeric:tabular-nums; white-space:nowrap; }
 /* GĐ12a (HD-first 1366): cell co theo cỡ màn. 1366 ô nhỏ (sale màn nhỏ thấy nhiều ảnh
    hơn, đỡ cuộn) → 1920 vừa → 2560 ô to thoáng. minmax auto-fill giữ lưới không vỡ. */
 .m-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px; }

@@ -90,13 +90,13 @@
       <!-- Lọc sâu (ẩn/hiện): chỉ Thời gian + Cỡ (Quyền + Dự án/Tag đã ra ngoài) -->
       <div v-if="showFilter" class="mtp-filter">
         <div class="mtp-frow">
-          <select v-model="sinceBy" class="mtp-sel" @change="reload">
+          <select v-model="sinceBy" class="mtp-sel" @change="applyFilters">
             <option value="">Mọi lúc</option>
             <option value="7d">7 ngày</option>
             <option value="30d">30 ngày</option>
             <option value="90d">90 ngày</option>
           </select>
-          <select v-model="sizeBy" class="mtp-sel" @change="reload">
+          <select v-model="sizeBy" class="mtp-sel" @change="applyFilters">
             <option value="">Mọi cỡ</option>
             <option value="small">&lt; 1MB</option>
             <option value="medium">1–10MB</option>
@@ -170,6 +170,13 @@
             <span v-if="sending === a.id" class="mtp-sending">Đang gửi…</span>
           </button>
         </div>
+
+        <!-- Phân trang (anh chốt 2026-06-16): nút chuyển trang, tránh load nhiều lag. -->
+        <div v-if="!loading && total > 0" class="mtp-pager">
+          <button class="mtp-pg" :disabled="page === 0" @click="goPage(-1)">‹ Trước</button>
+          <span class="mtp-pgnum">{{ page + 1 }}/{{ totalPages }} · {{ total }}</span>
+          <button class="mtp-pg" :disabled="page + 1 >= totalPages" @click="goPage(1)">Sau ›</button>
+        </div>
       </div>
     </template>
 
@@ -188,7 +195,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import {
-  listMedia, listMediaFolders, sendAlbumToConversation,
+  listMediaPaged, listMediaFolders, sendAlbumToConversation,
   type MediaAssetItem, type ListMediaParams, type MediaFolder,
 } from '@/api/media';
 import type { Contact } from '@/composables/use-contacts';
@@ -229,6 +236,12 @@ const items = ref<MediaAssetItem[]>([]);
 const loading = ref(false);
 const search = ref('');
 const sending = ref<string | null>(null);
+
+// Phân trang (anh chốt 2026-06-16): cột Media chat cũng có nút chuyển trang, tránh load lag.
+const PAGE_SIZE = 40;
+const page = ref(0);
+const total = ref(0);
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
 
 // ── Bảng review (Anh chốt 2026-06-15): click 1 ảnh/video/file → mở popup review ──
 // (preview + thông số + gắn/tháo tag lưu-ngay + nút Gửi). Thay cách "gửi thẳng khi click".
@@ -316,7 +329,7 @@ function fmtDuration(sec: number): string {
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null;
-function debouncedReload() { if (timer) clearTimeout(timer); timer = setTimeout(reload, 300); }
+function debouncedReload() { if (timer) clearTimeout(timer); timer = setTimeout(applyFilters, 300); }
 
 function setSubTab(k: SubKind) {
   if (subTab.value === k) return;
@@ -325,20 +338,20 @@ function setSubTab(k: SubKind) {
   folderId.value = '';
   tagFilter.value = '';
   if (k !== 'image') { multiMode.value = false; picked.value = new Set(); } // album chỉ cho ảnh
-  if (k !== 'block') reload();
+  if (k !== 'block') applyFilters();
 }
-function setVis(v: '' | 'public' | 'private') { visFilter.value = v; reload(); }
+function setVis(v: '' | 'public' | 'private') { visFilter.value = v; applyFilters(); }
 
 // Bấm nút Sắp xếp → nhảy sang bộ kế tiếp, hết thì quay về đầu.
 function cycleSort() {
   const i = SORT_CYCLE.findIndex((s) => s.mode === sortBy.value);
   sortBy.value = SORT_CYCLE[(i + 1) % SORT_CYCLE.length].mode;
-  reload();
+  applyFilters();
 }
-function setFolder(id: string) { folderId.value = id; reload(); }
+function setFolder(id: string) { folderId.value = id; applyFilters(); }
 function toggleTagFilter(tag: string) {
   tagFilter.value = tagFilter.value === tag ? '' : tag;
-  reload();
+  applyFilters();
 }
 
 function toggleMultiMode() {
@@ -354,6 +367,15 @@ function sizeRange(): { sizeMin?: number; sizeMax?: number } {
   return {};
 }
 
+// Đổi bộ lọc → về trang 1; chuyển trang giữ nguyên lọc.
+function applyFilters() { page.value = 0; reload(); }
+function goPage(delta: number) {
+  const next = page.value + delta;
+  if (next < 0 || next >= totalPages.value) return;
+  page.value = next;
+  reload();
+}
+
 async function reload() {
   if (subTab.value === 'block') return;
   loading.value = true;
@@ -366,11 +388,14 @@ async function reload() {
       folderId: folderId.value || undefined,
       since: sinceBy.value || undefined,
       sort: sortBy.value,
-      limit: 40,
+      limit: PAGE_SIZE,
+      skip: page.value * PAGE_SIZE,
       ...sizeRange(),
     };
-    items.value = await listMedia(params);
-    counts.value[subTab.value] = items.value.length;
+    const res = await listMediaPaged(params);
+    items.value = res.items;
+    total.value = res.total;
+    counts.value[subTab.value] = res.total; // badge tab = TỔNG (không phải số/trang)
   } catch (e: any) {
     toast.warning(e?.response?.data?.error || 'Không tải được kho');
   } finally {
@@ -515,6 +540,10 @@ onMounted(async () => {
 /* body */
 .mtp-body { flex: 1; overflow-y: auto; padding: 2px 12px 12px; }
 .mtp-empty { padding: 24px 12px; text-align: center; font-size: 12.5px; color: var(--at-hint); line-height: 1.5; }
+.mtp-pager { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 0 2px; }
+.mtp-pg { border: 1px solid var(--at-line, #e3e6ea); background: #fff; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; color: var(--at-ink, #141a24); }
+.mtp-pg:disabled { opacity: .4; cursor: default; }
+.mtp-pgnum { font-size: 11.5px; color: var(--at-hint, #8b93a7); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* grid ảnh/video */
 .mtp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
