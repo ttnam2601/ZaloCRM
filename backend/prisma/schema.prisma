@@ -2351,6 +2351,10 @@ model AutomationTrigger {
   // ── Luồng Mục Tiêu rebuild 2026-06-01 (Marketing BullMQ Rebuild M0) ──
   // P1: Delay sau khi gửi lời mời → step 1 bám đuổi (phút). Cấu hình per-trigger qua Wizard B3.
   sequenceStartDelayMinutes   Int     @default(60) @map("sequence_start_delay_minutes")
+  // 2026-06-16 — bản GIÂY của delay trên (Wizard B3 cho nhập giây, mặc định 10s).
+  // NULL = Mục tiêu cũ chưa cấu hình giây → fallback sequence_start_delay_minutes × 60.
+  // Mọi consumer ưu tiên cột này khi != NULL. 0 = gửi ngay (không delay).
+  sequenceStartDelaySeconds   Int?    @map("sequence_start_delay_seconds")
   // P2: Pause khi KH tương tác (giờ). Reply trong window → reset (P2.1).
   pauseOnActivityHours        Int     @default(24) @map("pause_on_activity_hours")
   // P6: Bỏ qua KH có > N nick friend trong hệ thống (0 = không filter, JOIN permission_groups theo T3A).

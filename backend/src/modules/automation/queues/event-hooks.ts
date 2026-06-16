@@ -351,6 +351,7 @@ export async function onFriendAccepted(input: {
         sequenceId: true,
         successorSequenceId: true,
         sequenceStartDelayMinutes: true,
+        sequenceStartDelaySeconds: true,
         pauseOnActivityHours: true,
         // I10 2026-06-04 — Tin 2 Cảm ơn KH đã đồng ý KB (gửi sau khi accept).
         thankYouTemplate: true,
@@ -390,6 +391,11 @@ export async function onFriendAccepted(input: {
   const acceptEpoch = sequenceId
     ? await resolveNextEnrollEpoch(orgId, contactId, sequenceId)
     : undefined;
+  // 2026-06-16 — delay sau lời mời → step 1: ưu tiên cột GIÂY (Wizard B3 cho nhập giây).
+  // startDelayMinutes có thể là PHÚT LẺ (giây/60) — worker tính ×60_000 nên xử lý đúng giây.
+  // Mục tiêu cũ (seconds NULL) → phút × 60 / 60 = phút nguyên (hành vi không đổi).
+  const startDelayMinutesEff =
+    (trigger.sequenceStartDelaySeconds ?? trigger.sequenceStartDelayMinutes * 60) / 60;
   if (nick?.ownerUserId) {
     await enrollFromTrigger({
       orgId,
@@ -398,7 +404,7 @@ export async function onFriendAccepted(input: {
       nickId,
       ownerUserId: nick.ownerUserId,
       sequenceId: sequenceId ?? null,
-      sequenceStartDelayMinutes: trigger.sequenceStartDelayMinutes,
+      sequenceStartDelayMinutes: startDelayMinutesEff,
       enrollEpoch: acceptEpoch,
       // closeConditions đọc từ ORG (cấu hình lắng nghe chung) — không truyền per-trigger.
     });
@@ -411,7 +417,7 @@ export async function onFriendAccepted(input: {
       nickId,
       orgId,
       enrollEpoch: acceptEpoch,
-      startDelayMinutes: trigger.sequenceStartDelayMinutes,
+      startDelayMinutes: startDelayMinutesEff,
     });
   }
 
