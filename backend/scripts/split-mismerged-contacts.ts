@@ -90,6 +90,7 @@ async function findMismergedContacts(): Promise<string[]> {
 
 interface SplitPlan {
   contactId: string;
+  orgId: string;
   contactName: string | null;
   contactGlobalId: string | null;
   keepGlobalId: string | null;       // globalId cụm ở lại
@@ -133,18 +134,39 @@ async function planSplit(contactId: string): Promise<SplitPlan | null> {
     }
     if (byGid.size <= 1) return null; // không cần tách (idempotent)
 
+    // Tra TRƯỚC: mỗi globalId trong byGid đã thuộc Contact KHÁC nào chưa
+    // (unique (org, globalId) → tối đa 1). Cần để (a) chọn cụm ở-lại an toàn,
+    // (b) quyết action mỗi cụm.
+    const ownerByGid = new Map<string, { id: string; mergedInto: string | null } | null>();
+    for (const g of byGid.keys()) {
+      const owner = await prisma.contact.findFirst({
+        where: { orgId: contact.orgId, zaloGlobalId: g, id: { not: contactId } },
+        select: { id: true, mergedInto: true },
+      });
+      ownerByGid.set(g, owner ?? null);
+    }
+
     // Chọn cụm "ở lại", ưu tiên:
     //  1. --keep-global-id (Anh chỉ định cho case lệch chéo)
-    //  2. khớp Contact.zaloGlobalId (mặc định an toàn)
-    //  3. cụm đông nhất
+    //  2. khớp Contact.zaloGlobalId (Cha vốn là người này)
+    //  3. cụm globalId CHƯA bị Contact khác chiếm (set vào Cha không đụng unique),
+    //     ưu tiên đông nhất trong số đó
+    //  4. (nếu MỌI cụm đều bị Contact khác chiếm) → keepGid = null: Cha KHÔNG giữ
+    //     cụm globalId nào (tất cả revive về Contact gốc), Cha cũ chỉ còn Friend
+    //     orphan (thiếu globalId) — tránh lỗi unique khi set gid trùng vào Cha.
     let keepGid: string | null = null;
-    if (KEEP_GLOBAL_ID && byGid.has(KEEP_GLOBAL_ID)) {
+    if (KEEP_GLOBAL_ID && byGid.has(KEEP_GLOBAL_ID) && !ownerByGid.get(KEEP_GLOBAL_ID)) {
       keepGid = KEEP_GLOBAL_ID;
     } else if (contact.zaloGlobalId && byGid.has(contact.zaloGlobalId)) {
+      // Cha đã mang gid này → giữ (set lại chính nó, không đụng unique).
       keepGid = contact.zaloGlobalId;
     } else {
       let max = -1;
-      for (const [g, fs] of byGid) if (fs.length > max) { max = fs.length; keepGid = g; }
+      for (const [g, fs] of byGid) {
+        if (ownerByGid.get(g)) continue; // gid đã bị Contact khác chiếm → không thể giữ ở Cha
+        if (fs.length > max) { max = fs.length; keepGid = g; }
+      }
+      // keepGid vẫn null = mọi cụm đều bị chiếm → Cha không giữ cụm nào.
     }
 
     const clusters: SplitPlan['clusters'] = [];
@@ -154,23 +176,19 @@ async function planSplit(contactId: string): Promise<SplitPlan | null> {
         clusters.push({ globalId: g, friendIds: fs.map((f) => f.id), sampleName: sample.zaloDisplayName, sampleAvatar: sample.zaloAvatarUrl, sampleUid: sample.zaloUidInNick, targetContactId: contactId, action: 'keep' });
         continue;
       }
-      // Tìm Contact đã mang globalId này (unique (org, globalId) nên tối đa 1):
-      //  - alive (mergedInto null, id khác Cha) → move-existing
-      //  - đã merged (kể cả merged vào chính Cha này — đây là Contact GỐC của người
-      //    bị gộp nhầm) → revive-merged: gỡ mergedInto + chuyển Friend/conv về.
-      //    (Codex #11: globalId có @@unique nên KHÔNG được create trùng → phải revive.)
-      const byGidContact = await prisma.contact.findFirst({
-        where: { orgId: contact.orgId, zaloGlobalId: g, id: { not: contactId } },
-        select: { id: true, mergedInto: true },
-      });
+      // Cụm KHÔNG ở-lại: tách về Contact mang globalId đó.
+      //  - alive (mergedInto null) → move-existing
+      //  - đã merged (Contact GỐC của người bị gộp) → revive-merged (gỡ mergedInto)
+      //  - chưa có Contact nào → create-new
+      const owner = ownerByGid.get(g) ?? null;
       let action: SplitPlan['clusters'][number]['action'];
       let targetContactId: string | null;
-      if (byGidContact && byGidContact.mergedInto === null) {
+      if (owner && owner.mergedInto === null) {
         action = 'move-existing';
-        targetContactId = byGidContact.id;
-      } else if (byGidContact) {
+        targetContactId = owner.id;
+      } else if (owner) {
         action = 'revive-merged';
-        targetContactId = byGidContact.id;
+        targetContactId = owner.id;
       } else {
         action = 'create-new';
         targetContactId = null;
@@ -188,6 +206,7 @@ async function planSplit(contactId: string): Promise<SplitPlan | null> {
 
     return {
       contactId,
+      orgId: contact.orgId,
       contactName: contact.fullName,
       contactGlobalId: contact.zaloGlobalId,
       keepGlobalId: keepGid,
@@ -219,6 +238,13 @@ async function executeSplit(plan: SplitPlan): Promise<void> {
           });
         } else if (cl.action === 'revive-merged' && targetId) {
           // Hồi sinh Contact GỐC đã bị merged (globalId @@unique nên không create trùng).
+          // NULL-OUT gid trên row merged KHÁC cùng gid (chuỗi merge nhiều tầng) trước khi
+          // revive — nếu không, revive targetId thành alive mà còn row merged khác giữ
+          // cùng gid → 2 row alive trùng gid → đụng unique (index không partial).
+          await tx.contact.updateMany({
+            where: { orgId: plan.orgId, zaloGlobalId: cl.globalId, mergedInto: { not: null }, id: { not: targetId } },
+            data: { zaloGlobalId: null },
+          });
           // Gỡ mergedInto + refresh avatar/uid về cụm; giữ fullName cũ của contact gốc.
           await tx.contact.update({
             where: { id: targetId },
@@ -267,6 +293,17 @@ async function executeSplit(plan: SplitPlan): Promise<void> {
         // Chỉ đổi tên khi cụm ở-lại có tên Zalo rõ VÀ khác tên Cha hiện tại
         // (tránh ghi đè khi cùng người / tên Zalo rỗng).
         const needRename = keepName !== '' && keepName !== (plan.contactName || '').trim();
+        // NULL-OUT gid trên row đã-MERGED khác đang giữ keepGid (anh chốt 2026-06-16,
+        // workflow phát hiện): index (org, zalo_global_id) KHÔNG partial → row merged
+        // vẫn chiếm slot gid. Nếu set keepGid vào Cha mà 1 row merged khác còn giữ gid
+        // đó → đụng unique. Gỡ gid khỏi các row merged đó trước (chúng đã merged nên
+        // không cần gid để hiển thị). KHÔNG đụng row ALIVE (người thật khác).
+        if (needOverrideGid) {
+          await tx.contact.updateMany({
+            where: { orgId: plan.orgId, zaloGlobalId: keepCluster.globalId, mergedInto: { not: null }, id: { not: plan.contactId } },
+            data: { zaloGlobalId: null },
+          });
+        }
         await tx.contact.update({
           where: { id: plan.contactId },
           data: {
@@ -275,6 +312,15 @@ async function executeSplit(plan: SplitPlan): Promise<void> {
             ...(needOverrideGid ? { zaloGlobalId: keepCluster.globalId } : {}),
             ...(needRename ? { fullName: keepName } : {}),
           },
+        });
+      } else {
+        // keepGid null = MỌI cụm globalId đều revive về Contact gốc khác. Cha cũ
+        // không còn đại diện người nào theo globalId → gỡ zalo_global_id + zalo_uid
+        // (của người đã tách đi) để Cha không "treo" danh tính sai. Cha chỉ còn các
+        // Friend orphan (thiếu globalId) nếu có; nếu rỗng hẳn → để sale dọn tay.
+        await tx.contact.update({
+          where: { id: plan.contactId },
+          data: { zaloGlobalId: null, zaloUid: null },
         });
       }
 
