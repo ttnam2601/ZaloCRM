@@ -45,6 +45,7 @@ interface ZaloInstance {
   status: 'connected' | 'disconnected' | 'qr_pending' | 'connecting';
   displayName?: string;
   zaloUid?: string;
+  orgId?: string; // FIX #A 2026-06-16: cache orgId để emit sự kiện vào đúng room org (không broadcast bare)
   lastActivity: Date;
   // Fix flap 2026-06-06: mỗi lần connect/reconnect cấp 1 epoch tăng dần. Listener
   // factory giữ epoch của nó; sự kiện 'closed' chỉ được xử lý nếu epoch khớp instance
@@ -105,6 +106,35 @@ class ZaloAccountPool {
   }
 
   /**
+   * FIX #A (2026-06-16): emit sự kiện account-level vào ĐÚNG room org thay vì `io.emit` BARE.
+   *
+   * Trước đây `zalo:connected`/`zalo:error`/`zalo:reconnect-failed` dùng `this.io.emit(...)`
+   * = broadcast TOÀN server (mọi org, mọi sale). Hệ quả:
+   *   1. Bất kỳ nick nào (kể cả cron tự reconnect) connect → bắn tới FE đang treo QR của
+   *      người KHÁC → FE tưởng "kết nối thành công" giả (gốc trigger bug báo-giả).
+   *   2. Lỗ cross-tenant: org A nhận {accountId, zaloUid} của org B.
+   * Sửa: gửi vào `org:${orgId}` (room đã auto-join từ token ở socket-auth.ts) → chỉ sale
+   * cùng org nhận. orgId cache trong instance để tránh query lặp. (qr/scanned/duplicate đã
+   * `.to(account:)` từ trước — đây gom connected/error/reconnect-failed cho nhất quán.)
+   */
+  private async emitAccountEventToOrg(accountId: string, event: string, payload: Record<string, unknown>): Promise<void> {
+    if (!this.io) return;
+    try {
+      const inst = this.instances.get(accountId);
+      let orgId = inst?.orgId;
+      if (!orgId) {
+        const rec = await prisma.zaloAccount.findUnique({ where: { id: accountId }, select: { orgId: true } });
+        orgId = rec?.orgId;
+        if (orgId && inst) inst.orgId = orgId; // cache cho lần sau
+      }
+      if (orgId) this.io.to(`org:${orgId}`).emit(event, payload);
+      else logger.warn(`[zalo-pool] emitAccountEventToOrg: không tìm orgId cho account ${accountId} (event=${event})`);
+    } catch (err) {
+      logger.error(`[zalo-pool] emitAccountEventToOrg lỗi (event=${event}):`, err);
+    }
+  }
+
+  /**
    * Fix flap 2026-06-06: dọn instance + listener + message-sync CŨ của 1 account
    * TRƯỚC khi tạo instance mới trong loginQR()/reconnect().
    *
@@ -161,14 +191,35 @@ class ZaloAccountPool {
     this.instances.set(accountId, { zalo, api: null, status: 'qr_pending', lastActivity: new Date(), epoch });
     logger.info(`[zalo:${accountId}] loginQR — fresh instance created (epoch=${epoch}), waiting for QR event…`);
 
+    // FIX #2 (2026-06-16): giới hạn số lần QR tự sinh lại. Trước đây QRCodeExpired luôn gọi
+    // retry() VÔ HẠN trên CÙNG phiên SDK → QR sinh lại mãi nhưng quét không ăn ("tạo QR mới
+    // không có tác dụng"). Sau MAX_QR_RETRY lần hết hạn → DỪNG retry, emit qr-session-dead để
+    // FE hiện nút "Quét lại" → tạo phiên FRESH (loginQR mới, epoch mới).
+    const MAX_QR_RETRY = 3;
+    let qrExpiredCount = 0;
+    // FIX #6 (2026-06-16): epoch guard. login lần 2 trên cùng nick tạo instance mới (epoch++);
+    // callback của phiên CŨ vẫn sống tới khi QR cũ expire → nếu nó emit sẽ trộn QR/ghi đè state
+    // của phiên mới. Chỉ xử lý event nếu epoch callback CÒN khớp instance hiện tại.
+    const isCurrentEpoch = () => this.instances.get(accountId)?.epoch === epoch;
+
     try {
       const api: any = await withProxy(proxyUrl, () => zalo.loginQR({}, (event: any) => {
+        if (!isCurrentEpoch()) return; // phiên cũ bị thay → bỏ qua mọi event (FIX #6)
         switch (event.type) {
           case 0: // QRCodeGenerated
             logger.info(`[zalo:${accountId}] loginQR — QR code generated, emitting to socket room`);
             this.io?.to(`account:${accountId}`).emit('zalo:qr', { accountId, qrImage: event.data.image });
             break;
           case 1: // QRCodeExpired
+            qrExpiredCount++;
+            if (qrExpiredCount >= MAX_QR_RETRY) {
+              // Hết lượt tự sinh lại → dừng phiên, báo FE cần quét lại thủ công (fresh).
+              logger.info(`[zalo:${accountId}] loginQR — QR hết hạn ${qrExpiredCount} lần, DỪNG retry (cần quét lại)`);
+              this.io?.to(`account:${accountId}`).emit('zalo:qr-session-dead', { accountId });
+              // KHÔNG gọi retry → phiên loginQR này kết thúc. teardown để giải phóng.
+              this.teardownExisting(accountId);
+              return;
+            }
             this.io?.to(`account:${accountId}`).emit('zalo:qr-expired', { accountId });
             event.actions?.retry();
             break;
@@ -188,6 +239,16 @@ class ZaloAccountPool {
             break;
         }
       }));
+
+      // FIX #6 (2026-06-16, code-review): epoch guard KHÔNG chỉ trong callback mà CẢ sau khi
+      // loginQR resolve. Nếu giữa lúc chờ resolve có teardown + tạo instance MỚI (autoReconnect
+      // timer, hoặc user bấm "Tạo QR mới" — fix #2 làm việc này phổ biến hơn), epoch đã bị bump
+      // → KHÔNG ghi đè instance mới (tránh 2 WS/listener cùng nick → tái phát flap). Đóng api cũ.
+      if (this.instances.get(accountId)?.epoch !== epoch) {
+        logger.warn(`[zalo:${accountId}] loginQR resolve nhưng epoch đã đổi (${epoch}→${this.instances.get(accountId)?.epoch}) → bỏ qua, đóng api cũ`);
+        try { api?.listener?.stop?.(); } catch { /* ignore */ }
+        return;
+      }
 
       const instance = this.instances.get(accountId)!;
       instance.api = api;
@@ -236,7 +297,7 @@ class ZaloAccountPool {
       }
 
       this.attachListener(accountId, api);
-      this.io?.emit('zalo:connected', { accountId, zaloUid: ownId });
+      void this.emitAccountEventToOrg(accountId, 'zalo:connected', { accountId, zaloUid: ownId });
       // Emit webhook (orgId lookup is async, fire-and-forget)
       prisma.zaloAccount.findUnique({ where: { id: accountId }, select: { orgId: true } })
         .then((rec) => rec && emitWebhook(rec.orgId, 'zalo.connected', { accountId }))
@@ -258,7 +319,7 @@ class ZaloAccountPool {
     } catch (err) {
       const instance = this.instances.get(accountId);
       if (instance) instance.status = 'disconnected';
-      this.io?.emit('zalo:error', { accountId, error: String(err) });
+      void this.emitAccountEventToOrg(accountId, 'zalo:error', { accountId, error: String(err) });
       throw err;
     }
   }
@@ -313,6 +374,21 @@ class ZaloAccountPool {
       instance.lastActivity = new Date();
 
       const ownId = await api.getOwnId();
+
+      // FIX #4b (2026-06-16): VERIFY uid sau reconnect khớp uid CŨ của nick. Session đã lưu
+      // thuộc 1 tài khoản Zalo; nếu đăng nhập ra uid KHÁC (cực hiếm — session bị thay/đổi chủ)
+      // thì KHÔNG ghi đè danh tính nick (tránh ghi nhầm uid người khác vào row này âm thầm).
+      if (eligibility.zaloUid && ownId && ownId !== eligibility.zaloUid) {
+        logger.error(`[zalo:${accountId}] reconnect uid LỆCH: session đăng nhập ra ${ownId} ≠ uid cũ ${eligibility.zaloUid} → từ chối ghi đè`);
+        this.teardownExisting(accountId);
+        if (instance) instance.status = 'disconnected';
+        await this.updateAccountDB(accountId, 'qr_pending', null, 'reconnect_failed'); // uid lệch (chi tiết ở log error trên)
+        void this.emitAccountEventToOrg(accountId, 'zalo:reconnect-failed', {
+          accountId, error: 'Phiên đăng nhập không khớp nick này — cần quét QR lại.',
+        });
+        this.reconnecting.delete(accountId);
+        return;
+      }
       instance.zaloUid = ownId;
 
       // Fetch own profile info for avatar
@@ -330,7 +406,7 @@ class ZaloAccountPool {
 
       this.attachListener(accountId, api);
       await this.updateAccountDB(accountId, 'connected', ownId, 'reconnect_ok');
-      this.io?.emit('zalo:connected', { accountId, zaloUid: ownId });
+      void this.emitAccountEventToOrg(accountId, 'zalo:connected', { accountId, zaloUid: ownId });
       prisma.zaloAccount.findUnique({ where: { id: accountId }, select: { orgId: true } })
         .then((rec) => rec && emitWebhook(rec.orgId, 'zalo.connected', { accountId }))
         .catch(() => {});
@@ -357,7 +433,7 @@ class ZaloAccountPool {
       const instance = this.instances.get(accountId);
       if (instance) instance.status = 'disconnected';
       await this.updateAccountDB(accountId, 'qr_pending', null, 'reconnect_failed');
-      this.io?.emit('zalo:reconnect-failed', { accountId, error: String(err) });
+      void this.emitAccountEventToOrg(accountId, 'zalo:reconnect-failed', { accountId, error: String(err) });
     } finally {
       // Fix flap 2026-06-06: luôn nhả in-flight guard dù thành công hay lỗi.
       this.reconnecting.delete(accountId);
@@ -434,7 +510,7 @@ class ZaloAccountPool {
           // >5 disconnects in 5 min → stop reconnecting, require QR re-login
           logger.error(`[zalo:${id}] Circuit breaker: ${history.length} disconnects in 5 min — stopping auto-reconnect. QR re-login required.`);
           this.updateAccountDB(id, 'qr_pending', null, 'session_expired');
-          this.io?.emit('zalo:reconnect-failed', { accountId: id, error: 'Session không ổn định, cần đăng nhập QR lại' });
+          void this.emitAccountEventToOrg(id, 'zalo:reconnect-failed', { accountId: id, error: 'Session không ổn định, cần đăng nhập QR lại' });
           this.disconnectHistory.delete(key);
           return; // DON'T reconnect
         }
@@ -649,7 +725,7 @@ class ZaloAccountPool {
         await this.reconnect(accountId, session, account?.proxyUrl);
       } else {
         logger.warn(`[zalo:${accountId}] No saved session, cannot auto-reconnect`);
-        this.io?.emit('zalo:reconnect-failed', { accountId, error: 'No saved session' });
+        void this.emitAccountEventToOrg(accountId, 'zalo:reconnect-failed', { accountId, error: 'No saved session' });
       }
     } catch (err) {
       logger.error(`[zalo:${accountId}] Auto-reconnect failed:`, err);

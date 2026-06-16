@@ -94,7 +94,12 @@
               <div class="cnw-spinner"></div>
               <p>Đang tạo mã QR…</p>
             </div>
-            <div v-if="qrError" class="cnw-err cnw-qr-err">
+            <!-- Phiên QR CHẾT (hết lượt tự sinh) → nút Tạo QR mới NỔI BẬT (fix #2). -->
+            <div v-if="qrSessionDead" class="cnw-err cnw-qr-dead">
+              <p>{{ qrError || 'Mã QR đã hết hiệu lực.' }}</p>
+              <button class="btn btn-primary cnw-retry-btn" @click="$emit('retry-qr')">Tạo QR mới</button>
+            </div>
+            <div v-else-if="qrError" class="cnw-err cnw-qr-err">
               {{ qrError }}
               <button class="cnw-link" @click="$emit('retry-qr')">Tạo QR mới</button>
             </div>
@@ -165,6 +170,7 @@ const props = defineProps<{
   qrScanned?: boolean;
   scannedName?: string | null;
   qrError?: string;
+  qrSessionDead?: boolean; // FIX #2: phiên QR đã chết (hết lượt tự sinh) → nổi nút "Tạo QR mới"
   saleName?: string | null;
   connectedNickName?: string | null;
 }>();
@@ -285,6 +291,9 @@ defineExpose({ phone });
 .cnw-muted { font-size: 12.5px; color: #9ca3af; }
 .cnw-qr-err { text-align: center; margin-top: 10px; }
 .cnw-link { border: none; background: none; color: #1786be; text-decoration: underline; cursor: pointer; font-size: 12.5px; margin-left: 6px; }
+.cnw-qr-dead { text-align: center; margin-top: 12px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.cnw-qr-dead p { color: #b45309; font-size: 13.5px; margin: 0; }
+.cnw-retry-btn { min-width: 140px; }
 
 .cnw-done { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 8px; }
 .cnw-done-icon { font-size: 44px; }

@@ -40,6 +40,8 @@ export function useZaloAccounts(opts?: { onStatusChange?: () => void }) {
   const qrScanned = ref(false);
   const scannedName = ref('');
   const qrError = ref('');
+  // FIX #2 2026-06-16: true khi BE dừng sinh QR (phiên treo) → FE hiện nút "Tạo QR mới" fresh.
+  const qrSessionDead = ref(false);
   const currentLoginAccountId = ref('');
   // fix ②: nick quét trúng zaloUid đã tồn tại → BE emit 'zalo:duplicate' + dọn record rác.
   const duplicateInfo = ref<{ owner: string | null; message: string } | null>(null);
@@ -110,11 +112,19 @@ export function useZaloAccounts(opts?: { onStatusChange?: () => void }) {
   }
 
   async function loginAccount(accountId: string) {
+    // FIX #B (2026-06-16): currentLoginAccountId là biến ĐƠN. Nếu đang chờ QR nick CŨ mà mở
+    // login nick MỚI, phải UNSUBSCRIBE room nick cũ TRƯỚC khi đổi — nếu không room cũ rò
+    // (socket vẫn nhận event nick cũ) + sau này cancelQR sẽ unsubscribe nhầm nick mới.
+    const prevId = currentLoginAccountId.value;
+    if (prevId && prevId !== accountId) {
+      socket?.emit('zalo:unsubscribe', { accountId: prevId });
+    }
     currentLoginAccountId.value = accountId;
     qrImage.value = '';
     qrScanned.value = false;
     scannedName.value = '';
     qrError.value = '';
+    qrSessionDead.value = false; // FIX #2: reset cờ phiên-chết mỗi lần login fresh
     showQRDialog.value = true;
     socket?.emit('zalo:subscribe', { accountId });
     try {
@@ -157,11 +167,26 @@ export function useZaloAccounts(opts?: { onStatusChange?: () => void }) {
 
   function cancelQR() {
     showQRDialog.value = false;
-    socket?.emit('zalo:unsubscribe', { accountId: currentLoginAccountId.value });
+    if (currentLoginAccountId.value) {
+      socket?.emit('zalo:unsubscribe', { accountId: currentLoginAccountId.value });
+      // code-review #3 (P3): clear để onReconnect KHÔNG re-subscribe room nick đã đóng (rò room
+      // mỗi lần refresh token). Phiên login kết thúc → không còn nick nào "đang chờ QR".
+      currentLoginAccountId.value = '';
+    }
   }
 
   function setupSocket() {
-    socket = createAppSocket();
+    // FIX #4 (2026-06-16): socket reconnect (transport drop / token 15' refresh) đổi socket.id
+    // → MẤT room account: đã join → mọi event zalo:qr/scanned/qr-expired (emit .to(account:))
+    // bị rớt → QR "đứng hình", sale quét không lên. onReconnect: re-emit zalo:subscribe cho nick
+    // đang login để join lại room. (use-chat đã dùng onReconnect bù tin; account-login trước bỏ sót.)
+    socket = createAppSocket({
+      onReconnect: () => {
+        if (currentLoginAccountId.value) {
+          socket?.emit('zalo:subscribe', { accountId: currentLoginAccountId.value });
+        }
+      },
+    });
 
     socket.on('zalo:qr', (data: { accountId: string; qrImage: string }) => {
       if (data.accountId === currentLoginAccountId.value) qrImage.value = data.qrImage;
@@ -175,8 +200,12 @@ export function useZaloAccounts(opts?: { onStatusChange?: () => void }) {
       }
     });
 
-    socket.on('zalo:connected', (_data: { accountId: string }) => {
-      showQRDialog.value = false;
+    // FIX #1 (2026-06-16): CHỈ đóng QR dialog khi ĐÚNG nick đang login connected. Trước đây
+    // không lọc accountId → bất kỳ nick nào (kể cả nick org khác do io.emit bare cũ) connect
+    // → đóng dialog → wizard báo "thành công" giả cho nick CHƯA quét. fetchAccounts/onStatusChange
+    // vẫn chạy cho MỌI nick (để danh sách cập nhật), nhưng showQRDialog chỉ đóng cho nick mình.
+    socket.on('zalo:connected', (data: { accountId: string }) => {
+      if (data.accountId === currentLoginAccountId.value) showQRDialog.value = false;
       fetchAccounts();
       opts?.onStatusChange?.(); // refresh grid enriched → card tự đổi sang "đang kết nối"
     });
@@ -193,6 +222,17 @@ export function useZaloAccounts(opts?: { onStatusChange?: () => void }) {
       if (data.accountId === currentLoginAccountId.value) {
         qrImage.value = '';
         qrError.value = 'QR đã hết hạn, đang tạo lại...';
+      }
+    });
+
+    // FIX #2 (2026-06-16): BE đã DỪNG tự sinh QR sau N lần hết hạn (phiên SDK treo, quét không
+    // ăn). FE hiện thông báo + nút "Quét lại" → onWizardRetryQr/loginAccount tạo phiên FRESH.
+    socket.on('zalo:qr-session-dead', (data: { accountId: string }) => {
+      if (data.accountId === currentLoginAccountId.value) {
+        qrImage.value = '';
+        qrScanned.value = false;
+        qrSessionDead.value = true;
+        qrError.value = 'Mã QR đã hết hiệu lực. Bấm "Tạo QR mới" để quét lại.';
       }
     });
 
@@ -215,7 +255,8 @@ export function useZaloAccounts(opts?: { onStatusChange?: () => void }) {
 
   return {
     accounts, loading, adding, deleting,
-    showQRDialog, qrImage, qrScanned, scannedName, qrError, duplicateInfo,
+    showQRDialog, qrImage, qrScanned, scannedName, qrError, qrSessionDead, duplicateInfo,
+    currentLoginAccountId,
     statusColor, statusText,
     fetchAccounts, addAccount, loginAccount, reconnectAccount, deleteAccount,
     updateProxy, cancelQR, setupSocket,

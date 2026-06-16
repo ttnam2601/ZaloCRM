@@ -208,6 +208,7 @@
       :qr-scanned="qrScanned"
       :scanned-name="scannedName"
       :qr-error="qrError"
+      :qr-session-dead="qrSessionDead"
       :sale-name="saleShortName"
       :connected-nick-name="connectedNickName"
       @checked="onWizardChecked"
@@ -272,7 +273,7 @@ import type { EnrichedAccount } from '@/composables/use-zalo-accounts-dashboard'
 const dash = useZaloAccountsDashboard();
 const {
   // dashboard data
-  stats, filtered, loadingStats, loadingEnriched,
+  stats, enriched, filtered, loadingStats, loadingEnriched,
   // filters
   search, statusFilter, saleFilter, sortMode,
   // selection
@@ -286,7 +287,8 @@ const {
   // helpers
   relativeTime, statusLabel, uptimeColor,
   // QR/socket from base composable
-  showQRDialog, qrImage, qrScanned, scannedName, qrError, duplicateInfo,
+  showQRDialog, qrImage, qrScanned, scannedName, qrError, qrSessionDead, duplicateInfo,
+  currentLoginAccountId,
   deleting,
   addAccount, loginAccount, reconnectAccount, deleteAccount,
   cancelQR, setupSocket,
@@ -541,10 +543,11 @@ async function onWizardConfirmConnect() {
     await onWizardReconnectExisting(res.account.id);
     return;
   }
-  // Nick mới → trigger QR login (socket cập qrImage/qrScanned ở composable).
-  const list = await api.get('/zalo-accounts');
-  const latest = list.data[list.data.length - 1];
-  if (latest) await loginAccount(latest.id);
+  // Nick mới → trigger QR login. FIX #5 (2026-06-16): dùng THẲNG id BE vừa trả (res.account.id),
+  // KHÔNG fetch list rồi đoán `list[length-1]` (sai nick nếu list sort khác created-asc hoặc 2
+  // sale tạo nick song song → login QR nhầm nick).
+  if (res.account?.id) await loginAccount(res.account.id);
+  else { wizardStep.value = 'phone'; alert('Không lấy được nick vừa tạo. Thử lại.'); }
 }
 
 // Fix ①: trùng nick CỦA CHÍNH MÌNH → Kết nối lại record cũ (thử reconnect session;
@@ -564,19 +567,34 @@ async function onWizardReconnectExisting(accountId: string) {
 }
 
 function onWizardRetryQr() {
-  // Tạo QR mới cho nick đang chờ.
-  const id = (dash as any).currentLoginAccountId?.value;
+  // Tạo QR mới (FRESH phiên) cho nick đang chờ — dùng khi QR hết hiệu lực (qrSessionDead).
+  const id = currentLoginAccountId.value;
   if (id) loginAccount(id);
 }
 
-// Khi composable nhận 'zalo:connected' → showQRDialog chuyển false. Nếu wizard đang ở
-// bước QR → tự chuyển sang màn CHÚC MỪNG + reload danh sách (Anh chốt).
+// Khi QR dialog đóng lúc wizard đang ở bước QR → CHỈ báo "Hoàn tất" nếu nick THẬT SỰ
+// connected (FIX #1 2026-06-16 — Anh chốt: Hoàn tất phải là nick connected thật, không phải
+// "dialog đóng = xong"). Trước đây bất kỳ lý do nào đóng dialog (QR hết hạn, nick khác connect)
+// đều nhảy 'done' giả. Giờ: refresh danh sách → kiểm nick đang login có liveStatus='connected'
+// + có zaloUid; KHÔNG thì coi như chưa xong (giữ nguyên bước qr / đóng wizard tùy lý do).
 watch(showQRDialog, async (open, was) => {
-  if (was && !open && wizardOpen.value && wizardStep.value === 'qr') {
+  if (!(was && !open && wizardOpen.value && wizardStep.value === 'qr')) return;
+  const loginId = currentLoginAccountId.value;
+  await refreshAll(); // refresh danh sách nick mới nhất trước khi verify
+  // code-review: dùng `enriched` (danh sách GỐC) KHÔNG phải `filtered` — nếu sale đang bật ô
+  // tìm/lọc trạng thái, nick vừa connected có thể bị filter loại → verify false oan → wizard
+  // kẹt ở bước qr dù nick đã online. enriched luôn chứa mọi nick.
+  const acct = enriched.value.find((a: EnrichedAccount) => a.id === loginId);
+  const reallyConnected = !!acct
+    && (acct.liveStatus || acct.status || '').toLowerCase() === 'connected'
+    && !!acct.zaloUid;
+  if (reallyConnected) {
     if (scannedName.value) connectedNickName.value = scannedName.value;
+    else connectedNickName.value = acct!.displayName ?? connectedNickName.value;
     wizardStep.value = 'done';
-    await refreshAll(); // refresh danh sách nick mới nhất
   }
+  // Nếu CHƯA connected thật: không báo done. Dialog đã đóng do QR hết hạn/lỗi → các handler
+  // riêng (zalo:duplicate→closeWizard, qr-session-dead→giữ bước qr + nút Quét lại) lo phần đó.
 });
 
 // Fix ②: BE báo nick quét trúng zaloUid đã tồn tại (record rác đã bị dọn) → đóng wizard,
