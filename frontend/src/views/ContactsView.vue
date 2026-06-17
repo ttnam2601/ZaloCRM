@@ -193,7 +193,7 @@
           <col style="width:54px">   <!-- 12 Tin in/out -->
           <col style="width:78px">   <!-- 13 Tags CRM -->
           <col style="width:60px">   <!-- 14 Có Zalo? -->
-          <col v-if="visibleCols.zaloUid" style="width:120px">
+          <col v-if="visibleChildCols.zaloUid" style="width:120px">
           <col v-if="visibleCols.zaloGlobalId" style="width:130px">
           <col v-if="visibleCols.zaloUsername" style="width:130px">
           <col v-if="visibleCols.lookupState" style="width:100px">
@@ -215,7 +215,7 @@
             <th>Tin in/out</th>
             <th>Tags CRM</th>
             <th>Có Zalo?</th>
-            <th v-if="visibleCols.zaloUid" class="w-120 c-extra" title="Zalo UID per-account chính (cũ nhất)">Zalo UID</th>
+            <th v-if="visibleChildCols.zaloUid" class="w-120 c-extra" title="UID per-nick (Cha không có UID) — giá trị ở dòng con">UID (nick)</th>
             <th v-if="visibleCols.zaloGlobalId" class="w-130 c-extra" title="Zalo globalId toàn cục (dedup cross-account)">Global ID</th>
             <th v-if="visibleCols.zaloUsername" class="w-130 c-extra" title="Zalo username (handle t_xxx)">Username</th>
             <th v-if="visibleCols.lookupState" class="w-100 c-extra" title="Trạng thái tra Zalo qua SĐT">Lookup</th>
@@ -395,9 +395,8 @@
                 <span v-else-if="zaloDisplay(contact) === 'no'" class="zpill zpill-no" title="Không tìm thấy Zalo">🔴 Ko</span>
                 <span v-else class="zpill zpill-wait" title="Chưa tìm Zalo">⚪ Chờ</span>
               </td>
-              <td v-if="visibleCols.zaloUid" class="c-extra" :title="'Per-account UID khác nhau theo nick. Mở ▸ xem chi tiết per row con.'">
-                <span v-if="(contact.childrenCount ?? 0) > 1" class="chip chip-multi" title="Đa Zalo identity — mỗi nick có UID riêng">đa {{ contact.childrenCount }} con</span>
-                <code v-else-if="contact.zaloUid" class="uid-cell">{{ contact.zaloUid }}</code>
+              <td v-if="visibleChildCols.zaloUid" class="c-extra" :title="'UID là per-nick — Cha không có UID. Mở ▸ xem UID từng nick.'">
+                <span v-if="(contact.childrenCount ?? 0) >= 1" class="chip chip-multi" title="UID riêng theo từng nick — mở ▸ xem">▸ {{ contact.childrenCount ?? 0 }} nick</span>
                 <span v-else class="empty">—</span>
               </td>
               <td v-if="visibleCols.zaloGlobalId" class="c-extra">
@@ -527,7 +526,7 @@
                   </td>
                   <!-- 2026-06-05 (Anh chốt) — friend row hiện giá trị UID/GlobalId/Username,
                        click vào text → copy. -->
-                  <td v-if="visibleCols.zaloUid" class="c-extra">
+                  <td v-if="visibleChildCols.zaloUid" class="c-extra">
                     <span v-if="row.zaloUid" class="fr-copy mono" :title="'Copy UID: ' + row.zaloUid" @click.stop="copyText(row.zaloUid, 'UID')">{{ row.zaloUid }}</span>
                     <span v-else class="empty">—</span>
                   </td>
@@ -669,7 +668,8 @@ const toast = useToast();
 //  - Child (KH Con / Friend row): cột per-identity — mỗi row 1 giá trị riêng.
 // Persist localStorage. Default ẨN.
 const OPTIONAL_COLUMNS = [
-  { key: 'zaloUid',      label: 'Zalo UID (Cha)',  hint: 'KH Cha: per-account UID chính. Đa nick → mở ▸ xem row con.' },
+  // 2026-06-17 (anh chốt): KH Cha KHÔNG có UID (UID là per-nick) → chuyển UID xuống cột Con.
+  // Cha chỉ định danh bằng Global ID + SĐT.
   { key: 'zaloGlobalId', label: 'Global ID (Cha)', hint: 'KH Cha: globalId chung khi tất cả con trùng, hoặc "đa N".' },
   { key: 'zaloUsername', label: 'Username (Cha)',  hint: 'KH Cha: username chung khi trùng tất cả con.' },
   { key: 'lookupState',  label: 'Lookup',          hint: 'Trạng thái tra Zalo qua SĐT cho KH này.' },
@@ -677,7 +677,7 @@ const OPTIONAL_COLUMNS = [
 type OptColKey = (typeof OPTIONAL_COLUMNS)[number]['key'];
 const LS_KEY_COLS = 'contactsview.visibleCols.v2';
 function loadVisibleCols(): Record<OptColKey, boolean> {
-  const def = { zaloUid: false, zaloGlobalId: false, zaloUsername: false, lookupState: false };
+  const def = { zaloGlobalId: false, zaloUsername: false, lookupState: false };
   try {
     const raw = localStorage.getItem(LS_KEY_COLS);
     if (raw) return { ...def, ...JSON.parse(raw) };
@@ -690,19 +690,22 @@ function toggleColumn(key: OptColKey) {
   try { localStorage.setItem(LS_KEY_COLS, JSON.stringify(visibleCols.value)); } catch { /* ignore */ }
 }
 const totalColumnsCount = computed(() =>
-  // 2026-06-04: gộp avatar+tên thành 1 cột (caret riêng) → 15 cột cố định
-  15 + Object.values(visibleCols.value).filter(Boolean).length,
+  // 2026-06-04: gộp avatar+tên thành 1 cột (caret riêng) → 15 cột cố định.
+  // 2026-06-17: cột UID giờ thuộc child-toggle (per-nick) → cộng riêng.
+  15 + Object.values(visibleCols.value).filter(Boolean).length + (visibleChildCols.value.zaloUid ? 1 : 0),
 );
 
 // Child (KH Con) optional cols — riêng vì bản chất per-Friend chứ không aggregate.
+// 2026-06-17: UID chuyển hẳn về đây (per-nick) — Cha không có UID.
 const CHILD_OPTIONAL_COLUMNS = [
+  { key: 'zaloUid',      label: 'Zalo UID (Con)',  hint: 'Per-nick: UID của KH nhìn từ nick này. Cha KHÔNG có UID.' },
   { key: 'zaloGlobalId', label: 'Global ID (Con)', hint: 'Per-identity — toàn cục, cùng giữa các nick nhìn cùng identity' },
   { key: 'zaloUsername', label: 'Username (Con)',  hint: 'Per-identity username handle' },
 ] as const;
 type ChildColKey = (typeof CHILD_OPTIONAL_COLUMNS)[number]['key'];
 const LS_KEY_CHILD_COLS = 'contactsview.visibleChildCols.v1';
 function loadVisibleChildCols(): Record<ChildColKey, boolean> {
-  const def = { zaloGlobalId: false, zaloUsername: false };
+  const def = { zaloUid: false, zaloGlobalId: false, zaloUsername: false };
   try {
     const raw = localStorage.getItem(LS_KEY_CHILD_COLS);
     if (raw) return { ...def, ...JSON.parse(raw) };
@@ -1693,7 +1696,7 @@ watch(
 .score-input { width: 50px; padding: 2px 4px; font-size: 11.5px; text-align: center; border: 1px solid var(--smax-grey-300); border-radius: 4px; }
 .score-input:focus { outline: 2px solid var(--smax-primary, #00f2ff); }
 .alias-input { width: 100%; min-width: 140px; padding: 3px 6px; font-size: 12px; border: 1px solid var(--smax-grey-300); border-radius: 4px; background: transparent; }
-.alias-input:focus { outline: 1.5px solid var(--smax-primary, #00f2ff); background: white; }
+.alias-input:focus { outline: 1.5px solid var(--smax-primary, #00f2ff); background: var(--surface); }
 .alias-input::placeholder { color: var(--smax-grey-400); font-style: italic; }
 .status-picker-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1100; display: flex; align-items: center; justify-content: center; }
 .status-picker { background: var(--smax-bg); border-radius: 10px; padding: 16px 20px; min-width: 320px; max-width: 480px; }
@@ -1716,7 +1719,7 @@ watch(
 .btn:hover { background: var(--smax-primary-soft); }
 .btn-primary {
   background: var(--smax-primary);
-  color: white;
+  color: var(--surface);
 }
 .btn-primary:hover { background: var(--smax-primary-hover); }
 /* 2026-06-05 — nút "Thêm KH Nhanh" trên toolbar (thay FAB), viền primary nhẹ. */
@@ -1726,10 +1729,10 @@ watch(
   border-color: var(--smax-primary);
   font-weight: 600;
 }
-.btn-quick-add:hover { background: var(--smax-primary); color: #fff; }
+.btn-quick-add:hover { background: var(--smax-primary); color: var(--surface); }
 .btn-badge {
   background: var(--smax-error);
-  color: white;
+  color: var(--surface);
   border-radius: 9px;
   padding: 1px 6px;
   font-size: 10px; font-weight: 600;
@@ -1902,7 +1905,7 @@ watch(
   border-radius: 50%;
   background: linear-gradient(135deg, #90caf9, #1976d2);
   display: flex; align-items: center; justify-content: center;
-  color: white; font-weight: 600; font-size: 13px;
+  color: var(--surface); font-weight: 600; font-size: 13px;
 }
 .avatar.avatar-customer.is-female {
   background: linear-gradient(135deg, #f48fb1, #c2185b);
@@ -1933,11 +1936,11 @@ watch(
   font-size: 10.5px; font-weight: 500;
   white-space: nowrap;
 }
-.chip-success { background: rgba(0,200,83,0.12); color: #00897b; }
-.chip-warning { background: rgba(255,145,0,0.15); color: #ef6c00; }
-.chip-info    { background: rgba(33,150,243,0.12); color: #1565c0; }
+.chip-success { background: rgba(0,200,83,0.12); color: var(--success); }
+.chip-warning { background: rgba(255,145,0,0.15); color: var(--warning); }
+.chip-info    { background: rgba(33,150,243,0.12); color: var(--info); }
 .chip-grey    { background: rgba(90,100,120,0.10); color: var(--smax-grey-700); }
-.chip-error   { background: rgba(255,82,82,0.12); color: #c62828; }
+.chip-error   { background: rgba(255,82,82,0.12); color: var(--error); }
 .chip-multi-nick {
   background: linear-gradient(135deg, rgba(124,77,255,0.14), rgba(33,150,243,0.10));
   color: #4527a0;
@@ -1947,8 +1950,8 @@ watch(
 }
 /* "Cùng chăm (N)" badge — vàng cam theo Airtable signature (anh chốt 2026-05-28) */
 .chip-cung-cham {
-  background: #FEF3C7;
-  color: #92400E;
+  background: var(--warning-soft);
+  color: var(--warning);
   border: 1px solid #F59E0B66;
   margin-left: 6px;
   font-weight: 600;
@@ -1973,7 +1976,7 @@ watch(
   font-weight: 600;
   white-space: nowrap;
 }
-.view-profile-btn:hover { background: var(--smax-primary); color: #fff; }
+.view-profile-btn:hover { background: var(--smax-primary); color: var(--surface); }
 
 .child-wrap td {
   background: var(--smax-grey-50);
@@ -1989,13 +1992,13 @@ watch(
 .child-mock-banner {
   font-size: 11px;
   background: rgba(255,145,0,0.10);
-  color: #ef6c00;
+  color: var(--warning);
   padding: 5px 9px;
   border-radius: 5px;
   margin-bottom: 9px;
 }
 .child-mock-banner code {
-  background: white;
+  background: var(--surface);
   padding: 1px 5px; border-radius: 4px;
   font-size: 10.5px;
 }
@@ -2048,7 +2051,7 @@ watch(
   border-radius: 50%;
   background: linear-gradient(135deg, #ffb74d, #f57c00);
   display: flex; align-items: center; justify-content: center;
-  color: white; font-weight: 600; font-size: 10px;
+  color: var(--surface); font-weight: 600; font-size: 10px;
   flex-shrink: 0;
 }
 .two-line {
@@ -2098,35 +2101,35 @@ watch(
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #94a3b8;
-  color: #fff;
+  background: var(--ink-4);
+  color: var(--surface);
   font-size: 9px;
   font-weight: 700;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid #fff;
+  border: 2px solid var(--surface);
   box-shadow: 0 0 0 1px #e2e8f0;
   margin-left: -6px;
   text-transform: uppercase;
 }
 .ccs-avatar:first-child { margin-left: 0; }
 .ccs-avatar.ccs-primary {
-  border: 2px solid #f59e0b;
+  border: 2px solid var(--warning);
   box-shadow: 0 0 0 1px #fbbf24;
 }
 .ccs-more {
   font-size: 10px;
-  color: #64748b;
+  color: var(--ink-3);
   margin-left: 2px;
-  background: #f1f5f9;
+  background: var(--surface-3);
   padding: 1px 5px;
   border-radius: 8px;
   font-weight: 600;
 }
 .ccs-count {
   font-size: 10px;
-  color: #475569;
+  color: var(--ink-2);
   margin-left: 4px;
   white-space: nowrap;
 }
@@ -2145,7 +2148,7 @@ watch(
 
 .chip-orange-soft {
   background: rgba(255,167,38,0.18);
-  color: #ef6c00;
+  color: var(--warning);
 }
 
 .w-220 { width: 220px; }
@@ -2159,8 +2162,8 @@ watch(
   text-transform: uppercase;
   white-space: nowrap;
 }
-.chip-conv--on  { background: rgba(0,200,83,0.12);  color: #00897b; }
-.chip-conv--off { background: rgba(0,0,0,0.06);     color: #888;    }
+.chip-conv--on  { background: rgba(0,200,83,0.12);  color: var(--success); }
+.chip-conv--off { background: rgba(0,0,0,0.06);     color: var(--ink-4);    }
 
 /* Zalo identity columns (optional, toggle via ⚙ Cột) */
 .uid-cell {
@@ -2174,7 +2177,7 @@ watch(
 }
 .chip-multi {
   background: rgba(13, 71, 161, 0.10);
-  color: #0d47a1;
+  color: var(--info);
   font-size: 10.5px;
   padding: 1px 7px;
   border-radius: 9px;
@@ -2219,8 +2222,8 @@ watch(
   white-space: nowrap;
   letter-spacing: 0.02em;
 }
-.role-primary { background: #EEF0FF; color: #4F46E5; }
-.role-collab  { background: #FEF3C7; color: #92400E; }
+.role-primary { background: var(--brand-soft); color: var(--brand); }
+.role-collab  { background: var(--warning-soft); color: var(--warning); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * Phase Dual View 2026-05-28 — Toggle 2 view modes + Master-Detail layout
@@ -2230,8 +2233,8 @@ watch(
 /* View toggle button group */
 .view-toggle {
   display: inline-flex;
-  background: var(--smax-grey-50, #f8fafc);
-  border: 1px solid var(--smax-grey-200, #e5e7eb);
+  background: var(--smax-grey-50, var(--surface-2));
+  border: 1px solid var(--smax-grey-200, var(--line));
   border-radius: 8px;
   padding: 3px;
   gap: 2px;
@@ -2243,7 +2246,7 @@ watch(
   padding: 6px 12px;
   font-size: 12.5px;
   font-weight: 500;
-  color: var(--smax-grey-600, #475569);
+  color: var(--smax-grey-600, var(--ink-2));
   cursor: pointer;
   border-radius: 5px;
   font-family: inherit;
@@ -2256,17 +2259,17 @@ watch(
 /* 2026-06-05 (Anh: active/hover chưa phân biệt) — hover nền trắng+viền, active nền
    primary chữ trắng → nổi bật rõ trạng thái đang chọn. */
 .view-btn:hover:not(.active) {
-  background: #fff;
+  background: var(--surface);
   color: var(--smax-primary);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 .view-btn.active {
   background: var(--smax-primary);
-  color: #fff;
+  color: var(--surface);
   font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 104, 255, 0.30);
 }
-.view-btn.active:hover { background: var(--smax-primary-hover, #0052cc); color: #fff; }
+.view-btn.active:hover { background: var(--smax-primary-hover, #0052cc); color: var(--surface); }
 
 
 .zalo-pill {
@@ -2283,18 +2286,18 @@ watch(
   overflow: hidden;
 }
 .zalo-pill.zalo-yes {
-  background: #dcfce7;
-  color: #166534;
+  background: var(--success-soft);
+  color: var(--success);
   border: 1px solid #86efac;
 }
 .zalo-pill.zalo-no {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--error-soft);
+  color: var(--error);
   border: 1px solid #fca5a5;
 }
 .zalo-pill.zalo-unknown {
-  background: #f1f5f9;
-  color: #475569;
+  background: var(--surface-3);
+  color: var(--ink-2);
   border: 1px dashed #cbd5e1;
 }
 
@@ -2317,8 +2320,8 @@ watch(
 }
 
 .detail-pane {
-  border-left: 1px solid var(--smax-grey-200, #e5e7eb);
-  background: white;
+  border-left: 1px solid var(--smax-grey-200, var(--line));
+  background: var(--surface);
   min-height: 0;
   overflow: hidden;
   display: flex;
@@ -2393,8 +2396,8 @@ watch(
   animation: row-flash-anim 2.5s ease-out;
 }
 @keyframes row-flash-anim {
-  0%   { background: #fef3c7; box-shadow: inset 0 0 0 2px #f59e0b; }
-  40%  { background: #fef3c7; box-shadow: inset 0 0 0 2px #f59e0b; }
+  0%   { background: var(--warning-soft); box-shadow: inset 0 0 0 2px var(--warning); }
+  40%  { background: var(--warning-soft); box-shadow: inset 0 0 0 2px var(--warning); }
   100% { background: transparent; box-shadow: inset 0 0 0 2px transparent; }
 }
 
@@ -2431,7 +2434,7 @@ watch(
   border-radius: 9999px;
   border: 1px solid #181d26;
   background: #181d26;
-  color: #ffffff;
+  color: var(--surface);
   font-family: inherit;
   font-size: 14px;
   font-weight: 500;
@@ -2474,7 +2477,7 @@ watch(
   margin-left: 4px;
   vertical-align: middle;
 }
-.gtag-inline.gtag-male { background: rgba(30, 136, 229, 0.13); color: #1565c0; }
+.gtag-inline.gtag-male { background: rgba(30, 136, 229, 0.13); color: var(--info); }
 .gtag-inline.gtag-female { background: rgba(233, 30, 99, 0.12); color: #c2185b; }
 .age-inline { font-size: 11px; color: var(--smax-grey-700); margin-left: 4px; font-weight: 500; }
 
@@ -2495,8 +2498,8 @@ watch(
 .assist-av {
   width: 20px; height: 20px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 9px; font-weight: 600;
-  border: 1.5px solid #fff; margin-left: -6px;
+  color: var(--surface); font-size: 9px; font-weight: 600;
+  border: 1.5px solid var(--surface); margin-left: -6px;
 }
 .assist-av:first-child { margin-left: 0; }
 .assist-lbl { font-size: 10px; color: var(--smax-grey-700); }
@@ -2534,38 +2537,38 @@ watch(
 .cl-nm { font-weight: 500; color: var(--smax-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .cl-name-sub { font-size: 11px; color: var(--smax-grey-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gtag { flex: 0 0 auto; font-size: 11px; font-weight: 600; border-radius: 7px; padding: 0 5px; }
-.gtag-male { background: rgba(30,136,229,.13); color: #1565c0; }
+.gtag-male { background: rgba(30,136,229,.13); color: var(--info); }
 .gtag-female { background: rgba(233,30,99,.12); color: #c2185b; }
 .age-inline { flex: 0 0 auto; font-size: 11px; color: var(--smax-grey-700); font-weight: 500; }
 
 /* Có Zalo? pill — KHÔNG tràn sang Action (box-sizing + max-width + overflow) */
 .cl-zalo { overflow: hidden; }
 .zpill { display: inline-flex; align-items: center; gap: 2px; box-sizing: border-box; max-width: 100%; font-size: 10px; line-height: 1; font-weight: 600; padding: 3px 5px; border-radius: 9999px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.zpill-yes { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
-.zpill-no { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
-.zpill-wait { background: #f1f5f9; color: #475569; border: 1px dashed #cbd5e1; }
+.zpill-yes { background: var(--success-soft); color: var(--success); border: 1px solid #86efac; }
+.zpill-no { background: var(--error-soft); color: var(--error); border: 1px solid #fca5a5; }
+.zpill-wait { background: var(--surface-3); color: var(--ink-2); border: 1px dashed #cbd5e1; }
 /* badge KB hàng con dùng .zpill + màu .kb-c-* */
-.kb-c-yes { background: rgba(0,200,83,.15); color: #1b8a3f; border: 1px solid #86efac; }
-.kb-c-pending { background: rgba(255,145,0,.16); color: #ef6c00; border: 1px solid #fcd9a5; }
-.kb-c-info { background: rgba(33,150,243,.14); color: #1565c0; border: 1px solid #90caf9; }
-.kb-c-off { background: var(--smax-grey-100); color: #9e9e9e; border: 1px solid var(--smax-grey-300); }
+.kb-c-yes { background: rgba(0,200,83,.15); color: var(--success); border: 1px solid #86efac; }
+.kb-c-pending { background: rgba(255,145,0,.16); color: var(--warning); border: 1px solid #fcd9a5; }
+.kb-c-info { background: rgba(33,150,243,.14); color: var(--info); border: 1px solid #90caf9; }
+.kb-c-off { background: var(--smax-grey-100); color: var(--ink-4); border: 1px solid var(--smax-grey-300); }
 
 /* Action — nút icon fixed-width, không tràn */
 .cl-action { display: flex; gap: 4px; }
-.cl-btn { box-sizing: border-box; height: 26px; padding: 0 8px; border: 1px solid var(--smax-grey-300); border-radius: 5px; background: #fff; font-size: 12px; line-height: 24px; white-space: nowrap; cursor: pointer; color: var(--smax-grey-700); }
+.cl-btn { box-sizing: border-box; height: 26px; padding: 0 8px; border: 1px solid var(--smax-grey-300); border-radius: 5px; background: var(--surface); font-size: 12px; line-height: 24px; white-space: nowrap; cursor: pointer; color: var(--smax-grey-700); }
 .cl-btn:hover { border-color: var(--smax-primary); color: var(--smax-primary); }
 .cl-btn-profile { background: var(--smax-primary-soft); border-color: var(--smax-primary); color: var(--smax-primary); font-weight: 600; }
-.cl-btn-profile:hover { background: var(--smax-primary); color: #fff; }
+.cl-btn-profile:hover { background: var(--smax-primary); color: var(--surface); }
 .fr-row .cl-btn { width: 22px; height: 22px; padding: 0; text-align: center; line-height: 20px; }
 .fr-row .cl-action { gap: 3px; }
-.cl-btn-primary { background: var(--smax-primary); color: #fff; border-color: var(--smax-primary); }
-.cl-btn-primary:hover { background: var(--smax-primary); color: #fff; }
+.cl-btn-primary { background: var(--smax-primary); color: var(--surface); border-color: var(--smax-primary); }
+.cl-btn-primary:hover { background: var(--smax-primary); color: var(--surface); }
 
 /* ───────── HÀNG CON (fr-row) — gióng cột với cha ───────── */
 .deck-head-row > td { padding: 5px 8px 5px 28px; background: var(--smax-grey-50); font-size: 10.5px; font-weight: 700; letter-spacing: .03em; color: var(--smax-primary); border-bottom: 1px solid var(--smax-grey-200); }
 .exp-loading > td, .exp-empty > td { background: var(--smax-grey-50); }
 .fr-row { background: var(--smax-grey-50); font-size: 12px; }
-.fr-row:hover { background: #eef0f4; }
+.fr-row:hover { background: var(--brand-softer); }
 /* 2026-06-05 v7 (Anh chốt bố trí 3 dòng = 25+15+15) — CHIỀU CAO HÀNG CỐ ĐỊNH.
    Cách đúng: mỗi td bọc nội dung trong khung 55px cố định + overflow ẩn.
    Dùng `td { height: 67px }` (min) + max-height ép trần. ROOT của lệch trước đây:
@@ -2606,12 +2609,12 @@ watch(
    FIX: giữ 1px (cùng độ dày → avatar mọi nick cùng top), màu đậm hơn để vẫn phân cách. */
 /* is-last: đáy đậm hơn (phân cách block nick cuối ↔ KH cha kế) — dùng box-shadow
    cho nhất quán + sắc nét như các nick khác (không bị half-pixel). */
-.fr-row.is-last > td { border-bottom: 0; box-shadow: inset 0 -1px 0 0 #c4c9d2; }
-.fr-row.is-last .fr-name { box-shadow: inset 3px 0 0 var(--smax-grey-300), inset 0 -1px 0 0 #c4c9d2; }
-.fr-row.is-last.kb-yes .fr-name { box-shadow: inset 3px 0 0 var(--smax-success), inset 0 -1px 0 0 #c4c9d2; }
-.fr-row.is-last.kb-pending .fr-name { box-shadow: inset 3px 0 0 var(--smax-warning), inset 0 -1px 0 0 #c4c9d2; }
-.fr-row.is-last.kb-info .fr-name { box-shadow: inset 3px 0 0 var(--smax-info), inset 0 -1px 0 0 #c4c9d2; }
-.fr-row.is-last.kb-off .fr-name { box-shadow: inset 3px 0 0 #9e9e9e, inset 0 -1px 0 0 #c4c9d2; }
+.fr-row.is-last > td { border-bottom: 0; box-shadow: inset 0 -1px 0 0 var(--line); }
+.fr-row.is-last .fr-name { box-shadow: inset 3px 0 0 var(--smax-grey-300), inset 0 -1px 0 0 var(--line); }
+.fr-row.is-last.kb-yes .fr-name { box-shadow: inset 3px 0 0 var(--smax-success), inset 0 -1px 0 0 var(--line); }
+.fr-row.is-last.kb-pending .fr-name { box-shadow: inset 3px 0 0 var(--smax-warning), inset 0 -1px 0 0 var(--line); }
+.fr-row.is-last.kb-info .fr-name { box-shadow: inset 3px 0 0 var(--smax-info), inset 0 -1px 0 0 var(--line); }
+.fr-row.is-last.kb-off .fr-name { box-shadow: inset 3px 0 0 var(--ink-4), inset 0 -1px 0 0 var(--line); }
 
 /* accent rail = inset shadow trái trên ô Tên (KHÔNG cột riêng → gióng cột chuẩn) */
 /* 2026-06-05 v11 — fr-name cần CẢ rail trái (3px màu KB) VÀ đường đáy (-1px) trong
@@ -2620,7 +2623,7 @@ watch(
 .fr-row.kb-yes .fr-name { box-shadow: inset 3px 0 0 var(--smax-success), inset 0 -1px 0 0 var(--smax-grey-200); }
 .fr-row.kb-pending .fr-name { box-shadow: inset 3px 0 0 var(--smax-warning), inset 0 -1px 0 0 var(--smax-grey-200); }
 .fr-row.kb-info .fr-name { box-shadow: inset 3px 0 0 var(--smax-info), inset 0 -1px 0 0 var(--smax-grey-200); }
-.fr-row.kb-off .fr-name { box-shadow: inset 3px 0 0 #9e9e9e, inset 0 -1px 0 0 var(--smax-grey-200); }
+.fr-row.kb-off .fr-name { box-shadow: inset 3px 0 0 var(--ink-4), inset 0 -1px 0 0 var(--smax-grey-200); }
 
 .fr-nm { font-size: 12.5px; font-weight: 600; }
 .fr-trophy { flex: 0 0 auto; color: #f9a825; font-size: 11px; }
@@ -2636,16 +2639,16 @@ watch(
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .fr-alias::placeholder { color: var(--smax-grey-400); font-style: italic; }
-.fr-alias:hover { border-color: var(--smax-grey-300); background: #fff; }
-.fr-alias:focus { outline: none; border-color: var(--smax-primary); background: #fff; }
-.fr-sync-hint { font-size: 10px; color: #1565c0; white-space: nowrap; cursor: help; }
+.fr-alias:hover { border-color: var(--smax-grey-300); background: var(--surface); }
+.fr-alias:focus { outline: none; border-color: var(--smax-primary); background: var(--surface); }
+.fr-sync-hint { font-size: 10px; color: var(--info); white-space: nowrap; cursor: help; }
 .fr-status-btn { border: 0; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fr-score { width: 34px; box-sizing: border-box; text-align: center; padding: 2px; border: 1px solid transparent; border-radius: 5px; font: inherit; font-weight: 700; font-size: 11.5px; -moz-appearance: textfield; }
 .fr-score::-webkit-outer-spin-button, .fr-score::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.fr-score:hover, .fr-score:focus { border-color: var(--smax-grey-300); background: #fff; outline: none; }
-.fr-score.chip-success { background: rgba(0,200,83,.15); color: #1b8a3f; }
-.fr-score.chip-warning { background: rgba(255,145,0,.15); color: #ef6c00; }
-.fr-score.chip-error { background: rgba(255,61,0,.13); color: #c62828; }
+.fr-score:hover, .fr-score:focus { border-color: var(--smax-grey-300); background: var(--surface); outline: none; }
+.fr-score.chip-success { background: rgba(0,200,83,.15); color: var(--success); }
+.fr-score.chip-warning { background: rgba(255,145,0,.15); color: var(--warning); }
+.fr-score.chip-error { background: rgba(255,61,0,.13); color: var(--error); }
 .fr-became, .fr-sale { display: block; font-size: 11px; color: var(--smax-grey-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 2026-06-05 (Anh chốt) — text UID/GlobalId/Username friend row: click để copy. */
 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; }
@@ -2661,10 +2664,10 @@ watch(
 .fr-io b { font-weight: 700; }
 /* Friend Tag chip (cột Tags hàng con) */
 .fr-row .ftag { display: inline-flex; align-items: center; gap: 2px; padding: 1px 6px; border-radius: 8px; font-size: 9.5px; font-weight: 600; border: 1px solid; white-space: nowrap; }
-.fr-row .ft-zalo { background: #fff8f0; border-color: #ff9800; color: #ef6c00; }
-.fr-row .ft-manual { background: #f0f7ff; border-color: #42a5f5; color: #1565c0; }
+.fr-row .ft-zalo { background: #fff8f0; border-color: #ff9800; color: var(--warning); }
+.fr-row .ft-manual { background: #f0f7ff; border-color: #42a5f5; color: var(--info); }
 .fr-row .ft-auto { background: #faf3fc; border-color: #ce93d8; color: #6a1b9a; }
-.fr-row .ft-score { background: rgba(0,200,83,.08); border-color: #66bb6a; color: #1b8a3f; }
+.fr-row .ft-score { background: rgba(0,200,83,.08); border-color: #66bb6a; color: var(--success); }
 .fr-row .ft-sync { background: var(--smax-grey-100); border-color: var(--smax-grey-300); color: var(--smax-grey-700); }
 .child-empty { padding: 9px 13px; font-size: 12px; color: var(--smax-grey-700); }
 
