@@ -32,6 +32,8 @@ import { logActivity } from '../activity/activity-logger.js';
 import { applyFriendTransition } from './friend-event-handler.js';
 import { resolveOrCreateContact } from '../contacts/resolve-contact.js';
 import { buildFriendUpdatedPayload } from '../../shared/friend-serializer.js';
+// getAllFriends() trả gender/dob/sdob cùng shape getUserInfo — tái dùng parse của cron.
+import { mapGender, parseBirthDate } from '../contacts/contact-profile-sync-cron.js';
 
 export type SyncTrigger = 'manual' | 'connect' | 'cron';
 
@@ -97,6 +99,10 @@ function computeDiff(existing: DiffSnapshot, incoming: DiffSnapshot): DiffSnapsh
 function extractFriendInfo(raw: Record<string, unknown>): {
   uid: string;
   snapshot: DiffSnapshot;
+  // Demographic Cha (Contact) — getAllFriends ĐÃ trả sẵn (User.gender/dob/sdob), không
+  // tốn thêm call SDK. Ghi null-only + !genderLocked ở processFriend (xem dưới).
+  gender: 'male' | 'female' | null;
+  birthDate: Date | null;
 } | null {
   const uid = String((raw.userId ?? raw.uid ?? '') as string);
   if (!uid) return null;
@@ -108,6 +114,8 @@ function extractFriendInfo(raw: Record<string, unknown>): {
       zaloGlobalId: String((raw.globalId ?? '') as string) || null,
       zaloUsername: String((raw.username ?? '') as string) || null,
     },
+    gender: mapGender(raw.gender),
+    birthDate: parseBirthDate(raw.sdob, raw.dob),
   };
 }
 
@@ -225,6 +233,8 @@ async function syncFriendsForAccountImpl(
         orgId,
         uid: info.uid,
         snapshot: info.snapshot,
+        gender: info.gender,
+        birthDate: info.birthDate,
         targetStatus: 'accepted',
         fallbackName: info.snapshot.zaloDisplayName,
         fallbackAvatar: info.snapshot.zaloAvatarUrl,
@@ -252,6 +262,8 @@ async function syncFriendsForAccountImpl(
         orgId,
         uid: info.uid,
         snapshot: info.snapshot,
+        gender: info.gender,
+        birthDate: info.birthDate,
         targetStatus: 'pending_sent',
         fallbackName: info.snapshot.zaloDisplayName,
         fallbackAvatar: info.snapshot.zaloAvatarUrl,
@@ -283,6 +295,8 @@ interface ProcessFriendArgs {
   orgId: string;
   uid: string;
   snapshot: DiffSnapshot;
+  gender: 'male' | 'female' | null;
+  birthDate: Date | null;
   targetStatus: 'accepted' | 'pending_sent';
   fallbackName: string | null | undefined;
   fallbackAvatar: string | null | undefined;
@@ -319,30 +333,33 @@ async function processFriend(args: ProcessFriendArgs): Promise<void> {
   // Re-read fullName for downstream B8 backfill logic
   const contactRow = await prisma.contact.findUnique({
     where: { id: resolved.id },
-    select: { id: true, fullName: true },
+    select: { id: true, fullName: true, gender: true, genderLocked: true, birthDate: true },
   });
-  let contact = contactRow ?? { id: resolved.id, fullName: null };
+  const contact = contactRow ?? { id: resolved.id, fullName: null, gender: null, genderLocked: false, birthDate: null };
 
-  // 1c. B8 — Backfill Contact.fullName khi Contact stub 'Unknown' mà Friend đã có
-  // zaloDisplayName từ SDK. Stub được tạo bởi resolveContact (friend-event-handler)
-  // khi event đến trước message → fullName='Unknown'. Sau khi sync pull zaloName
-  // về Friend, KH Cha vẫn stuck "Unknown" gây UI broken popup/chat.
-  // Chỉ ghi đè khi fullName = 'Unknown' literal — KHÔNG đụng nếu sale đã edit thủ công.
+  // 1c. Gộp các backfill Cha (Contact) vào 1 update để tránh N+1:
+  //   • B8 — fullName khi Contact stub 'Unknown' mà Friend đã có zaloDisplayName từ SDK.
+  //     (Stub tạo bởi resolveContact khi event đến trước message → fullName='Unknown', KH
+  //     Cha stuck "Unknown" gây UI broken.) CHỈ ghi đè 'Unknown' literal — không đụng sale sửa tay.
+  //   • Demographic 2026-06-18 — gender/birthDate Zalo TRẢ SẴN trong getAllFriends (0 call SDK
+  //     thêm). Điền khi đang TRỐNG; gender thêm !genderLocked (chống đè chỉnh tay). 1 lần đồng
+  //     bộ là fill hàng loạt thay vì chờ cron getUserInfo từng KH.
+  const cPatch: Record<string, unknown> = {};
   const newName = args.snapshot.zaloDisplayName || args.fallbackName;
   if (
     newName
     && newName !== 'Unknown'
     && (contact.fullName === 'Unknown' || contact.fullName === null || contact.fullName === '' || contact.fullName === 'KH chưa rõ')
   ) {
-    await prisma.contact.update({
-      where: { id: contact.id },
-      data: {
-        fullName: newName,
-        ...(args.snapshot.zaloGlobalId ? { zaloGlobalId: args.snapshot.zaloGlobalId } : {}),
-        ...(args.snapshot.zaloUsername ? { zaloUsername: args.snapshot.zaloUsername } : {}),
-        ...(args.fallbackAvatar ? { avatarUrl: args.fallbackAvatar } : {}),
-      },
-    });
+    cPatch.fullName = newName;
+    if (args.snapshot.zaloGlobalId) cPatch.zaloGlobalId = args.snapshot.zaloGlobalId;
+    if (args.snapshot.zaloUsername) cPatch.zaloUsername = args.snapshot.zaloUsername;
+    if (args.fallbackAvatar) cPatch.avatarUrl = args.fallbackAvatar;
+  }
+  if (args.gender && contact.gender == null && !contact.genderLocked) cPatch.gender = args.gender;
+  if (args.birthDate && contact.birthDate == null) cPatch.birthDate = args.birthDate;
+  if (Object.keys(cPatch).length) {
+    await prisma.contact.update({ where: { id: contact.id }, data: cPatch });
   }
 
   // 2. Drive friendship state machine (handles upsert + counter delta + assignedUser).

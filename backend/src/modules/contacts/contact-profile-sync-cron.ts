@@ -21,11 +21,11 @@ import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { zaloOps } from '../../shared/zalo-operations.js';
 
-// #3 2026-06-18 (anh báo 16k KH có UID nhưng gender Unknown): tăng throughput để dọn tồn
-// đọng. Mỗi 4 giờ (6 lượt/ngày) × 400 = ~2400 KH/ngày → ~16k tồn dọn trong ~1 tuần. Nhịp an
-// toàn vẫn do THROTTLE_MS (1.5s/call) giữ — KHÔNG burst. (Trước: 03:00/ngày × 200 = ~80 ngày.)
-const CRON_SCHEDULE = '0 */4 * * *';
-const MAX_PER_CYCLE = 400;   // trần KH/lượt — throttle 1.5s/call vẫn chặn burst rate-limit
+// 03:00 mỗi ngày (giờ VN) — khung thấp điểm. 2026-06-18: friend-sync nay backfill gender/dob
+// HÀNG LOẠT từ getAllFriends mỗi lần nick connect (0 call SDK thêm) → cron chỉ còn VÉT ĐUÔI
+// (KH không nằm trong friend list live). Nên trả về daily×200 cho nhẹ tải, bỏ bump 4h×400 cũ.
+const CRON_SCHEDULE = '0 3 * * *';
+const MAX_PER_CYCLE = 200;   // trần KH/ngày — throttle 1.5s/call chặn burst rate-limit Zalo
 const THROTTLE_MS = 1500;    // nghỉ giữa mỗi getUserInfo
 
 let cronRunning = false;
@@ -92,7 +92,8 @@ export function parseBirthDate(sdob: unknown, dob: unknown): Date | null {
 /** Map gender SDK → Contact.gender. FIX 2026-06-08 (Anh báo + verify SDK live):
  *  Zalo trả 0=NAM(male), 1=NỮ(female). Memo cũ "0=female" SAI → cron sync đảo ngược
  *  gender. Đồng bộ với 4 file đúng (lead-pool/zinstant/profile-operations/chat-routes). */
-function mapGender(g: unknown): 'male' | 'female' | null {
+// Export để friend-sync tái dùng (getAllFriends trả gender cùng shape getUserInfo).
+export function mapGender(g: unknown): 'male' | 'female' | null {
   if (g === 0 || g === '0') return 'male';
   if (g === 1 || g === '1') return 'female';
   return null;
