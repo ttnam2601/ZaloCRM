@@ -192,6 +192,8 @@ async function enqueueNextStep(
           orgId: data.orgId,
           triggerId: data.triggerId,
           contactId: data.contactId,
+          // 2026-06-18: thiếu nickId → cột "Nick chăm" ở Log trống cho dòng "Lên lịch bước kế". data.nickId có sẵn.
+          nickId: data.nickId,
           eventType: 'sequence_step_enqueued',
           detail: `step ${nextStepIdx}/${data.totalSteps}, jobId=${nextJobId}`,
           metadata: {
@@ -990,8 +992,11 @@ export async function sweepMissingNextSteps(): Promise<{ recovered: number }> {
         orgId: trigger.orgId,
         triggerId: evt.triggerId,
         contactId: evt.contactId,
+        // 2026-06-18: thêm nickId → cột "Nick chăm" Log không trống; bỏ "(SWEEPER RECOVERY)" khỏi
+        // detail (đã có ở metadata.source) để không lộ chữ nội bộ cho sale.
+        nickId: outbox.nickId,
         eventType: 'sequence_step_enqueued',
-        detail: `step ${nextStepIdx}/${steps.length} (SWEEPER RECOVERY)`,
+        detail: `step ${nextStepIdx}/${steps.length}`,
         metadata: {
           stepIdx: nextStepIdx,
           totalSteps: steps.length,

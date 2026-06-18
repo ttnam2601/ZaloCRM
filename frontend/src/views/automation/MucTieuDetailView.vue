@@ -924,7 +924,6 @@
           <div>
             Sale có thể đổi giai đoạn KH bất kỳ lúc nào để
             <strong>tự động dừng</strong> Mục tiêu cho KH đó.
-            <span class="muted-inline">(Bulk action ship Wave 4)</span>
           </div>
         </div>
       </div>
@@ -1728,19 +1727,17 @@ function onEdit(): void {
 }
 function onDuplicate(): void {
   menuOpen.value = false;
-  toast.warning('Sao chép Mục tiêu — Wave 4.');
+  toast.warning('Tính năng Sao chép Mục tiêu đang phát triển, sắp có nhé.');
 }
 function exportExcel(): void {
   menuOpen.value = false;
-  toast.warning('Xuất Excel — Wave 4.');
+  toast.warning('Tính năng Xuất Excel đang phát triển, sắp có nhé.');
 }
 function exportEntries(): void {
-  toast.warning('Xuất Excel danh sách KH — Wave 4.');
+  toast.warning('Tính năng Xuất Excel danh sách KH đang phát triển, sắp có nhé.');
 }
 function exportCsv(): void {
-  // Defer Wave 4 — keep button discoverable for now
-  console.log('[muc-tieu-detail] Export CSV log — defer Wave 4');
-  toast.warning('Xuất CSV log — Wave 4.');
+  toast.warning('Tính năng Xuất CSV log đang phát triển, sắp có nhé.');
 }
 function goLeadPool(): void {
   void router.push({
