@@ -43,17 +43,28 @@
             <span>Công khai</span>
             <span class="bv-sidebar-hint">cả org dùng</span>
           </div>
-          <button
+          <div
             v-for="folder in publicFolders"
             :key="folder.id"
             class="bv-folder-item"
             :class="{ 'is-active': selectedFolderId === folder.id }"
-            @click="onSelectFolder(folder.id)"
           >
-            <v-icon size="14">mdi-folder-outline</v-icon>
-            <span class="bv-folder-label">{{ folder.name }}</span>
-            <span class="bv-folder-count num">{{ folder._count?.blocks ?? 0 }}</span>
-          </button>
+            <button class="bv-folder-main" @click="onSelectFolder(folder.id)">
+              <v-icon size="14">mdi-folder-outline</v-icon>
+              <span class="bv-folder-label">{{ folder.name }}</span>
+              <span class="bv-folder-count num">{{ folder._count?.blocks ?? 0 }}</span>
+            </button>
+            <v-menu v-if="canCreateBlock" location="bottom end" :close-on-content-click="true">
+              <template #activator="{ props }">
+                <button class="bv-folder-more" v-bind="props" @click.stop title="Tùy chọn"><v-icon size="14">mdi-dots-horizontal</v-icon></button>
+              </template>
+              <v-list density="compact" class="bk-menu" @click.stop>
+                <v-list-item @click="onRenameFolder(folder)"><template #prepend><v-icon size="16">mdi-pencil-outline</v-icon></template><v-list-item-title>Đổi tên</v-list-item-title></v-list-item>
+                <v-list-item @click="onToggleFolderVisibility(folder)"><template #prepend><v-icon size="16">mdi-lock-outline</v-icon></template><v-list-item-title>Chuyển sang Riêng tư</v-list-item-title></v-list-item>
+                <v-list-item class="bk-menu-danger" @click="onDeleteFolder(folder)"><template #prepend><v-icon size="16">mdi-trash-can-outline</v-icon></template><v-list-item-title>Xoá thư mục</v-list-item-title></v-list-item>
+              </v-list>
+            </v-menu>
+          </div>
         </div>
 
         <div v-if="privateFolders.length > 0" class="bv-sidebar-section">
@@ -62,17 +73,28 @@
             <span>Riêng tư</span>
             <span class="bv-sidebar-hint">chỉ tôi</span>
           </div>
-          <button
+          <div
             v-for="folder in privateFolders"
             :key="folder.id"
             class="bv-folder-item"
             :class="{ 'is-active': selectedFolderId === folder.id }"
-            @click="onSelectFolder(folder.id)"
           >
-            <v-icon size="14">mdi-folder-outline</v-icon>
-            <span class="bv-folder-label">{{ folder.name }}</span>
-            <span class="bv-folder-count num">{{ folder._count?.blocks ?? 0 }}</span>
-          </button>
+            <button class="bv-folder-main" @click="onSelectFolder(folder.id)">
+              <v-icon size="14">mdi-folder-outline</v-icon>
+              <span class="bv-folder-label">{{ folder.name }}</span>
+              <span class="bv-folder-count num">{{ folder._count?.blocks ?? 0 }}</span>
+            </button>
+            <v-menu v-if="canCreateBlock" location="bottom end" :close-on-content-click="true">
+              <template #activator="{ props }">
+                <button class="bv-folder-more" v-bind="props" @click.stop title="Tùy chọn"><v-icon size="14">mdi-dots-horizontal</v-icon></button>
+              </template>
+              <v-list density="compact" class="bk-menu" @click.stop>
+                <v-list-item @click="onRenameFolder(folder)"><template #prepend><v-icon size="16">mdi-pencil-outline</v-icon></template><v-list-item-title>Đổi tên</v-list-item-title></v-list-item>
+                <v-list-item @click="onToggleFolderVisibility(folder)"><template #prepend><v-icon size="16">mdi-lock-open-variant-outline</v-icon></template><v-list-item-title>Chuyển sang Công khai</v-list-item-title></v-list-item>
+                <v-list-item class="bk-menu-danger" @click="onDeleteFolder(folder)"><template #prepend><v-icon size="16">mdi-trash-can-outline</v-icon></template><v-list-item-title>Xoá thư mục</v-list-item-title></v-list-item>
+              </v-list>
+            </v-menu>
+          </div>
         </div>
 
         <div class="bv-folder-divider"></div>
@@ -177,9 +199,31 @@
                 class="blk"
                 @click="openEdit(block)"
               >
-                <button v-if="canEditBlock || canCreateBlock" class="bk-more" @click.stop="onCardMore(block, $event)" title="Tùy chọn">
-                  <v-icon size="16">mdi-dots-vertical</v-icon>
-                </button>
+                <v-menu v-if="canEditBlock || canCreateBlock" location="bottom end" :close-on-content-click="true">
+                  <template #activator="{ props }">
+                    <button class="bk-more" v-bind="props" @click.stop title="Tùy chọn">
+                      <v-icon size="16">mdi-dots-vertical</v-icon>
+                    </button>
+                  </template>
+                  <v-list density="compact" class="bk-menu" @click.stop>
+                    <v-list-item @click="openEdit(block)">
+                      <template #prepend><v-icon size="16">mdi-pencil-outline</v-icon></template>
+                      <v-list-item-title>Sửa</v-list-item-title>
+                    </v-list-item>
+                    <v-list-item @click="onDuplicate(block)">
+                      <template #prepend><v-icon size="16">mdi-content-copy</v-icon></template>
+                      <v-list-item-title>Nhân bản</v-list-item-title>
+                    </v-list-item>
+                    <v-list-item @click="onArchiveToggle(block)">
+                      <template #prepend><v-icon size="16">{{ block.archivedAt ? 'mdi-archive-arrow-up-outline' : 'mdi-archive-outline' }}</v-icon></template>
+                      <v-list-item-title>{{ block.archivedAt ? 'Khôi phục' : 'Lưu trữ' }}</v-list-item-title>
+                    </v-list-item>
+                    <v-list-item v-if="canDeleteBlock" class="bk-menu-danger" @click="onDeleteBlock(block)">
+                      <template #prepend><v-icon size="16">mdi-trash-can-outline</v-icon></template>
+                      <v-list-item-title>Xoá hẳn</v-list-item-title>
+                    </v-list-item>
+                  </v-list>
+                </v-menu>
 
                 <!-- action chip -->
                 <span class="bk-act chip" :class="actionChipClass(block.actionType)">
@@ -243,6 +287,7 @@ const { confirm, confirmWithReason } = useConfirm();
 const authStore = useAuthStore();
 const canCreateBlock = computed(() => authStore.canAccess('block', 'create'));
 const canEditBlock = computed(() => authStore.canAccess('block', 'edit'));
+const canDeleteBlock = computed(() => authStore.canAccess('block', 'delete'));
 
 const blocks = ref<Block[]>([]);
 const folders = ref<BlockFolder[]>([]);
@@ -485,34 +530,94 @@ async function onFoldersChanged(_newFolderId: string) {
   showToast('Đã tạo thư mục mới', 'success');
 }
 
-async function onCardMore(block: Block, ev: MouseEvent) {
-  ev.preventDefault();
-  // Phase 1 simple action menu
-  const { ok, reason } = await confirmWithReason({
-    title: `Khối "${block.name}"`,
-    message: `Nhập số:\n1 = Sửa\n2 = Nhân bản\n3 = ${block.archivedAt ? 'Khôi phục' : 'Lưu trữ'}`,
-    confirmText: 'Chọn',
-    cancelText: 'Hủy',
-    reasonLabel: 'Số thao tác',
-    reasonPlaceholder: '1, 2 hoặc 3',
-  });
-  if (!ok) return;
-  const action = reason?.trim();
-  if (action === '1') openEdit(block);
-  else if (action === '2') {
+// ── Menu "..." Khối (2026-06-18): dropdown thay popup nhập-số ──
+async function onDuplicate(block: Block) {
+  try {
     await blocksApi.duplicateBlock(block.id);
     loadAll();
     showToast('Đã nhân bản', 'success');
-  } else if (action === '3') {
+  } catch (e: any) {
+    showToast(e?.response?.data?.error || 'Không nhân bản được', 'error');
+  }
+}
+async function onArchiveToggle(block: Block) {
+  try {
     if (block.archivedAt) {
       await blocksApi.unarchiveBlock(block.id);
       showToast('Đã khôi phục', 'success');
     } else {
-      if (!(await confirm({ title: `Lưu trữ khối "${block.name}"?`, message: 'Khối sẽ chuyển sang mục Đã lưu trữ, có thể khôi phục lại sau.', tone: 'danger', confirmText: 'Lưu trữ', cancelText: 'Hủy' }))) return;
+      if (!(await confirm({ title: `Lưu trữ khối "${block.name}"?`, message: 'Khối sẽ chuyển sang mục "Đã lưu trữ" — không hiện khi chọn khối, nhưng GIỮ LẠI và khôi phục được bất cứ lúc nào.', confirmText: 'Lưu trữ', cancelText: 'Hủy' }))) return;
       await blocksApi.archiveBlock(block.id);
       showToast('Đã lưu trữ', 'success');
     }
     loadAll();
+  } catch (e: any) {
+    showToast(e?.response?.data?.error || 'Thao tác thất bại', 'error');
+  }
+}
+async function onDeleteBlock(block: Block) {
+  if (!(await confirm({
+    title: `Xoá hẳn khối "${block.name}"?`,
+    message: 'Xoá VĨNH VIỄN, KHÔNG khôi phục được. Nếu chỉ muốn cất đi mà giữ lại thì chọn "Lưu trữ".',
+    tone: 'danger', confirmText: 'Xoá hẳn', cancelText: 'Hủy',
+  }))) return;
+  try {
+    await blocksApi.deleteBlock(block.id);
+    loadAll();
+    showToast('Đã xoá khối', 'success');
+  } catch (e: any) {
+    // BE chặn xoá khi khối đang được Mục tiêu/Broadcast tham chiếu.
+    showToast(e?.response?.data?.detail || e?.response?.data?.error || 'Không xoá được — khối đang được dùng ở Mục tiêu/Broadcast. Hãy gỡ tham chiếu hoặc "Lưu trữ" thay vì xoá.', 'error');
+  }
+}
+
+// ── Menu "..." Thư mục (2026-06-18): đổi tên / đổi công khai↔riêng tư / xoá ──
+async function onRenameFolder(folder: BlockFolder) {
+  const { ok, reason } = await confirmWithReason({
+    title: 'Đổi tên thư mục',
+    confirmText: 'Lưu', cancelText: 'Hủy',
+    reasonLabel: 'Tên mới', reasonPlaceholder: folder.name,
+  });
+  if (!ok || !reason?.trim() || reason.trim() === folder.name) return;
+  try {
+    await blocksApi.updateFolder(folder.id, { name: reason.trim() });
+    loadAll();
+    showToast('Đã đổi tên thư mục', 'success');
+  } catch (e: any) {
+    showToast(e?.response?.data?.error || 'Không đổi tên được', 'error');
+  }
+}
+async function onToggleFolderVisibility(folder: BlockFolder) {
+  const next = folder.visibility === 'private' ? 'public' : 'private';
+  const okMsg = next === 'public'
+    ? 'Cả tổ chức sẽ thấy & dùng được các khối trong thư mục này.'
+    : 'Chỉ mình bạn thấy thư mục này. Khối đã lên lịch ở luồng vẫn gửi bình thường, nhưng người khác không mở khối được nữa.';
+  if (!(await confirm({ title: `Chuyển "${folder.name}" sang ${next === 'public' ? 'Công khai' : 'Riêng tư'}?`, message: okMsg, confirmText: 'Đồng ý', cancelText: 'Hủy' }))) return;
+  try {
+    await blocksApi.updateFolder(folder.id, { visibility: next });
+    loadAll();
+    showToast(`Đã chuyển sang ${next === 'public' ? 'Công khai' : 'Riêng tư'}`, 'success');
+  } catch (e: any) {
+    showToast(e?.response?.data?.error || 'Không đổi được trạng thái', 'error');
+  }
+}
+async function onDeleteFolder(folder: BlockFolder) {
+  const n = folder._count?.blocks ?? 0;
+  if (!(await confirm({
+    title: `Xoá thư mục "${folder.name}"?`,
+    message: n > 0
+      ? `Thư mục có ${n} khối. Xoá thư mục KHÔNG xoá khối — các khối sẽ về "Chưa phân loại" (công khai).`
+      : 'Thư mục trống sẽ bị xoá.',
+    tone: 'danger', confirmText: 'Xoá thư mục', cancelText: 'Hủy',
+  }))) return;
+  try {
+    // force=true: thư mục còn khối → BE cascade-detach khối về folderId=null (Chưa phân loại).
+    await blocksApi.deleteFolder(folder.id, true);
+    if (selectedFolderId.value === folder.id) selectedFolderId.value = null;
+    loadAll();
+    showToast('Đã xoá thư mục', 'success');
+  } catch (e: any) {
+    showToast(e?.response?.data?.error || 'Không xoá được thư mục', 'error');
   }
 }
 
@@ -591,19 +696,30 @@ async function createFolderInline() {
 .vis-private { color: #c2410c; }
 
 .bv-folder-item {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center;
   width: 100%;
-  padding: 7px 10px;
   border-radius: var(--r-sm);
-  cursor: pointer;
-  font-size: 12.5px;
   color: var(--ink);
   background: transparent;
-  border: 0;
-  text-align: left;
-  font-family: inherit;
   margin-bottom: 1px;
+  position: relative;
 }
+.bv-folder-main {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  background: transparent; border: 0;
+  cursor: pointer; font-size: 12.5px; color: inherit;
+  text-align: left; font-family: inherit;
+}
+.bv-folder-more {
+  flex-shrink: 0; width: 26px; height: 26px; margin-right: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; background: transparent; border-radius: var(--r-sm);
+  color: var(--ink-4); cursor: pointer; opacity: 0; transition: 0.12s;
+}
+.bv-folder-item:hover .bv-folder-more { opacity: 1; }
+.bv-folder-more:hover { background: var(--surface); color: var(--ink); }
 .bv-folder-item .v-icon { color: var(--ink-4); }
 .bv-folder-item:hover { background: var(--surface-3); }
 .bv-folder-item.is-active {
@@ -726,6 +842,19 @@ async function createFolderInline() {
 }
 .bk-more:hover { background: var(--surface-3); color: var(--ink); }
 .blk:hover .bk-more { opacity: 1; }
+/* v-menu activator (block "...") luôn hiện khi đang mở menu (Vuetify set aria-expanded) */
+.blk .bk-more[aria-expanded="true"] { opacity: 1; background: var(--surface-3); color: var(--ink); }
+
+/* Dropdown menu "..." (Khối + Thư mục) — 2026-06-18 */
+.bk-menu {
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: var(--sh-lg); padding: 4px; min-width: 172px; background: var(--surface);
+}
+.bk-menu :deep(.v-list-item) { border-radius: var(--r-sm); min-height: 36px; }
+.bk-menu :deep(.v-list-item-title) { font-size: 13px; color: var(--ink); }
+.bk-menu :deep(.v-list-item .v-icon) { color: var(--ink-3); }
+.bk-menu-danger :deep(.v-list-item-title) { color: var(--error, #de350b); font-weight: 600; }
+.bk-menu-danger :deep(.v-icon) { color: var(--error, #de350b) !important; }
 .bn { padding-right: 24px; }
 
 .bf { gap: 8px; }
