@@ -93,6 +93,7 @@ import { startFriendInviteSweepers, stopFriendInviteSweepers } from './modules/a
 import { startWelcomeProbeWorker, stopWelcomeProbeWorker } from './modules/automation/friend-invite/welcome-probe-worker.js';
 import { bootstrapFriendInviteWorkers, stopAllNickWorkers, setNickWorkerIO } from './modules/automation/friend-invite/nick-worker.js';
 import { initTelegramBridge } from './modules/integrations/providers/telegram-bridge/index.js';
+import { telegramBridgeRoutes } from './modules/integrations/providers/telegram-bridge/telegram-bridge-routes.js';
 import { broadcastRoutes } from './modules/automation/broadcasts/broadcast-routes.js';
 import { webhookRoutes as automationWebhookRoutes } from './modules/automation/webhooks/webhook-routes.js';
 // Tệp khách hàng (CustomerList) — Phase 7 audience layer
@@ -297,6 +298,7 @@ async function bootstrap() {
   await app.register(analyticsRoutes);
   await app.register(savedReportRoutes);
   await app.register(integrationRoutes);
+  await app.register(telegramBridgeRoutes);
   await app.register(automationRoutes);
   await app.register(templateRoutes);
   await app.register(templateFolderRoutes);
