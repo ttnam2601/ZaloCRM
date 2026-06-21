@@ -86,6 +86,14 @@
           <span class="ctx-item__label">Thêm vào Yêu thích</span>
         </button>
 
+        <!-- Tải về máy (ảnh/video/tệp) — tải qua cổng CRM → ĐÚNG TÊN, không ra tên-hash. -->
+        <button v-if="isMediaMessage" class="ctx-item" role="menuitem" @click="onAction('download-media')">
+          <svg class="ctx-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span class="ctx-item__label">Tải về máy</span>
+        </button>
+
         <!-- Thu hồi (self only) -->
         <button v-if="isSelf" class="ctx-item" role="menuitem" @click="onAction('undo')">
           <svg class="ctx-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -130,6 +138,7 @@ const emit = defineEmits<{
   copy: [];
   'save-media': [visibility: 'private' | 'public'];
   'favorite-media': [];
+  'download-media': [];
 }>();
 
 // Tin có media (ảnh/video/tệp) → hiện "Lưu vào Media". Phase Media Library 2026-06-11.
@@ -225,7 +234,7 @@ onBeforeUnmount(() => {
 function close() {
   emit('update:modelValue', false);
 }
-function onAction(name: 'reply' | 'edit' | 'forward' | 'undo' | 'delete' | 'favorite-media') {
+function onAction(name: 'reply' | 'edit' | 'forward' | 'undo' | 'delete' | 'favorite-media' | 'download-media') {
   // Switch để TS narrow đúng từng emit signature (union không inferr được)
   switch (name) {
     case 'reply':          emit('reply');          break;
@@ -234,6 +243,7 @@ function onAction(name: 'reply' | 'edit' | 'forward' | 'undo' | 'delete' | 'favo
     case 'undo':           emit('undo');           break;
     case 'delete':         emit('delete');         break;
     case 'favorite-media': emit('favorite-media'); break;
+    case 'download-media': emit('download-media'); break;
   }
   close();
 }

@@ -375,7 +375,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   contextmenu: [event: MouseEvent];
   'preview-image': [url: string];
-  'preview-video': [url: string];
+  'preview-video': [url: string, name: string];
   'toggle-reaction': [emoji: string];
   'sender-click': [];
   callback: [message: Message];
@@ -776,8 +776,17 @@ function openVideo() {
   const p = safeParse(props.message.content);
   const url = (p?.href as string) || (p?.hdUrl as string) || (p?.normalUrl as string);
   if (typeof url === 'string' && url.startsWith('http')) {
-    emit('preview-video', url);
+    emit('preview-video', url, videoDownloadName(url));
   }
+}
+
+// Tên tải video (anh báo 2026-06-21: tải từ CRM ra tên-HASH). Zalo thật đặt tên video =
+// chính ID tin nhắn Zalo (zaloMsgId, dãy ~13 số) → CRM tải cũng đặt y vậy cho khớp. Đuôi
+// suy từ URL (mp4/mov...), mặc định .mp4. Thiếu zaloMsgId (hiếm) → "video.<ext>".
+function videoDownloadName(url: string): string {
+  const ext = (url.split('?')[0].match(/\.([A-Za-z0-9]{2,5})$/)?.[1] || 'mp4').toLowerCase();
+  const id = (props.message.zaloMsgId || '').trim();
+  return id ? `${id}.${ext}` : `video.${ext}`;
 }
 
 function isReminderMessage(msg: Message): boolean {
