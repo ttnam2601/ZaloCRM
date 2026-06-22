@@ -18,6 +18,7 @@ import { captureZaloProfile } from '../contacts/zalo-profile-capture.js';
 import { onInboundMessage as onInboundScoring, onOutboundMessage as onOutboundScoring } from '../scoring/scoring-hooks.js';
 import { syncReminderFromMessage } from '../contacts/reminder-sync.js';
 import { uploadBuffer } from '../../shared/storage/minio-client.js';
+import { compressImage } from '../media/media-service.js';
 import { config } from '../../config/index.js';
 // Open-core: customer-reply care-session reaction moved to extension engine
 // (emitted via the shared automation event bus below).
@@ -174,7 +175,15 @@ async function mirrorRemoteMediaUrl(url: string, contentType: string): Promise<s
     if (buffer.length > 0) break;
   }
   if (!buffer || buffer.length === 0) throw new Error('empty response');
-  const uploaded = await uploadBuffer(buffer, mimeType, fileNameFromUrl(url, contentType, mimeType));
+  // 2026-06-22: NÉN ảnh khách gửi vào trước khi LƯU mirror (R2) — nguồn ảnh lớn nhất. Bản mirror
+  // là bản CRM hiển thị + lưu trữ; nén webp giảm ~55% dung lượng. compressImage tự bỏ qua
+  // video/voice/gif + fallback bytes gốc nếu sharp lỗi (ảnh hỏng/format lạ).
+  let outBuf = buffer, outMime = mimeType;
+  if (contentType === 'image') {
+    const proc = await compressImage(buffer, mimeType);
+    outBuf = proc.buffer; outMime = proc.mimeType;
+  }
+  const uploaded = await uploadBuffer(outBuf, outMime, fileNameFromUrl(url, contentType, mimeType));
   return uploaded.url;
 }
 
