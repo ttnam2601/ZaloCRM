@@ -490,7 +490,7 @@
               :current-user-id="currentUserId"
               @contextmenu="onContextMenu($event, item.msg)"
               @preview-image="openImageLightbox($event, [])"
-              @preview-video="previewVideoUrl = $event"
+              @preview-video="onPreviewVideo"
               @toggle-reaction="onToggleReaction(item.msg, $event)"
               @sender-click="onSenderClick(item.msg)"
               @callback="onMessageCallback(item.msg)"
@@ -751,6 +751,7 @@
       @forward="showForwardDialog = true"
       @save-media="onSaveToMedia"
       @favorite-media="onFavoriteFromChat"
+      @download-media="onDownloadMedia"
       @copy="() => {}"
     />
 
@@ -815,14 +816,28 @@
          autoplay + controls, click ngoài video để đóng. -->
     <v-dialog v-model="showVideoPreview" max-width="900" content-class="elevation-0">
       <div class="text-center" @click.self="showVideoPreview = false" style="cursor: pointer; padding: 16px;">
-        <video
-          v-if="previewVideoUrl"
-          :src="previewVideoUrl"
-          controls
-          autoplay
-          playsinline
-          style="max-width: 100%; max-height: 85vh; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); background: #000;"
-        />
+        <!-- wrap bám sát video → nút tải nổi đúng góc video, không bị đẩy khi video dọc cao. -->
+        <div style="position: relative; display: inline-block; max-width: 100%;">
+          <video
+            v-if="previewVideoUrl"
+            :src="previewVideoUrl"
+            controls
+            controlslist="nodownload"
+            autoplay
+            playsinline
+            style="display: block; max-width: 100%; max-height: 85vh; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); background: #000;"
+          />
+          <!-- Nút tải NỔI góc trên-phải video — luôn thấy. Tải qua cổng CRM → tên đúng
+               (zaloMsgId.mp4), thay nút download mặc định (đã ẩn vì đặt tên-hash). -->
+          <button
+            type="button"
+            title="Tải video về máy (đúng tên)"
+            @click.stop="downloadVideo"
+            style="position: absolute; top: 12px; right: 12px; display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: none; border-radius: 999px; background: rgba(23,134,190,0.95); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.45);"
+          >
+            <DownloadIcon :size="16" :stroke-width="2" /> Tải video
+          </button>
+        </div>
         <div class="text-caption mt-2" style="color: #aaa;">Nhấn ngoài video để đóng</div>
       </div>
     </v-dialog>
@@ -959,6 +974,7 @@ import {
   Check as CheckIcon,
   Flag as FlagIcon,
   Send as SendIcon,
+  Download as DownloadIcon,
 } from 'lucide-vue-next';
 
 // Reaction detail popup state — anh chốt 2026-05-22: click reaction box → popup
@@ -1092,7 +1108,80 @@ function onLightboxKey(e: KeyboardEvent): void {
 
 // E08 — Video popup modal (anh chốt 2026-05-21: play inline, không mở tab)
 const previewVideoUrl = ref('');
-const showVideoPreview = computed({ get: () => !!previewVideoUrl.value, set: (v) => { if (!v) previewVideoUrl.value = ''; } });
+const previewVideoName = ref('');
+const showVideoPreview = computed({ get: () => !!previewVideoUrl.value, set: (v) => { if (!v) { previewVideoUrl.value = ''; previewVideoName.value = ''; } } });
+
+// Mở modal video kèm TÊN tải (zaloMsgId.mp4 — khớp tên Zalo thật, do message-bubble tính).
+function onPreviewVideo(url: string, name?: string) {
+  previewVideoUrl.value = url;
+  previewVideoName.value = name || 'video.mp4';
+}
+
+// Tải media QUA cổng CRM /media/download (gắn Content-Disposition tên thật) — KHÔNG để trình
+// duyệt kéo thẳng URL MinIO (ra tên-hash). Dùng chung: nút modal video + menu chuột phải.
+const gatewayDownloading = new Set<string>();
+async function downloadViaGateway(href: string, name: string) {
+  if (!href || gatewayDownloading.has(href)) return;
+  gatewayDownloading.add(href);
+  try {
+    const res = await api.get('/media/download', {
+      params: { url: href, name: name || '' },
+      responseType: 'blob',
+      timeout: 120000, // media nặng (video vài chục MB) → nới timeout
+    });
+    const blobUrl = URL.createObjectURL(res.data as Blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = name || 'tai-ve';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+  } catch (e) {
+    console.error('[downloadViaGateway] lỗi:', e);
+    try { toast.warning('Tải tệp lỗi tạm thời, thử lại sau ít giây.'); } catch { /* */ }
+  } finally {
+    gatewayDownloading.delete(href);
+  }
+}
+
+// Nút "Tải video" trong modal xem video (tên đã tính sẵn = zaloMsgId.mp4).
+function downloadVideo() {
+  downloadViaGateway(previewVideoUrl.value, previewVideoName.value || 'video.mp4');
+}
+
+// Menu chuột phải "Tải về máy" cho tin ảnh/video/tệp. Suy URL + TÊN từ content:
+//   • video → <zaloMsgId>.mp4 (giống Zalo thật)   • ảnh → <zaloMsgId>.jpg
+//   • tệp   → tên thật Zalo (title/name) kèm đuôi (fileExt) — như nút tải file.
+function onDownloadMedia() {
+  const msg = contextMsg.value;
+  if (!msg) return;
+  let p: any = {};
+  try { p = JSON.parse(msg.content || '{}'); } catch { /* not json */ }
+  const url = String(p.href || p.hdUrl || p.normalUrl || p.url || p.fileUrl || '');
+  if (!url) { try { toast.warning('Tin này không có tệp để tải.'); } catch { /* */ } return; }
+  const urlExt = (url.split('?')[0].match(/\.([A-Za-z0-9]{2,5})$/)?.[1] || '').toLowerCase();
+  const id = (msg.zaloMsgId || '').trim();
+  let name = '';
+  if (msg.contentType === 'file') {
+    name = String(p.title || p.fileName || p.name || '').trim();
+    let paramExt = '';
+    try {
+      const pr = typeof p.params === 'string' ? JSON.parse(p.params) : p.params;
+      paramExt = String(pr?.fileExt || '').replace(/^\./, '').toLowerCase();
+    } catch { /* */ }
+    if (name && !/\.[A-Za-z0-9]{2,5}$/.test(name)) {
+      const e = urlExt || paramExt;
+      if (e) name = `${name}.${e}`;
+    }
+    if (!name) name = `${id || 'tep'}.${urlExt || paramExt || 'bin'}`;
+  } else if (msg.contentType === 'video') {
+    name = `${id || 'video'}.${urlExt || 'mp4'}`;
+  } else {
+    name = `${id || 'image'}.${urlExt || 'jpg'}`;
+  }
+  downloadViaGateway(url, name);
+}
 const webhookLoading = ref(false);
 
 // E17/E18 — Cuộc gọi nhỡ "Gọi lại". Copy phone của conv contact để sale dial nhanh.
