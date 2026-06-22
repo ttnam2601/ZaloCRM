@@ -91,6 +91,36 @@ export function fromFindUser(raw: unknown): NormalizedZaloProfile | null {
   };
 }
 
+/**
+ * Tính patch capture SĐT công khai Zalo vào Contact (phone → phone2 → phone3 → phonesExtra) +
+ * provenance metadata.zaloPublicPhones. Chống trùng (normalize), KHÔNG đè phone chính. Trả {}
+ * nếu trùng số đã có / không có số. Pure — dùng chung captureZaloProfile + friend-sync (DRY).
+ */
+export function buildPhoneCapturePatch(
+  c: { phone?: string | null; phone2?: string | null; phone3?: string | null; phonesExtra?: unknown; metadata?: unknown },
+  phoneNumber: string | null | undefined,
+): Record<string, unknown> {
+  const zNorm = normalizePhone(phoneNumber ?? '');
+  if (!zNorm) return {};
+  const extra = Array.isArray(c.phonesExtra) ? (c.phonesExtra as Array<{ phone?: string }>) : [];
+  const have = new Set(
+    [c.phone, c.phone2, c.phone3, ...extra.map((x) => x?.phone)]
+      .map((x) => normalizePhone(x ?? '')).filter(Boolean) as string[],
+  );
+  if (have.has(zNorm)) return {};
+  const rawPhone = (phoneNumber ?? '').trim() || zNorm;
+  const patch: Record<string, unknown> = {};
+  if (!c.phone) { patch.phone = rawPhone; patch.phoneNormalized = zNorm; }
+  else if (!c.phone2) patch.phone2 = rawPhone;
+  else if (!c.phone3) patch.phone3 = rawPhone;
+  else patch.phonesExtra = [...extra, { phone: rawPhone, label: 'zalo_public' }];
+  // Provenance: số Zalo công khai CHƯA verify (sale tự xác minh), bất kể vào ô nào.
+  const meta = (c.metadata && typeof c.metadata === 'object' ? c.metadata : {}) as Record<string, unknown>;
+  const zpub = Array.isArray(meta.zaloPublicPhones) ? (meta.zaloPublicPhones as string[]) : [];
+  if (!zpub.includes(zNorm)) patch.metadata = { ...meta, zaloPublicPhones: [...zpub, zNorm] };
+  return patch;
+}
+
 // ── CAPTURE ─────────────────────────────────────────────────────────────────
 
 /**
@@ -165,28 +195,8 @@ export async function captureZaloProfile(
       if (bd) { data.birthDate = bd; data.birthYear = bd.getUTCFullYear(); }
     }
 
-    // 3b. SĐT công khai → phone (nếu KH chưa có số nào) → phone2 → phone3 → phonesExtra.
-    //     Chống trùng (normalize so), KHÔNG đè phone chính, ghi PROVENANCE vào metadata
-    //     (số Zalo CHƯA verify — sale tự xác minh). Anh chốt + review điểm 5.
-    const zNorm = normalizePhone(p.phoneNumber ?? '');
-    if (zNorm) {
-      const extra = Array.isArray(c.phonesExtra) ? (c.phonesExtra as Array<{ phone?: string }>) : [];
-      const have = new Set(
-        [c.phone, c.phone2, c.phone3, ...extra.map((x) => x?.phone)]
-          .map((x) => normalizePhone(x ?? '')).filter(Boolean) as string[],
-      );
-      if (!have.has(zNorm)) {
-        const rawPhone = (p.phoneNumber ?? '').trim() || zNorm;
-        if (!c.phone) { data.phone = rawPhone; data.phoneNormalized = zNorm; }
-        else if (!c.phone2) data.phone2 = rawPhone;
-        else if (!c.phone3) data.phone3 = rawPhone;
-        else data.phonesExtra = [...extra, { phone: rawPhone, label: 'zalo_public' }];
-        // Provenance: đánh dấu số này nguồn Zalo công khai (chưa verify), bất kể vào ô nào.
-        const meta = (c.metadata && typeof c.metadata === 'object' ? c.metadata : {}) as Record<string, unknown>;
-        const zpub = Array.isArray(meta.zaloPublicPhones) ? (meta.zaloPublicPhones as string[]) : [];
-        if (!zpub.includes(zNorm)) data.metadata = { ...meta, zaloPublicPhones: [...zpub, zNorm] };
-      }
-    }
+    // 3b. SĐT công khai → phone/phone2/phone3/phonesExtra (helper chung, dùng lại ở friend-sync).
+    Object.assign(data, buildPhoneCapturePatch(c, p.phoneNumber));
 
     if (Object.keys(data).length) await prisma.contact.update({ where: { id: cid }, data });
   } catch (err) {

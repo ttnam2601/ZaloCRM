@@ -36,6 +36,7 @@ import { resolveOrCreateContact } from '../contacts/resolve-contact.js';
 import { buildFriendUpdatedPayload } from '../../shared/friend-serializer.js';
 // getAllFriends() trả gender/dob/sdob cùng shape getUserInfo — tái dùng parse của cron.
 import { mapGender, parseBirthDate } from '../contacts/contact-profile-sync-cron.js';
+import { buildPhoneCapturePatch } from '../contacts/zalo-profile-capture.js';
 
 export type SyncTrigger = 'manual' | 'connect' | 'cron';
 
@@ -105,6 +106,8 @@ function extractFriendInfo(raw: Record<string, unknown>): {
   // tốn thêm call SDK. Ghi null-only + !genderLocked ở processFriend (xem dưới).
   gender: 'male' | 'female' | null;
   birthDate: Date | null;
+  // SĐT công khai (chỉ có khi KH bật) — 2026-06-22 Đợt 1: trước đây rớt, nay capture.
+  phoneNumber: string | null;
 } | null {
   const uid = String((raw.userId ?? raw.uid ?? '') as string);
   if (!uid) return null;
@@ -118,6 +121,7 @@ function extractFriendInfo(raw: Record<string, unknown>): {
     },
     gender: mapGender(raw.gender),
     birthDate: parseBirthDate(raw.sdob, raw.dob),
+    phoneNumber: String((raw.phoneNumber ?? '') as string).trim() || null,
   };
 }
 
@@ -237,6 +241,7 @@ async function syncFriendsForAccountImpl(
         snapshot: info.snapshot,
         gender: info.gender,
         birthDate: info.birthDate,
+        phoneNumber: info.phoneNumber,
         targetStatus: 'accepted',
         fallbackName: info.snapshot.zaloDisplayName,
         fallbackAvatar: info.snapshot.zaloAvatarUrl,
@@ -266,6 +271,7 @@ async function syncFriendsForAccountImpl(
         snapshot: info.snapshot,
         gender: info.gender,
         birthDate: info.birthDate,
+        phoneNumber: info.phoneNumber,
         targetStatus: 'pending_sent',
         fallbackName: info.snapshot.zaloDisplayName,
         fallbackAvatar: info.snapshot.zaloAvatarUrl,
@@ -299,6 +305,7 @@ interface ProcessFriendArgs {
   snapshot: DiffSnapshot;
   gender: 'male' | 'female' | null;
   birthDate: Date | null;
+  phoneNumber: string | null;
   targetStatus: 'accepted' | 'pending_sent';
   fallbackName: string | null | undefined;
   fallbackAvatar: string | null | undefined;
@@ -335,9 +342,11 @@ async function processFriend(args: ProcessFriendArgs): Promise<void> {
   // Re-read fullName for downstream B8 backfill logic
   const contactRow = await prisma.contact.findUnique({
     where: { id: resolved.id },
-    select: { id: true, fullName: true, gender: true, genderLocked: true, birthDate: true },
+    select: { id: true, fullName: true, gender: true, genderLocked: true, birthDate: true,
+      phone: true, phone2: true, phone3: true, phonesExtra: true, metadata: true },
   });
-  const contact = contactRow ?? { id: resolved.id, fullName: null, gender: null, genderLocked: false, birthDate: null };
+  const contact = contactRow ?? { id: resolved.id, fullName: null, gender: null, genderLocked: false, birthDate: null,
+    phone: null, phone2: null, phone3: null, phonesExtra: [], metadata: {} };
 
   // 1c. Gộp các backfill Cha (Contact) vào 1 update để tránh N+1:
   //   • B8 — fullName khi Contact stub 'Unknown' mà Friend đã có zaloDisplayName từ SDK.
@@ -360,6 +369,8 @@ async function processFriend(args: ProcessFriendArgs): Promise<void> {
   }
   if (args.gender && contact.gender == null && !contact.genderLocked) cPatch.gender = args.gender;
   if (args.birthDate && contact.birthDate == null) cPatch.birthDate = args.birthDate;
+  // SĐT công khai → phone/phone2/phone3/phonesExtra (helper chung, chống trùng, không đè số chính).
+  Object.assign(cPatch, buildPhoneCapturePatch(contact, args.phoneNumber));
   if (Object.keys(cPatch).length) {
     await prisma.contact.update({ where: { id: contact.id }, data: cPatch });
   }
