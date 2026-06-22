@@ -1281,6 +1281,24 @@ async function openFile(href: string, name?: string) {
   max-height: 280px;
   object-fit: cover;
 }
+/* FIX 2026-06-22 (anh báo video bot gửi bể khung): video THIẾU thumbnail (vd bot gửi từ block —
+   payload.thumbnailUrl rỗng) rơi vào thẻ <video> này. Trước đây KHÔNG có CSS → render full độ phân
+   giải gốc → vỡ khung chat. Gói gọn 300×280 giữ tỉ lệ (browser tự scale theo max-width/height),
+   khớp khung thumbnail branch trên → 2 video cùng file hiển thị đồng nhất. */
+.chat-video-wrap {
+  display: inline-block;
+  border-radius: 10px;
+  overflow: hidden;
+  max-width: 300px;
+  line-height: 0;
+}
+.chat-video {
+  display: block;
+  max-width: 300px;
+  max-height: 280px;
+  border-radius: 10px;
+  background: #000;
+}
 .video-play-overlay {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
