@@ -15,6 +15,7 @@ import { isBlurContaminated } from '../privacy/redact.js';
 import { requireAnyGrant, requireGrant } from '../rbac/rbac-middleware.js';
 import { logger } from '../../shared/utils/logger.js';
 import { mergeContacts } from './merge-service.js';
+import { findExistingUserConversation } from '../chat/conversation-resolver.js';
 import { runContactIntelligence } from './contact-intelligence.js';
 import { backfillGlobalId, backfillOrphanFriends } from './backfill-global-id.js';
 import { backfillMissingFriends } from './backfill-missing-friends.js';
@@ -1788,14 +1789,12 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
 
       // Find-or-create conversation for (zaloAccount, externalThreadId=zaloUidInNick).
       // threadType='user' vì Friend = 1-1 Zalo identity (group conv không qua đây).
-      const existing = await prisma.conversation.findFirst({
-        where: {
-          zaloAccountId: friend.zaloAccountId,
-          externalThreadId: friend.zaloUidInNick,
-        },
-        select: { id: true },
+      // CHỐNG XÉ globalId-aware (anh chốt 2026-06-22): mở chat theo Friend → nếu KH này đã có
+      // hội thoại trên nick (UID khác do drift / cùng globalId) → mở cái đó, KHÔNG đẻ hội thoại 2.
+      const reuseId = await findExistingUserConversation({
+        orgId: user.orgId, nickId: friend.zaloAccountId, externalThreadId: friend.zaloUidInNick, contactId: friend.contactId,
       });
-      if (existing) return reply.send({ conversationId: existing.id, created: false });
+      if (reuseId) return reply.send({ conversationId: reuseId, created: false });
 
       const created = await prisma.conversation.create({
         data: {
@@ -2197,6 +2196,13 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
         }
         return reply.send({ conversationId: existing.id, created: false });
       }
+
+      // CHỐNG XÉ globalId-aware (anh chốt 2026-06-22): UID này chưa có conv → nếu KH (cùng globalId)
+      // đã có hội thoại trên nick dưới UID khác → mở cái đó, KHÔNG đẻ hội thoại thứ 2.
+      const reuseId = await findExistingUserConversation({
+        orgId: user.orgId, nickId: body.zaloAccountId, externalThreadId: body.uid, contactId: linkedContactId,
+      });
+      if (reuseId) return reply.send({ conversationId: reuseId, created: false });
 
       const created = await prisma.conversation.create({
         data: {

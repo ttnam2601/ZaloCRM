@@ -13,6 +13,7 @@ import { runAutomationRules } from '../../shared/ee-registry/automation.js';
 import { automationEventBus } from '../../shared/ee-registry/event-bus.js';
 import { applyContactAggregateFromMessage, applyContactInteraction, applyFriendAggregate } from '../contacts/contact-aggregate.js';
 import { followMergedInto } from '../contacts/resolve-contact.js';
+import { findExistingUserConversation } from './conversation-resolver.js';
 import { onInboundMessage as onInboundScoring, onOutboundMessage as onOutboundScoring } from '../scoring/scoring-hooks.js';
 import { syncReminderFromMessage } from '../contacts/reminder-sync.js';
 import { uploadBuffer } from '../../shared/storage/minio-client.js';
@@ -957,17 +958,14 @@ async function findOrCreateConversation(
     return { id: existing.id };
   }
 
-  // A2 (chặn tái sinh hội thoại xé — anh chốt 2026-06-22): trước khi tạo conversation MỚI cho
-  // thread 1-1, nếu contact ĐÃ có conversation với nick này (UID khác do per-account UID drift)
-  // → DÙNG LẠI thay vì đẻ conversation thứ 2 (gốc gây "Chưa có tin nhắn"). Group giữ nguyên
-  // (externalThreadId nhóm ổn định, không drift).
-  if (msg.threadType === 'user' && contactId) {
-    const sibling = await prisma.conversation.findFirst({
-      where: { zaloAccountId: msg.accountId, contactId, threadType: 'user' },
-      orderBy: { lastMessageAt: 'desc' },
-      select: { id: true },
+  // CHỐNG XÉ globalId-aware (anh chốt 2026-06-22): NGAY lúc tạo, check globalId + UID per-nick →
+  // 1 KH × 1 nick = 1 hội thoại, KHÔNG BAO GIỜ đẻ hội thoại thứ 2 (kể cả UID drift / contact chưa
+  // merge). Group giữ nguyên (externalThreadId nhóm ổn định, không drift).
+  if (msg.threadType === 'user') {
+    const existingId = await findExistingUserConversation({
+      orgId, nickId: msg.accountId, externalThreadId, contactId, globalId: msg.contactGlobalId,
     });
-    if (sibling) return { id: sibling.id };
+    if (existingId) return { id: existingId };
   }
 
   return prisma.conversation.create({
