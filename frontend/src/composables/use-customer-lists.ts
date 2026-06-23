@@ -36,6 +36,8 @@ export interface CustomerListSummary {
   shareableToPool?: boolean;
   // Phase FB 2-tab 2026-06-10 — list tạo tự động từ FB Lead Form → khoá (chặn xoá/đổi tên).
   fbLocked?: boolean;
+  // Phase Multi-Source 2026-06-23 — nền tảng có lead trong tệp (['fb-leadads','tiktok-leadgen','zalo-ads']).
+  platforms?: string[];
 }
 
 export interface MappedRow {
@@ -133,7 +135,12 @@ export function useCustomerLists() {
   const listsStatus = ref<ListStatusFilter>('active');
   const listsSearch = ref('');
   const listsPage = ref(1);
-  const listsLimit = ref(20);
+  const listsLimit = ref(50);
+  // Phase Multi-Source 2026-06-22 — lọc nhóm nguồn server-side + stats band toàn tập (không theo trang).
+  const listsPlatform = ref<'all' | 'leadads' | 'paste'>('all');
+  // Phase Multi-Source 2026-06-23 — lọc theo nền tảng cụ thể (fb-leadads/tiktok-leadgen/zalo-ads/manual).
+  const listsLeadSource = ref('');
+  const listsStats = ref({ totalLists: 0, leadAdsLists: 0, pasteLists: 0, totalEntries: 0, totalHasZalo: 0 });
 
   // Detail state
   const currentList = ref<CustomerListSummary | null>(null);
@@ -159,10 +166,13 @@ export function useCustomerLists() {
           page: listsPage.value,
           limit: listsLimit.value,
           search: listsSearch.value || undefined,
+          platform: listsPlatform.value !== 'all' ? listsPlatform.value : undefined,
+          leadSource: listsLeadSource.value || undefined,
         },
       });
       lists.value = res.data.lists ?? [];
       listsTotal.value = res.data.total ?? 0;
+      if (res.data.stats) listsStats.value = res.data.stats;
     } catch (err) {
       console.error('[customer-lists] fetchLists failed:', err);
       lists.value = [];
@@ -384,6 +394,9 @@ export function useCustomerLists() {
     listsSearch,
     listsPage,
     listsLimit,
+    listsPlatform,
+    listsLeadSource,
+    listsStats,
     fetchLists,
     fetchListById,
     currentList,

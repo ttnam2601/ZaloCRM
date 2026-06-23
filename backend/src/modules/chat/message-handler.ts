@@ -19,6 +19,7 @@ import { captureZaloProfile } from '../contacts/zalo-profile-capture.js';
 import { onInboundMessage as onInboundScoring, onOutboundMessage as onOutboundScoring } from '../scoring/scoring-hooks.js';
 import { syncReminderFromMessage } from '../contacts/reminder-sync.js';
 import { uploadBuffer } from '../../shared/storage/minio-client.js';
+import { compressImage } from '../media/media-service.js';
 import { config } from '../../config/index.js';
 // Open-core: customer-reply care-session reaction moved to extension engine
 // (emitted via the shared automation event bus below).
@@ -47,6 +48,11 @@ export interface IncomingMessage {
   contactGender?: unknown;
   contactSdob?: unknown;
   contactPhone?: string;
+  // Đợt 2b — status/cover/lastActionTime/isExtensionAccount (getUserInfo) → 4 cột Contact.
+  contactStatus?: unknown;
+  contactCover?: unknown;
+  contactLastActionTime?: unknown;
+  contactIsExtension?: unknown;
   groupName?: string;       // group name if group message
   groupAvatarUrl?: string;  // group avatar URL from Zalo (via getGroupInfo.avt)
   groupMembersCount?: number; // total members in group
@@ -170,7 +176,15 @@ async function mirrorRemoteMediaUrl(url: string, contentType: string): Promise<s
     if (buffer.length > 0) break;
   }
   if (!buffer || buffer.length === 0) throw new Error('empty response');
-  const uploaded = await uploadBuffer(buffer, mimeType, fileNameFromUrl(url, contentType, mimeType));
+  // 2026-06-22: NÉN ảnh khách gửi vào trước khi LƯU mirror (R2) — nguồn ảnh lớn nhất. Bản mirror
+  // là bản CRM hiển thị + lưu trữ; nén webp giảm ~55% dung lượng. compressImage tự bỏ qua
+  // video/voice/gif + fallback bytes gốc nếu sharp lỗi (ảnh hỏng/format lạ).
+  let outBuf = buffer, outMime = mimeType;
+  if (contentType === 'image') {
+    const proc = await compressImage(buffer, mimeType);
+    outBuf = proc.buffer; outMime = proc.mimeType;
+  }
+  const uploaded = await uploadBuffer(outBuf, outMime, fileNameFromUrl(url, contentType, mimeType));
   return uploaded.url;
 }
 
@@ -939,7 +953,8 @@ async function upsertContact(msg: IncomingMessage, orgId: string): Promise<strin
   // Đợt 1 (message-handler): capture gender/ngày sinh/SĐT công khai từ getUserInfo (listener đã
   // fetch + cache) — upsertContact bỏ các field này. Additive, best-effort, fill-không-đè + diff.
   // Gate: chỉ chạy khi getUserInfo trả demographic/SĐT → tránh tải hot-path khi không có gì mới.
-  if (contactUid && (msg.contactGender != null || msg.contactSdob || msg.contactPhone)) {
+  if (contactUid && (msg.contactGender != null || msg.contactSdob || msg.contactPhone
+      || msg.contactStatus != null || msg.contactCover != null || msg.contactLastActionTime != null || msg.contactIsExtension != null)) {
     void captureZaloProfile({
       uid: contactUid,
       zaloName: msg.contactZaloDisplayName ?? null,
@@ -950,6 +965,11 @@ async function upsertContact(msg: IncomingMessage, orgId: string): Promise<strin
       sdob: msg.contactSdob ?? null,
       dob: null,
       phoneNumber: msg.contactPhone ?? null,
+      // Đợt 2b — status/cover (chuỗi), isExtensionAccount + lastActionTime (raw, captureZaloProfile coerce).
+      status: msg.contactStatus ? String(msg.contactStatus) : null,
+      cover: msg.contactCover ? String(msg.contactCover) : null,
+      isExtensionAccount: msg.contactIsExtension,
+      lastActionTime: msg.contactLastActionTime,
     }, { orgId, contactId: contact.id, nickId: msg.accountId });
   }
 
