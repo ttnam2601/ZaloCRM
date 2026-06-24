@@ -203,6 +203,10 @@ export interface Message {
       // Flag distinguish CRM thuần vs Native sync (sale gõ trên app Zalo)
       syncedFromNative?: boolean;
     };
+    // Bug B 2026-06-22 — tin gửi THẤT BẠI (Zalo từ chối: chặn tin lạ / 119 / 127...):
+    // message-bubble đọc 2 key này để hiện "Gửi thất bại: <lý do>" trong bubble.
+    sendStatus?: 'failed';
+    failReason?: string;
     [key: string]: unknown;
   } | null;
 }

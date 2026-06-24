@@ -1680,14 +1680,36 @@ export async function chatRoutes(app: FastifyInstance) {
         sendPayload.mentions = mentions;
       }
       if (quote) sendPayload.quote = quote;
-      const sendResult = await instance.api.sendMessage(sendPayload, threadId, threadType);
-      // zca-js trả về { message: { msgId } | null, attachment: [{ msgId }] }
-      // Extract zaloMsgId từ message (text) hoặc attachment[0] (media) để dedup với selfListen
-      const sr = sendResult as unknown as { message?: { msgId?: number | string } | null; attachment?: Array<{ msgId?: number | string }> };
-      const rawId = sr?.message?.msgId ?? sr?.attachment?.[0]?.msgId ?? '';
-      const zaloMsgId = String(rawId || '');
-      if (!zaloMsgId) {
-        logger.warn(`[chat] sendMessage không trả msgId — shape=${JSON.stringify(sendResult).slice(0, 200)}`);
+      // 2026-06-24 (anh chốt): Zalo TỪ CHỐI gửi (vd KH chặn tin người lạ, 119, 127...) →
+      // KHÔNG fail cứng 422/toast nữa. Thay vào đó LƯU tin dạng "gửi thất bại" + lý do để
+      // hiện ngay trong đoạn chat (như Zalo/Messenger). Lỗi hệ thống thật (non-Zalo) vẫn
+      // ném ra ngoài → outer catch → 500.
+      let zaloMsgId = '';
+      let sendFail: { reason: string; code: string | null } | null = null;
+      try {
+        const sendResult = await instance.api.sendMessage(sendPayload, threadId, threadType);
+        // zca-js trả về { message: { msgId } | null, attachment: [{ msgId }] }
+        // Extract zaloMsgId từ message (text) hoặc attachment[0] (media) để dedup với selfListen
+        const sr = sendResult as unknown as { message?: { msgId?: number | string } | null; attachment?: Array<{ msgId?: number | string }> };
+        const rawId = sr?.message?.msgId ?? sr?.attachment?.[0]?.msgId ?? '';
+        zaloMsgId = String(rawId || '');
+        if (!zaloMsgId) {
+          logger.warn(`[chat] sendMessage không trả msgId — shape=${JSON.stringify(sendResult).slice(0, 200)}`);
+        }
+      } catch (sendErr) {
+        const se = sendErr as { name?: string; message?: string };
+        const raw = String(se?.message || '');
+        const isZaloBusiness =
+          se?.name === 'ZaloApiError' || se?.name === 'ZcaApiError' ||
+          /ZaloApiError|ZcaApiError/.test(String(se?.name || '')) ||
+          /chặn không nhận tin|người lạ|chưa thể gửi tin|không muốn nhận tin|Không thể nhận tin nhắn|Tham số không hợp lệ|\[zalo:\d+\]/i.test(raw);
+        if (!isZaloBusiness) throw sendErr; // lỗi hệ thống thật → outer catch → 500
+        const codeMatch = raw.match(/\[zalo:(\d+)\]/);
+        const reason =
+          raw.replace(/^sendMessage failed:\s*/i, '').replace(/\s*\[zalo:\d+\]\s*$/i, '').trim() ||
+          'Zalo từ chối gửi tin này';
+        sendFail = { reason, code: codeMatch ? codeMatch[1] : null };
+        logger.warn(`[chat] send rejected → lưu tin failed: reason="${reason}" code=${sendFail.code ?? '-'}`);
       }
 
       // 2026-05-21 RTF: nếu có styles → lưu content dạng JSON rich (matches Zalo echo format)
@@ -1726,6 +1748,11 @@ export async function chatRoutes(app: FastifyInstance) {
             clientEchoId: echoId,
             metadata: {
               sender: { kind: 'user_crm', name: await getUserFullName(user.id) },
+              // 2026-06-24 — tin gửi THẤT BẠI (Zalo từ chối): lưu theo schema Bug B 2026-06-22
+              // (message-bubble đọc metadata.sendStatus + failReason) → hiện "Gửi thất bại: <lý do>".
+              ...(sendFail
+                ? { sendStatus: 'failed', failReason: sendFail.reason, failCode: sendFail.code, failedAt: new Date().toISOString() }
+                : {}),
             },
           },
           include: { repliedBy: { select: { id: true, fullName: true, email: true } } },
@@ -1755,19 +1782,22 @@ export async function chatRoutes(app: FastifyInstance) {
         data: { lastMessageAt: new Date(), isReplied: true, unreadCount: 0 },
       });
 
-      const aggInput = {
-        conversationId: id,
-        message: {
-          id: message.id,
-          content: message.content,
-          contentType: message.contentType,
-          sentAt: message.sentAt,
-          senderType: 'self' as const,
-        },
-        outboundUserId: user.id,
-      };
-      void applyContactAggregateFromMessage(aggInput);
-      void applyFriendAggregate(aggInput);
+      // Tin gửi THẤT BẠI: KHÔNG cộng vào thống kê outbound (chưa thật sự tới khách).
+      if (!sendFail) {
+        const aggInput = {
+          conversationId: id,
+          message: {
+            id: message.id,
+            content: message.content,
+            contentType: message.contentType,
+            sentAt: message.sentAt,
+            senderType: 'self' as const,
+          },
+          outboundUserId: user.id,
+        };
+        void applyContactAggregateFromMessage(aggInput);
+        void applyFriendAggregate(aggInput);
+      }
 
       // FIX 2026-05-21: BigInt zaloMsgIdNum không serialize được trong socket.io + JSON.
       // Cast trước khi emit + return.

@@ -646,6 +646,9 @@ const formattedText = computed(() => {
  */
 const receiptState = computed<'sending' | 'delivered' | 'seen' | 'sent'>(() => {
   const m = props.message;
+  // 2026-06-24 — tin gửi THẤT BẠI (metadata.sendStatus='failed') → trả 'sent' để ẩn chip
+  // receipt (tránh kẹt "Đang gửi"); badge "Gửi thất bại + lý do" đã hiện trong bubble.
+  if ((m.metadata as { sendStatus?: string } | null | undefined)?.sendStatus === 'failed') return 'sent';
   if (m.seenAt) return 'seen';
   if (m.deliveredAt) return 'delivered';
   const ageMs = Date.now() - new Date(m.sentAt).getTime();
