@@ -3515,8 +3515,12 @@ model FriendRequestOutbox {
   successorSequenceId     String?   @map("successor_sequence_id")
   // Snapshot Sequence steps tại insert time → edit Sequence mid-run KHÔNG affect
   sequenceVersionSnapshot Json?     @map("sequence_version_snapshot")
-  sendStatus              String    @map("send_status") // success | tentative | failed
+  sendStatus              String    @map("send_status") // pending | success | tentative | failed
   zaloLeadgenId           String?   @map("zalo_leadgen_id")
+  // Friend-invite BullMQ 2026-06-24 (dup-fix): mốc Zalo XÁC NHẬN gửi lời mời.
+  // NULL + sendStatus='pending' = mới ghi ý định, CHƯA chắc Zalo đã gửi (crash ở đây → gửi lại an toàn).
+  // NOT NULL = Zalo đã nhận → KHÔNG gửi lại. Stuck sweeper dùng cột này phân nhánh (xem sweepers.ts).
+  sentToZaloAt            DateTime? @map("sent_to_zalo_at") @db.Timestamptz
   sequenceMaterializedAt  DateTime? @map("sequence_materialized_at")
   attemptCount            Int       @default(0) @map("attempt_count")
   lastErrorMessage        String?   @map("last_error_message") @db.Text
