@@ -45,6 +45,7 @@
           :loading="loading"
           @select="onSelectGroup"
           @create="showCreateDialog = true"
+          @join-link="showJoinDialog = true"
           @open-chat="onOpenGroupChat"
         />
       </v-card>
@@ -95,6 +96,14 @@
       @create="onCreatePoll"
     />
 
+    <GroupJoinDialog
+      v-model="showJoinDialog"
+      :accounts="accounts"
+      :default-account-id="selectedAccountId"
+      :join-by-link-fn="joinByLink"
+      @success="onJoinSuccess"
+    />
+
     <!-- Invite link dialog -->
     <v-dialog v-model="showInviteLinkDialog" max-width="480">
       <v-card>
@@ -142,6 +151,7 @@ import GroupCreateDialog from '@/components/groups/group-create-dialog.vue';
 import GroupSettingsDialog from '@/components/groups/group-settings-dialog.vue';
 import PollCreateDialog from '@/components/groups/poll-create-dialog.vue';
 import InviteLinkManager from '@/components/groups/invite-link-manager.vue';
+import GroupJoinDialog from '@/components/groups/group-join-dialog.vue';
 
 const router = useRouter();
 
@@ -161,6 +171,7 @@ const { polls, createPoll, votePoll, lockPoll, sharePoll } = usePolls();
 
 const selectedGroupId = ref('');
 const showCreateDialog = ref(false);
+const showJoinDialog = ref(false);
 const showSettingsDialog = ref(false);
 const showPollDialog = ref(false);
 const showInviteLinkDialog = ref(false);
@@ -289,5 +300,12 @@ async function onSharePoll(poll: { id?: string; pollId?: string }) {
   const result = await sharePoll(selectedAccountId.value, selectedGroupId.value, id);
   if (result !== null) notify('Đã chia sẻ bình chọn');
   else notify('Chia sẻ bình chọn thất bại', 'error');
+}
+
+async function onJoinSuccess(msg: string) {
+  notify(msg);
+  if (selectedAccountId.value) {
+    await fetchGroups(selectedAccountId.value);
+  }
 }
 </script>

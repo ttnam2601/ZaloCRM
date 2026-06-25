@@ -55,7 +55,7 @@
       Không có nhóm nào
     </div>
 
-    <div class="pa-3 pt-2">
+    <div class="pa-3 pt-2 d-flex flex-column gap-2">
       <v-btn
         color="primary"
         variant="tonal"
@@ -64,6 +64,15 @@
         @click="$emit('create')"
       >
         Tạo nhóm
+      </v-btn>
+      <v-btn
+        color="success"
+        variant="tonal"
+        block
+        prepend-icon="mdi-link-variant-plus"
+        @click="$emit('join-link')"
+      >
+        Gia nhập nhóm bằng link
       </v-btn>
     </div>
   </div>
@@ -81,6 +90,7 @@ const props = defineProps<{
 defineEmits<{
   select: [groupId: string];
   create: [];
+  'join-link': [];
   'open-chat': [groupId: string];
 }>();
 

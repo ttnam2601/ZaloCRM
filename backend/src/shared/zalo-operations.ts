@@ -439,9 +439,9 @@ async function unblockGroupMember(accountId: string, userId: string, groupId: st
     (api) => api.removeGroupBlockedMember(userId, groupId));
 }
 
-async function leaveGroup(accountId: string, groupId: string) {
+async function leaveGroup(accountId: string, groupId: string, silent: boolean = true) {
   return exec({ accountId, category: 'group_admin', operation: 'leaveGroup' },
-    (api) => api.leaveGroup(groupId));
+    (api) => api.leaveGroup(groupId, silent));
 }
 
 async function disperseGroup(accountId: string, groupId: string) {
@@ -494,6 +494,11 @@ async function disableGroupLink(accountId: string, groupId: string) {
 async function joinGroupByLink(accountId: string, linkId: string) {
   return exec({ accountId, category: 'group_admin', operation: 'joinGroupByLink' },
     (api) => api.joinGroupLink(linkId));
+}
+
+async function parseLink(accountId: string, link: string) {
+  return exec({ accountId, category: 'query', operation: 'parseLink' },
+    (api) => api.parseLink(link));
 }
 
 // ─── Group Polls ────────────────────────────────────────────────────────────
@@ -707,6 +712,7 @@ export const zaloOps = {
   enableGroupLink,
   disableGroupLink,
   joinGroupByLink,
+  parseLink,
 
   // Group polls
   createPoll,

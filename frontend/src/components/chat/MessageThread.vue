@@ -31,6 +31,8 @@
           :gender="contactGender"
           :is-group="conversation.threadType === 'group'"
           :gradient-seed="conversation.id"
+          :class="{ 'cursor-pointer': conversation?.threadType === 'group' }"
+          @click="onHeaderAvatarClick"
         />
 
         <div class="ch-info">
@@ -301,6 +303,12 @@
             <span v-if="reminderNoticeTime(item.msg)" class="reminder-notice-time">· {{ reminderNoticeTime(item.msg) }}</span>
           </div>
 
+          <!-- CRM System notice — render inline timeline event (centered, no bubble) -->
+          <div v-else-if="isSystemNotice(item.msg)" class="msg-system-event system-notice">
+            <v-icon size="14" color="grey" class="mr-1">mdi-information-outline</v-icon>
+            <span>{{ item.msg.content }}</span>
+          </div>
+
           <!-- Single message — MessageBubble component (wrap với privacy blur khi redacted) -->
           <div
             v-else
@@ -328,6 +336,7 @@
               @callback="onMessageCallback(item.msg)"
               @open-profile="onOpenProfileFromCard"
               @open-reaction-detail="onOpenReactionDetail"
+              @join-group-link="onJoinGroupLink"
             />
           </div>
         </template>
@@ -612,6 +621,43 @@
       v-model="privacyViewerOpen"
       :nick="privacyDialogNick"
     />
+
+    <!-- Dialog rời nhóm Zalo -->
+    <v-dialog v-model="leaveGroupDialogOpen" max-width="440">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2" color="error">mdi-logout</v-icon>
+          Rời nhóm Zalo
+        </v-card-title>
+        
+        <v-card-text class="pt-2">
+          <div class="mb-4">
+            Bạn có chắc chắn muốn rời nhóm <strong>{{ conversation?.groupName || headerName }}</strong>? Lịch sử chat vẫn được giữ lại trên hệ thống.
+          </div>
+          
+          <v-checkbox
+            v-model="leaveSilent"
+            label="Rời nhóm trong im lặng (không thông báo)"
+            color="primary"
+            hide-details
+            density="compact"
+          />
+        </v-card-text>
+        
+        <v-card-actions class="px-4 pb-4">
+          <v-spacer />
+          <v-btn variant="text" @click="leaveGroupDialogOpen = false">Hủy</v-btn>
+          <v-btn
+            color="error"
+            variant="elevated"
+            :loading="leaveGroupLoading"
+            @click="confirmLeaveGroup"
+          >
+            Rời nhóm
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -638,6 +684,11 @@ const privacyUnlockOpen = ref(false);
 const privacyViewerOpen = ref(false);
 const privacyDialogNick = ref<{ displayName?: string | null; avatarUrl?: string | null; zaloUid?: string | null } | null>(null);
 const _authStorePriv = _useAuthStorePriv();
+
+// Leave group state
+const leaveGroupDialogOpen = ref(false);
+const leaveSilent = ref(true);
+const leaveGroupLoading = ref(false);
 
 function openPrivacyDialog(conv: any) {
   if (!conv?.zaloAccount) return;
@@ -1561,6 +1612,65 @@ async function onAcceptInvite() {
   } finally {
     actionLoading.value = false;
   }
+}
+
+async function onJoinGroupLink(linkId: string) {
+  const accountId = props.conversation?.zaloAccount?.id;
+  if (!accountId) {
+    toast.error('Không tìm thấy tài khoản Zalo hợp lệ');
+    return;
+  }
+  if (!confirm('Bạn có muốn gia nhập nhóm Zalo này không?')) {
+    return;
+  }
+  toast.push('Đang gửi yêu cầu gia nhập nhóm...');
+  try {
+    const res = await api.post(`/zalo-accounts/${accountId}/groups/join-link`, { linkId });
+    if (res.data?.alreadyMember) {
+      toast.success('Bạn đã là thành viên của nhóm này');
+    } else {
+      toast.success('Gia nhập nhóm thành công');
+    }
+    if (res.data?.conversationId) {
+      const { router } = await import('@/router/index');
+      router.push({ name: 'Chat', params: { convId: res.data.conversationId } });
+    }
+  } catch (err: any) {
+    const errMsg = err.response?.data?.error || err.message || 'Lỗi kết nối';
+    toast.error(`Gia nhập nhóm thất bại: ${errMsg}`);
+  }
+}
+
+function onHeaderAvatarClick() {
+  if (props.conversation?.threadType === 'group') {
+    leaveSilent.value = true;
+    leaveGroupDialogOpen.value = true;
+  }
+}
+
+async function confirmLeaveGroup() {
+  const accountId = props.conversation?.zaloAccount?.id;
+  const groupId = props.conversation?.externalThreadId;
+  if (!accountId || !groupId) {
+    toast.error('Thiếu thông tin cuộc trò chuyện hoặc tài khoản Zalo');
+    return;
+  }
+  leaveGroupLoading.value = true;
+  try {
+    await api.post(`/zalo-accounts/${accountId}/groups/${groupId}/leave`, { silent: leaveSilent.value });
+    toast.success('Đã rời nhóm thành công');
+    leaveGroupDialogOpen.value = false;
+    emit('refresh-thread');
+  } catch (err: any) {
+    const errMsg = err.response?.data?.error || err.message || 'Lỗi kết nối';
+    toast.error(`Rời nhóm thất bại: ${errMsg}`);
+  } finally {
+    leaveGroupLoading.value = false;
+  }
+}
+
+function isSystemNotice(msg: Message): boolean {
+  return msg.contentType === 'system_event' || msg.senderType === 'system';
 }
 function onOpenNote() {
   // Open right info panel + scroll to note footer
@@ -2886,4 +2996,13 @@ watch(() => props.editingMessage?.id, async (id) => {
 }
 .zlbl-manage:hover { background: var(--smax-grey-50); color: var(--smax-primary); }
 .manage-icon { font-size: 14px; }
+
+.msg-system-event.system-notice {
+  background: rgba(var(--v-theme-on-surface), 0.05);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.12);
+  color: rgba(var(--v-theme-on-surface), 0.7);
+}
+.cursor-pointer {
+  cursor: pointer;
+}
 </style>

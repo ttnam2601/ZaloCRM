@@ -12,6 +12,7 @@ import { onInboundMessage as onInboundScoring, onOutboundMessage as onOutboundSc
 import { syncReminderFromMessage } from '../contacts/reminder-sync.js';
 import { uploadBuffer } from '../../shared/storage/minio-client.js';
 import { config } from '../../config/index.js';
+import { zaloOps } from '../../shared/zalo-operations.js';
 
 export interface IncomingMessage {
   accountId: string;
@@ -335,6 +336,28 @@ export async function handleIncomingMessage(
     }
 
     await updateConversationAfterMessage(conversation.id, sentAt, msg.isSelf);
+
+    // Auto-join Zalo group if message contains a group link
+    if (!msg.isSelf && msg.content) {
+      const groupLinkRegex = /zalo\.me\/g\/([a-zA-Z0-9_-]+)/gi;
+      let groupLinkMatch;
+      const groupLinkIds: string[] = [];
+      while ((groupLinkMatch = groupLinkRegex.exec(msg.content)) !== null) {
+        groupLinkIds.push(groupLinkMatch[1]);
+      }
+      if (groupLinkIds.length > 0) {
+        for (const linkId of groupLinkIds) {
+          logger.info(`[message-handler] Auto-joining Zalo group by link: ${linkId} on account: ${msg.accountId}`);
+          zaloOps.joinGroupByLink(msg.accountId, linkId)
+            .then((res) => {
+              logger.info(`[message-handler] Auto-joined Zalo group ${linkId} successfully`, res);
+            })
+            .catch((err) => {
+              logger.error(`[message-handler] Failed to auto-join Zalo group ${linkId}:`, err);
+            });
+        }
+      }
+    }
 
     // Update Contact aggregate fields (last*, total*) — fire-and-forget,
     // best-effort. Skipped for group threads inside the helper.

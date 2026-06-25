@@ -200,7 +200,7 @@
           />
 
           <!-- Default text — parse @mention + bullets + linebreaks -->
-          <div v-else class="text-content" v-html="formattedText" />
+          <div v-else class="text-content" v-html="formattedText" @click="handleTextClick" />
 
         </template>
 
@@ -297,6 +297,7 @@ const emit = defineEmits<{
   callback: [message: Message];
   'open-profile': [uid: string];
   'open-reaction-detail': [payload: { reactions: any[]; message: Message }];
+  'join-group-link': [linkId: string];
 }>();
 
 const SPECIAL_TYPES = new Set([
@@ -335,6 +336,18 @@ function resolveSpecialType(msg: Message): string {
 // E21/E22 — mở Zalo user info dialog cho UID trong card. Parent (MessageThread) handle.
 function onOpenProfile(uid: string) {
   emit('open-profile', uid);
+}
+
+function handleTextClick(event: MouseEvent) {
+  const target = event.target as HTMLElement;
+  if (target && target.tagName === 'A') {
+    const href = target.getAttribute('href') || '';
+    const match = href.match(/zalo\.me\/g\/([a-zA-Z0-9_-]+)/i);
+    if (match) {
+      event.preventDefault();
+      emit('join-group-link', match[1]);
+    }
+  }
 }
 
 function getImageUrl(msg: Message): string | null {
