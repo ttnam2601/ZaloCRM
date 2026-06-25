@@ -9,6 +9,16 @@ import { resolveAccount, checkAccess, handleError } from './zalo-route-helpers.j
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 
+/** Format một Date thành chuỗi "HH:mm dd/MM/yyyy" theo giờ Việt Nam (UTC+7). */
+function formatVNTime(date: Date): string {
+  return new Intl.DateTimeFormat('vi-VN', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    hour: '2-digit', minute: '2-digit',
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour12: false,
+  }).format(date).replace(',', '');
+}
+
 export async function groupModerationRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authMiddleware);
 
@@ -115,14 +125,17 @@ export async function groupModerationRoutes(app: FastifyInstance) {
         }
       }
 
-      // 2. If grid is found, verify actual membership and check if a conversation exists in DB
+      // 2. If grid is found, verify actual membership via getAllGroups (authoritative joined-group list)
       if (grid) {
         let isReallyMember = false;
         try {
-          await zaloOps.getGroupInfo(accountId, grid);
-          isReallyMember = true;
-        } catch (groupInfoErr) {
-          logger.info(`[groups] check membership: getGroupInfo failed for grid=${grid}, assuming not in group:`, groupInfoErr);
+          const allGroupsResult: any = await zaloOps.getAllGroups(accountId);
+          const gridInfoMap = allGroupsResult?.gridInfoMap || allGroupsResult || {};
+          const joinedGroupIds = new Set(Object.keys(gridInfoMap));
+          isReallyMember = joinedGroupIds.has(grid);
+          logger.info(`[groups] membership check via getAllGroups: grid=${grid}, isReallyMember=${isReallyMember}, joinedCount=${joinedGroupIds.size}`);
+        } catch (allGroupsErr) {
+          logger.warn(`[groups] getAllGroups failed for membership check, assuming not member:`, allGroupsErr);
         }
 
         if (isReallyMember) {
@@ -215,6 +228,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
         logger.warn(`[groups] Failed to fetch group info for grid=${finalGrid} after joining:`, groupInfoErr);
       }
 
+      const joinedAt = new Date();
       let existingConv = await prisma.conversation.findFirst({
         where: {
           zaloAccountId: accountId,
@@ -235,7 +249,8 @@ export async function groupModerationRoutes(app: FastifyInstance) {
             groupName,
             groupAvatarUrl,
             groupMembersCount,
-            lastMessageAt: new Date(),
+            groupJoinedAt: joinedAt,
+            lastMessageAt: joinedAt,
             unreadCount: 0,
             isReplied: false,
           },
@@ -248,11 +263,36 @@ export async function groupModerationRoutes(app: FastifyInstance) {
             groupName,
             groupAvatarUrl,
             groupMembersCount,
+            groupJoinedAt: joinedAt,
           },
         });
       }
 
-      // 5. Send welcome message if requested and we weren't already a member
+      // 5. Write join system message (same style as leave message)
+      if (!alreadyMember) {
+        try {
+          const userDetails = await prisma.user.findUnique({
+            where: { id: request.user!.id },
+            select: { fullName: true },
+          });
+          const userName = userDetails?.fullName || 'Hệ thống';
+          const formattedTime = formatVNTime(joinedAt);
+          await prisma.message.create({
+            data: {
+              conversationId: existingConv.id,
+              senderType: 'system',
+              contentType: 'system_event',
+              content: `Đã gia nhập nhóm bởi ${userName} vào ${formattedTime}`,
+              sentVia: 'system',
+              sentAt: joinedAt,
+            },
+          });
+        } catch (msgErr) {
+          logger.error('[groups] Failed to record system message after joining group:', msgErr);
+        }
+      }
+
+      // 6. Send welcome message if requested and we weren't already a member
       if (welcomeMessage && welcomeMessage.trim() && !alreadyMember) {
         try {
           await zaloOps.sendMessage(accountId, finalGrid, 1, { msg: welcomeMessage.trim() });
@@ -263,6 +303,44 @@ export async function groupModerationRoutes(app: FastifyInstance) {
 
       return { conversationId: existingConv.id, groupId: finalGrid, alreadyMember };
     } catch (err) { return handleError(reply, err, 'joinGroupByLink'); }
+  });
+
+  // ── Members ─────────────────────────────────────────────────────────────────
+
+  app.get<{ Params: { accountId: string; groupId: string } }>(`${BASE}/:groupId/members`, async (request, reply) => {
+    const { accountId, groupId } = request.params;
+    try {
+      await resolveAccount(accountId, request.user!.orgId);
+      if (!(await checkAccess(request, reply, accountId, 'read'))) return;
+      const groupInfo: any = await zaloOps.getGroupInfo(accountId, groupId);
+      const resultInfo = groupInfo?.gridInfoMap?.[groupId] || groupInfo;
+      const rawMembers: any[] = (
+        resultInfo?.memVerList ||
+        resultInfo?.memList ||
+        resultInfo?.members ||
+        []
+      );
+      const ownerId = String(resultInfo?.creatorId || resultInfo?.ownerId || resultInfo?.owner || '');
+      const adminIds = new Set<string>(
+        (resultInfo?.adminIds || resultInfo?.adminList || []).map((x: any) => String(x?.uid || x))
+      );
+      const members = rawMembers.map((m: any) => {
+        const uid = String(m?.uid || m?.userId || m?.id || '');
+        const role = uid === ownerId ? 'owner' : adminIds.has(uid) ? 'admin' : 'member';
+        return {
+          uid,
+          name: m?.dName || m?.displayName || m?.name || 'Unknown',
+          avatar: m?.avatar || m?.avt || null,
+          role,
+        };
+      });
+      return {
+        members,
+        ownerId,
+        groupName: resultInfo?.name || null,
+        totalMember: members.length,
+      };
+    } catch (err) { return handleError(reply, err, 'getGroupMembers'); }
   });
 
   // ── Lifecycle ───────────────────────────────────────────────────────────────
@@ -292,8 +370,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
           const userName = userDetails?.fullName || 'Hệ thống';
 
           const now = new Date();
-          const pad = (n: number) => String(n).padStart(2, '0');
-          const formattedTime = `${pad(now.getHours())}:${pad(now.getMinutes())} ${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}`;
+          const formattedTime = formatVNTime(now);
           await prisma.message.create({
             data: {
               conversationId: conversation.id,

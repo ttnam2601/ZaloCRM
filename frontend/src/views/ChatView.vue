@@ -84,9 +84,17 @@
       @view-applied="onFolderViewApplied"
     />
 
-    <!-- COL 4: contact info panel (chỉ hiện khi có contact) -->
+    <!-- COL 4a: Group members panel (khi chat nhóm) -->
+    <GroupMembersPanel
+      v-if="showContactPanel && selectedConv?.threadType === 'group'"
+      :conversation="selectedConv"
+      class="smax-info-col"
+      @close="showContactPanel = false"
+    />
+
+    <!-- COL 4b: contact info panel (khi chat 1-1 có contact) -->
     <ChatContactPanel
-      v-if="showContactPanel && selectedConv?.contact"
+      v-if="showContactPanel && selectedConv?.contact && selectedConv?.threadType !== 'group'"
       :contact-id="selectedConv.contact.id"
       :contact="selectedConv.contact"
       :friendship="selectedConv.friendship ?? null"
@@ -113,6 +121,7 @@ import { useToast } from '@/composables/use-toast';
 import ConversationList from '@/components/chat/ConversationList.vue';
 import MessageThread from '@/components/chat/MessageThread.vue';
 import ChatContactPanel from '@/components/chat/ChatContactPanel.vue';
+import GroupMembersPanel from '@/components/chat/GroupMembersPanel.vue';
 import ConversationFilterSidebar from '@/components/chat/ConversationFilterSidebar.vue';
 import ConversationFilterBar from '@/components/chat/ConversationFilterBar.vue';
 import FolderManagePopup from '@/components/chat/FolderManagePopup.vue';

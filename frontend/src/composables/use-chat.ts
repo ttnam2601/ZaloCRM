@@ -100,6 +100,8 @@ export interface Conversation {
   groupAvatarUrl?: string | null;
   /** Số thành viên nhóm */
   groupMembersCount?: number | null;
+  /** Thời điểm tài khoản Zalo gia nhập nhóm (chỉ group thread) */
+  groupJoinedAt?: string | null;
   /** External thread ID (group id từ Zalo, hoặc UID per-nick cho user thread) */
   externalThreadId?: string | null;
   /** Friend record per-pair (chỉ user thread) — backend join từ Friend table */

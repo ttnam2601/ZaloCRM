@@ -132,7 +132,13 @@
               <span class="cnt-out">{{ msgOutCount }}</span>↗
               <span class="cnt-scope">per nick này</span>
             </span>
-            <template v-if="showOnlineIndicator && lastOnlineLabel">
+            <template v-if="conversation.threadType === 'group' && groupJoinedAtLabel">
+              <span class="ch-sep">|</span>
+              <span class="group-joined-label" title="Ngày tài khoản gia nhập nhóm">
+                📅 Tham gia: {{ groupJoinedAtLabel }}
+              </span>
+            </template>
+            <template v-else-if="showOnlineIndicator && lastOnlineLabel">
               <span class="ch-sep">|</span>
               <span class="last-online" :class="{ 'is-online': isOnline }">
                 <span class="online-dot" />
@@ -908,6 +914,20 @@ const lastSelfMessageId = computed<string | null>(() => {
     if (list[i]?.senderType === 'self' && !list[i]?.isDeleted) return list[i].id;
   }
   return null;
+});
+
+// ── Group join date label ─────────────────────────────────────────────────
+const groupJoinedAtLabel = computed(() => {
+  const raw = (props.conversation as any)?.groupJoinedAt as string | null | undefined;
+  if (!raw) return null;
+  try {
+    return new Intl.DateTimeFormat('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      day: '2-digit', month: '2-digit', year: 'numeric',
+    }).format(new Date(raw));
+  } catch {
+    return null;
+  }
 });
 
 // ── Header derived data (Avatar handles initials/gradient/gender) ──────────

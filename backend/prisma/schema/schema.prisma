@@ -503,6 +503,7 @@ model Conversation {
   groupName         String?   @map("group_name")
   groupAvatarUrl    String?   @map("group_avatar_url")
   groupMembersCount Int?      @map("group_members_count")
+  groupJoinedAt     DateTime? @map("group_joined_at")
   lastMessageAt     DateTime? @map("last_message_at")
   unreadCount       Int       @default(0) @map("unread_count")
   isReplied         Boolean   @default(true) @map("is_replied")
