@@ -115,17 +115,40 @@ export async function groupModerationRoutes(app: FastifyInstance) {
         }
       }
 
-      // 2. If grid is found, check if a conversation already exists in DB
+      // 2. If grid is found, verify actual membership and check if a conversation exists in DB
       if (grid) {
-        const existing = await prisma.conversation.findFirst({
-          where: {
-            zaloAccountId: accountId,
-            externalThreadId: grid,
-            threadType: 'group',
-          },
-          select: { id: true },
-        });
-        if (existing) {
+        let isReallyMember = false;
+        try {
+          await zaloOps.getGroupInfo(accountId, grid);
+          isReallyMember = true;
+        } catch (groupInfoErr) {
+          logger.info(`[groups] check membership: getGroupInfo failed for grid=${grid}, assuming not in group:`, groupInfoErr);
+        }
+
+        if (isReallyMember) {
+          let existing = await prisma.conversation.findFirst({
+            where: {
+              zaloAccountId: accountId,
+              externalThreadId: grid,
+              threadType: 'group',
+            },
+            select: { id: true },
+          });
+          if (!existing) {
+            existing = await prisma.conversation.create({
+              data: {
+                orgId: request.user!.orgId,
+                zaloAccountId: accountId,
+                contactId: null,
+                threadType: 'group',
+                externalThreadId: grid,
+                lastMessageAt: new Date(),
+                unreadCount: 0,
+                isReplied: false,
+              },
+              select: { id: true },
+            });
+          }
           return { conversationId: existing.id, alreadyMember: true, groupId: grid };
         }
       }
@@ -210,15 +233,21 @@ export async function groupModerationRoutes(app: FastifyInstance) {
           select: { id: true },
         });
         if (conversation) {
+          const userDetails = await prisma.user.findUnique({
+            where: { id: request.user!.id },
+            select: { fullName: true },
+          });
+          const userName = userDetails?.fullName || 'Hệ thống';
+
           const now = new Date();
           const pad = (n: number) => String(n).padStart(2, '0');
-          const formattedTime = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+          const formattedTime = `${pad(now.getHours())}:${pad(now.getMinutes())} ${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}`;
           await prisma.message.create({
             data: {
               conversationId: conversation.id,
               senderType: 'system',
               contentType: 'system_event',
-              content: `Đã rời nhóm vào ${formattedTime}`,
+              content: `Đã rời nhóm bởi ${userName} vào ${formattedTime}`,
               sentVia: 'system',
               sentAt: now,
             },

@@ -658,6 +658,32 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Dialog gia nhập nhóm Zalo -->
+    <v-dialog v-model="joinGroupDialogOpen" max-width="440">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2" color="primary">mdi-account-plus</v-icon>
+          Gia nhập nhóm Zalo
+        </v-card-title>
+        
+        <v-card-text class="pt-2">
+          Bạn có chắc chắn muốn gia nhập nhóm Zalo này không?
+        </v-card-text>
+        
+        <v-card-actions class="px-4 pb-4">
+          <v-spacer />
+          <v-btn variant="text" @click="joinGroupDialogOpen = false">Hủy</v-btn>
+          <v-btn
+            color="primary"
+            variant="elevated"
+            @click="confirmJoinGroup"
+          >
+            Gia nhập
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -689,6 +715,10 @@ const _authStorePriv = _useAuthStorePriv();
 const leaveGroupDialogOpen = ref(false);
 const leaveSilent = ref(true);
 const leaveGroupLoading = ref(false);
+
+// Join group state
+const joinGroupDialogOpen = ref(false);
+const joinGroupLinkId = ref('');
 
 function openPrivacyDialog(conv: any) {
   if (!conv?.zaloAccount) return;
@@ -1614,15 +1644,22 @@ async function onAcceptInvite() {
   }
 }
 
-async function onJoinGroupLink(linkId: string) {
+function onJoinGroupLink(linkId: string) {
   const accountId = props.conversation?.zaloAccount?.id;
   if (!accountId) {
     toast.error('Không tìm thấy tài khoản Zalo hợp lệ');
     return;
   }
-  if (!confirm('Bạn có muốn gia nhập nhóm Zalo này không?')) {
-    return;
-  }
+  joinGroupLinkId.value = linkId;
+  joinGroupDialogOpen.value = true;
+}
+
+async function confirmJoinGroup() {
+  const accountId = props.conversation?.zaloAccount?.id;
+  const linkId = joinGroupLinkId.value;
+  if (!accountId || !linkId) return;
+  joinGroupDialogOpen.value = false;
+
   toast.push('Đang gửi yêu cầu gia nhập nhóm...');
   try {
     const res = await api.post(`/zalo-accounts/${accountId}/groups/join-link`, { linkId });
