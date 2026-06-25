@@ -102,10 +102,13 @@ export async function groupModerationRoutes(app: FastifyInstance) {
 
       // 1. Try to resolve group ID (grid) using parseLink first to see if already in group
       let grid: string | null = null;
+      let parseResult: any = null;
+      let parseErrorMsg: string | null = null;
       try {
-        const parseResult: any = await zaloOps.parseLink(accountId, `https://zalo.me/g/${cleanLinkId}`);
+        parseResult = await zaloOps.parseLink(accountId, `https://zalo.me/g/${cleanLinkId}`);
         grid = parseResult?.params?.grid || parseResult?.grid || parseResult?.groupId || null;
-      } catch (parseErr) {
+      } catch (parseErr: any) {
+        parseErrorMsg = parseErr?.message || String(parseErr);
         logger.warn('[groups] parseLink failed for join-link:', parseErr);
       }
 
@@ -131,8 +134,9 @@ export async function groupModerationRoutes(app: FastifyInstance) {
       // 3. Perform join link call
       let finalGrid = grid;
       let alreadyMember = false;
+      let joinResult: any = null;
       try {
-        const joinResult: any = await zaloOps.joinGroupByLink(accountId, cleanLinkId);
+        joinResult = await zaloOps.joinGroupByLink(accountId, cleanLinkId);
         finalGrid = finalGrid || joinResult?.params?.grid || joinResult?.grid || joinResult?.groupId;
       } catch (err: any) {
         if (err?.code === 178 || String(err?.message || '').includes('178')) {
@@ -143,7 +147,11 @@ export async function groupModerationRoutes(app: FastifyInstance) {
       }
 
       if (!finalGrid) {
-        throw new ZaloOpError('Không thể xác định ID nhóm Zalo sau khi gia nhập', 'API_ERROR', 500);
+        throw new ZaloOpError(
+          `Không thể xác định ID nhóm Zalo sau khi gia nhập. parseError: ${parseErrorMsg}, parseResult: ${JSON.stringify(parseResult)}, joinResult: ${JSON.stringify(joinResult)}`,
+          'API_ERROR',
+          500
+        );
       }
 
       // 4. Ensure conversation in database
