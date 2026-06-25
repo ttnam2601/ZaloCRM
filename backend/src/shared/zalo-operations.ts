@@ -491,9 +491,12 @@ async function disableGroupLink(accountId: string, groupId: string) {
     (api) => api.disableGroupLink(groupId));
 }
 
-async function joinGroupByLink(accountId: string, linkId: string) {
+async function joinGroupByLink(accountId: string, linkIdOrUrl: string) {
+  const fullLink = linkIdOrUrl.startsWith('http') 
+    ? linkIdOrUrl 
+    : `https://zalo.me/g/${linkIdOrUrl}`;
   return exec({ accountId, category: 'group_admin', operation: 'joinGroupByLink' },
-    (api) => api.joinGroupLink(linkId));
+    (api) => api.joinGroupLink(fullLink));
 }
 
 async function parseLink(accountId: string, link: string) {
