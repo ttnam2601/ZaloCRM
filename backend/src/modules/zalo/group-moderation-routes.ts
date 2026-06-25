@@ -4,7 +4,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { authMiddleware } from '../auth/auth-middleware.js';
-import { zaloOps } from '../../shared/zalo-operations.js';
+import { zaloOps, ZaloOpError } from '../../shared/zalo-operations.js';
 import { resolveAccount, checkAccess, handleError } from './zalo-route-helpers.js';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
@@ -133,7 +133,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
       let alreadyMember = false;
       try {
         const joinResult: any = await zaloOps.joinGroupByLink(accountId, cleanLinkId);
-        finalGrid = finalGrid || joinResult?.grid || joinResult?.groupId;
+        finalGrid = finalGrid || joinResult?.params?.grid || joinResult?.grid || joinResult?.groupId;
       } catch (err: any) {
         if (err?.code === 178 || String(err?.message || '').includes('178')) {
           alreadyMember = true;
@@ -143,7 +143,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
       }
 
       if (!finalGrid) {
-        throw new Error('Could not resolve Zalo group ID');
+        throw new ZaloOpError('Không thể xác định ID nhóm Zalo sau khi gia nhập', 'API_ERROR', 500);
       }
 
       // 4. Ensure conversation in database

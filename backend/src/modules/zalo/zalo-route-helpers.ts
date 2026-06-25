@@ -85,9 +85,16 @@ export async function getAccessibleZaloAccountIds(user: {
 
 /** Map ZaloOpError to HTTP response, fallback 500 for unknown errors */
 export function handleError(reply: FastifyReply, err: unknown, op: string) {
+  logger.error(`[zalo-routes] ${op} failed:`, err);
   if (err instanceof ZaloOpError) {
     return reply.status(err.statusCode).send({ error: err.message, code: err.code });
   }
-  logger.error(`[zalo-routes] ${op} failed:`, err);
-  return reply.status(500).send({ error: 'Internal server error' });
+  
+  // Safe fallback for other types of errors to ensure descriptive messages are sent to the client
+  const errAny = err as any;
+  const msg = errAny?.message || String(err || 'Unknown error');
+  const code = errAny?.code || 'INTERNAL_ERROR';
+  const statusCode = errAny?.statusCode || 500;
+  
+  return reply.status(statusCode).send({ error: msg, code });
 }
