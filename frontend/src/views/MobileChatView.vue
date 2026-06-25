@@ -9,6 +9,7 @@
         v-model:search="searchQuery"
         @select="selectConversation"
         @filter-account="onFilterAccount"
+        @compose-opened="onComposeOpened"
       />
     </div>
 
@@ -34,7 +35,7 @@
         :ai-suggestion-loading="false"
         :ai-suggestion-error="(null as any)"
         @send="handleSend"
-        @refresh-thread="selectedConvId && fetchMessages(selectedConvId)"
+        @refresh-thread="selectedConvId && selectConversation(selectedConvId)"
         style="flex: 1; min-height: 0;"
       />
     </div>
@@ -51,7 +52,7 @@ import { useOfflineQueue } from '@/composables/use-offline-queue';
 const {
   conversations, selectedConvId, selectedConv, messages,
   loadingConvs, loadingMsgs, sendingMsg, searchQuery, accountFilter,
-  fetchConversations, fetchMessages, selectConversation, sendMessage, sendMessageTo,
+  fetchConversations, selectConversation, sendMessage, sendMessageTo,
   initSocket, destroySocket,
 } = useChat();
 
@@ -60,6 +61,11 @@ const { pendingMessages, enqueue, flush } = useOfflineQueue();
 function onFilterAccount(id: string | null) {
   accountFilter.value = id;
   fetchConversations();
+}
+
+async function onComposeOpened(conversationId: string) {
+  await fetchConversations();
+  selectConversation(conversationId);
 }
 
 function goBack() {

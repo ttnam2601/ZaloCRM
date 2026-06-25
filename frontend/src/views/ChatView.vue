@@ -71,7 +71,7 @@
       @set-editing="setEditing"
       @cancel-reply-edit="onCancelReplyEdit"
       @typing="onTyping"
-      @refresh-thread="selectedConvId && fetchMessages(selectedConvId)"
+      @refresh-thread="onRefreshThread"
     />
 
     <!-- Folder management modal (overlay) -->
@@ -343,8 +343,16 @@ function onConversationMoved(_id: string, _tab: string) {
 
 // Khi user tạo conv mới từ "Tin nhắn mới" dialog → refresh list + nav vào conv đó.
 async function onComposeOpened(conversationId: string) {
-  await fetchConversations();
+  await fetchConversations({ bypassCache: true });
+  selectConversation(conversationId);
   router.push({ name: 'Chat', params: { convId: conversationId } });
+}
+
+async function onRefreshThread() {
+  await fetchConversations({ bypassCache: true });
+  if (selectedConvId.value) {
+    selectConversation(selectedConvId.value);
+  }
 }
 
 // Auto-show panel khi chọn conv có contact

@@ -1044,7 +1044,10 @@ async function touchConversationProfile(convId: string) {
   if (!convId) return;
   try {
     const { api: apiClient } = await import('@/api/index');
-    await apiClient.post(`/conversations/${convId}/touch-profile`);
+    const res = await apiClient.post(`/conversations/${convId}/touch-profile`);
+    if (res.data?.ok && res.data.groupPatched) {
+      emit('refresh-thread');
+    }
   } catch {
     // Silent — touch profile chỉ là background enrichment
   }
@@ -1669,8 +1672,12 @@ async function confirmJoinGroup() {
       toast.success('Gia nhập nhóm thành công');
     }
     if (res.data?.conversationId) {
-      const { router } = await import('@/router/index');
-      router.push({ name: 'Chat', params: { convId: res.data.conversationId } });
+      if (res.data.conversationId === props.conversation?.id) {
+        emit('refresh-thread');
+      } else {
+        const { router } = await import('@/router/index');
+        router.push({ name: 'Chat', params: { convId: res.data.conversationId } });
+      }
     }
   } catch (err: any) {
     const errMsg = err.response?.data?.error || err.message || 'Lỗi kết nối';

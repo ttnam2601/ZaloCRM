@@ -126,6 +126,20 @@ export async function groupModerationRoutes(app: FastifyInstance) {
         }
 
         if (isReallyMember) {
+          let groupName: string | null = null;
+          let groupAvatarUrl: string | null = null;
+          let groupMembersCount: number | null = null;
+          try {
+            const groupInfo = await zaloOps.getGroupInfo(accountId, grid);
+            const resultInfo = (groupInfo as any)?.gridInfoMap?.[grid] || groupInfo;
+            const members = (resultInfo as any)?.memVerList || (resultInfo as any)?.memList || (resultInfo as any)?.members;
+            groupName = resultInfo?.name || null;
+            groupAvatarUrl = resultInfo?.avt || resultInfo?.fullAvt || resultInfo?.avatar || null;
+            groupMembersCount = Array.isArray(members) ? members.length : (resultInfo?.totalMember || null);
+          } catch (groupInfoErr) {
+            logger.warn(`[groups] Failed to fetch group info for grid=${grid}:`, groupInfoErr);
+          }
+
           let existing = await prisma.conversation.findFirst({
             where: {
               zaloAccountId: accountId,
@@ -142,11 +156,23 @@ export async function groupModerationRoutes(app: FastifyInstance) {
                 contactId: null,
                 threadType: 'group',
                 externalThreadId: grid,
+                groupName,
+                groupAvatarUrl,
+                groupMembersCount,
                 lastMessageAt: new Date(),
                 unreadCount: 0,
                 isReplied: false,
               },
               select: { id: true },
+            });
+          } else {
+            await prisma.conversation.update({
+              where: { id: existing.id },
+              data: {
+                groupName,
+                groupAvatarUrl,
+                groupMembersCount,
+              },
             });
           }
           return { conversationId: existing.id, alreadyMember: true, groupId: grid };
@@ -175,6 +201,20 @@ export async function groupModerationRoutes(app: FastifyInstance) {
       }
 
       // 4. Ensure conversation in database
+      let groupName: string | null = null;
+      let groupAvatarUrl: string | null = null;
+      let groupMembersCount: number | null = null;
+      try {
+        const groupInfo = await zaloOps.getGroupInfo(accountId, finalGrid);
+        const resultInfo = (groupInfo as any)?.gridInfoMap?.[finalGrid] || groupInfo;
+        const members = (resultInfo as any)?.memVerList || (resultInfo as any)?.memList || (resultInfo as any)?.members;
+        groupName = resultInfo?.name || null;
+        groupAvatarUrl = resultInfo?.avt || resultInfo?.fullAvt || resultInfo?.avatar || null;
+        groupMembersCount = Array.isArray(members) ? members.length : (resultInfo?.totalMember || null);
+      } catch (groupInfoErr) {
+        logger.warn(`[groups] Failed to fetch group info for grid=${finalGrid} after joining:`, groupInfoErr);
+      }
+
       let existingConv = await prisma.conversation.findFirst({
         where: {
           zaloAccountId: accountId,
@@ -192,11 +232,23 @@ export async function groupModerationRoutes(app: FastifyInstance) {
             contactId: null,
             threadType: 'group',
             externalThreadId: finalGrid,
+            groupName,
+            groupAvatarUrl,
+            groupMembersCount,
             lastMessageAt: new Date(),
             unreadCount: 0,
             isReplied: false,
           },
           select: { id: true },
+        });
+      } else {
+        await prisma.conversation.update({
+          where: { id: existingConv.id },
+          data: {
+            groupName,
+            groupAvatarUrl,
+            groupMembersCount,
+          },
         });
       }
 

@@ -586,8 +586,69 @@ export async function chatRoutes(app: FastifyInstance) {
       select: { id: true, contactId: true, zaloAccountId: true, externalThreadId: true, threadType: true },
     });
     if (!conv) return reply.status(404).send({ error: 'Conversation not found' });
-    if (conv.threadType !== 'user' || !conv.contactId || !conv.externalThreadId) {
-      return { ok: true, skipped: true, reason: 'group_or_no_contact' };
+    if (!conv.externalThreadId) {
+      return { ok: true, skipped: true, reason: 'no_external_thread_id' };
+    }
+
+    if (conv.threadType === 'group') {
+      const last = profileTouchCooldown.get(conv.id) || 0;
+      if (Date.now() - last < PROFILE_TOUCH_COOLDOWN_MS) {
+        return { ok: true, skipped: true, reason: 'cooldown' };
+      }
+      profileTouchCooldown.set(conv.id, Date.now());
+
+      const api = zaloPool.getApi(conv.zaloAccountId);
+      if (!api || typeof api.getGroupInfo !== 'function') {
+        return { ok: true, skipped: true, reason: 'account_disconnected' };
+      }
+
+      try {
+        const result = await api.getGroupInfo(conv.externalThreadId);
+        const info = result?.gridInfoMap?.[conv.externalThreadId];
+        if (!info) return { ok: true, skipped: true, reason: 'no_group_info' };
+
+        const members = info.memVerList || info.memList || info.members;
+        const groupName = info.name || '';
+        const groupAvatarUrl = info.avt || info.fullAvt || info.avatar || '';
+        const groupMembersCount = Array.isArray(members) ? members.length : (info.totalMember || null);
+
+        const currentConv = await prisma.conversation.findUnique({
+          where: { id: conv.id },
+          select: { groupName: true, groupAvatarUrl: true, groupMembersCount: true },
+        });
+
+        const hasChanges = !currentConv ||
+          currentConv.groupName !== groupName ||
+          currentConv.groupAvatarUrl !== groupAvatarUrl ||
+          currentConv.groupMembersCount !== groupMembersCount;
+
+        if (hasChanges) {
+          const updated = await prisma.conversation.update({
+            where: { id: conv.id },
+            data: {
+              groupName,
+              groupAvatarUrl,
+              groupMembersCount,
+            },
+          });
+
+          const io = (app as any).io as Server;
+          io?.emit('conversation:updated', updated);
+
+          return { ok: true, groupPatched: true };
+        }
+
+        return { ok: true, groupPatched: false };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Touch group profile failed';
+        logger.warn(`[touch-profile] group conv=${conv.id}: ${msg}`);
+        profileTouchCooldown.delete(conv.id);
+        return { ok: false, error: msg };
+      }
+    }
+
+    if (!conv.contactId) {
+      return { ok: true, skipped: true, reason: 'no_contact_for_user_thread' };
     }
 
     // Cooldown
