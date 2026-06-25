@@ -504,6 +504,11 @@ async function parseLink(accountId: string, link: string) {
     (api) => api.parseLink(link));
 }
 
+async function getGroupLinkInfo(accountId: string, payload: { link: string; memberPage?: number }) {
+  return exec({ accountId, category: 'query', operation: 'getGroupLinkInfo' },
+    (api) => api.getGroupLinkInfo(payload));
+}
+
 // ─── Group Polls ────────────────────────────────────────────────────────────
 async function createPoll(accountId: string, options: any, groupId: string) {
   return exec({ accountId, category: 'group_admin', operation: 'createPoll' },
@@ -716,6 +721,7 @@ export const zaloOps = {
   disableGroupLink,
   joinGroupByLink,
   parseLink,
+  getGroupLinkInfo,
 
   // Group polls
   createPoll,
