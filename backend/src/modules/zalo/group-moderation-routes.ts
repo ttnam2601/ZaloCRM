@@ -83,9 +83,9 @@ export async function groupModerationRoutes(app: FastifyInstance) {
     } catch (err) { return handleError(reply, err, 'disableGroupLink'); }
   });
 
-  app.post<{ Params: { accountId: string }; Body: { linkId: string; welcomeMessage?: string } }>(`/api/v1/zalo-accounts/:accountId/groups/join-link`, async (request, reply) => {
+  app.post<{ Params: { accountId: string }; Body: { linkId: string; welcomeMessage?: string; checkOnly?: boolean } }>(`/api/v1/zalo-accounts/:accountId/groups/join-link`, async (request, reply) => {
     const { accountId } = request.params;
-    const { linkId, welcomeMessage } = request.body ?? {};
+    const { linkId, welcomeMessage, checkOnly } = request.body ?? {};
     if (!linkId) return reply.status(400).send({ error: 'linkId is required' });
 
     let cleanLinkId = linkId.trim();
@@ -122,6 +122,10 @@ export async function groupModerationRoutes(app: FastifyInstance) {
         if (existing) {
           return { conversationId: existing.id, alreadyMember: true, groupId: grid };
         }
+      }
+
+      if (checkOnly) {
+        return { alreadyMember: false, groupId: grid };
       }
 
       // 3. Perform join link call

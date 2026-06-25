@@ -108,6 +108,43 @@
             Chọn nick CRM để tìm KH
           </div>
 
+          <!-- Group Link Query Mode -->
+          <div v-else-if="isGroupLinkQuery" class="result-section">
+            <div class="result-section-title">
+              <v-icon size="14" color="primary" class="mr-1">mdi-link-variant</v-icon>
+              Đường dẫn nhóm Zalo phát hiện
+            </div>
+            
+            <div v-if="checkingGroupLink" class="text-center text-grey pa-3">
+              <v-progress-circular indeterminate size="20" class="mr-2" />
+              Đang kiểm tra trạng thái nhóm...
+            </div>
+            
+            <div v-else-if="groupLinkChecked" class="pa-3">
+              <div v-if="groupLinkAlreadyMember" class="d-flex align-center text-success py-2">
+                <v-icon color="success" class="mr-2">mdi-check-circle</v-icon>
+                <span>Bạn đã ở trong nhóm này. Có thể mở chat trực tiếp.</span>
+              </div>
+              <div v-else>
+                <div class="d-flex align-center text-warning mb-3">
+                  <v-icon color="warning" class="mr-2">mdi-account-plus-outline</v-icon>
+                  <span>Bạn chưa tham gia nhóm này (hoặc đã rời đi trước đó).</span>
+                </div>
+                <v-textarea
+                  v-model="groupLinkWelcomeMsg"
+                  label="Tin nhắn gửi kèm khi vào nhóm (tùy chọn)"
+                  variant="outlined"
+                  density="comfortable"
+                  rows="3"
+                  placeholder="Nhập tin nhắn chào mừng gửi vào nhóm sau khi gia nhập..."
+                />
+              </div>
+            </div>
+            <div v-else class="text-center text-grey pa-3">
+              Lỗi kiểm tra trạng thái nhóm.
+            </div>
+          </div>
+
           <!-- Tier 1: Friend rows của NICK NÀY (KH nick này đang chăm) -->
           <div v-if="friendRows.length" class="result-section">
             <div class="result-section-title">
@@ -358,12 +395,29 @@ const lookingUp = ref(false);
 const lookupNotFound = ref<string | null>(null);
 const lookupCommitMode = ref<string>('create'); // 'create' | 'attach:<contactId>'
 
+// Group link check state
+const checkingGroupLink = ref(false);
+const groupLinkAlreadyMember = ref(false);
+const groupLinkConvId = ref<string | null>(null);
+const groupLinkChecked = ref(false);
+const groupLinkWelcomeMsg = ref('');
+
+const isGroupLinkQuery = computed(() => {
+  return /zalo\.me\/g\/([a-zA-Z0-9_-]+)/i.test(query.value.trim());
+});
+
+const groupLinkQueryId = computed(() => {
+  const match = query.value.trim().match(/zalo\.me\/g\/([a-zA-Z0-9_-]+)/i);
+  return match ? match[1] : null;
+});
+
 const isPhoneQuery = computed(() => {
   const digits = query.value.replace(/[^\d]/g, '');
   return digits.length >= 9 && digits.length <= 12;
 });
 
 const canOpen = computed(() => {
+  if (isGroupLinkQuery.value) return groupLinkChecked.value;
   if (pickedKind.value === 'friend') return !!pickedId.value;
   if (pickedKind.value === 'contact') return !!pickedId.value;
   if (pickedKind.value === 'lookup') return !!lookupResult.value?.found;
@@ -371,6 +425,9 @@ const canOpen = computed(() => {
 });
 
 const openButtonLabel = computed(() => {
+  if (isGroupLinkQuery.value) {
+    return groupLinkAlreadyMember.value ? 'Mở chat' : 'Gia nhập nhóm';
+  }
   if (pickedKind.value === 'friend') return 'Mở chat';
   if (pickedKind.value === 'contact') return 'Bắt đầu chat & gắn vào nick này';
   if (pickedKind.value === 'lookup') {
@@ -389,6 +446,12 @@ function clearResults() {
   lookupResult.value = null;
   lookupNotFound.value = null;
   lookupCommitMode.value = 'create';
+  
+  // Clear group link state
+  groupLinkAlreadyMember.value = false;
+  groupLinkConvId.value = null;
+  groupLinkChecked.value = false;
+  groupLinkWelcomeMsg.value = '';
 }
 function resetState() {
   selectedAccountId.value = props.defaultAccountId
@@ -414,6 +477,13 @@ function onSearchInput() {
   lookupNotFound.value = null;
   pickedKind.value = null;
   pickedId.value = null;
+
+  // Clear group link state
+  groupLinkAlreadyMember.value = false;
+  groupLinkConvId.value = null;
+  groupLinkChecked.value = false;
+  groupLinkWelcomeMsg.value = '';
+
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => runSearch(), 250);
 }
@@ -430,6 +500,10 @@ async function runSearch() {
   if (!selectedAccountId.value || !query.value.trim()) {
     friendRows.value = [];
     contactRows.value = [];
+    return;
+  }
+  if (isGroupLinkQuery.value) {
+    runGroupLinkCheck();
     return;
   }
   searching.value = true;
@@ -456,6 +530,30 @@ async function runSearch() {
     contactRows.value = [];
   } finally {
     searching.value = false;
+  }
+}
+
+async function runGroupLinkCheck() {
+  const linkId = groupLinkQueryId.value;
+  if (!selectedAccountId.value || !linkId) return;
+  checkingGroupLink.value = true;
+  groupLinkChecked.value = false;
+  groupLinkAlreadyMember.value = false;
+  groupLinkConvId.value = null;
+  
+  try {
+    const res = await api.post(`/zalo-accounts/${selectedAccountId.value}/groups/join-link`, {
+      linkId,
+      checkOnly: true
+    });
+    groupLinkAlreadyMember.value = !!res.data?.alreadyMember;
+    groupLinkConvId.value = res.data?.conversationId || null;
+    groupLinkChecked.value = true;
+  } catch (err: any) {
+    console.error('[NewMessageDialog] Group link check failed:', err);
+    toast.error(err.response?.data?.error || err.message || 'Lỗi kiểm tra link nhóm');
+  } finally {
+    checkingGroupLink.value = false;
   }
 }
 
@@ -511,6 +609,28 @@ async function onOpenChat() {
   if (!selectedAccountId.value) return;
   opening.value = true;
   try {
+    if (isGroupLinkQuery.value) {
+      const linkId = groupLinkQueryId.value;
+      if (!linkId) return;
+      if (groupLinkAlreadyMember.value && groupLinkConvId.value) {
+        emit('opened', groupLinkConvId.value);
+      } else {
+        toast.push('Đang gia nhập nhóm...');
+        const res = await api.post(`/zalo-accounts/${selectedAccountId.value}/groups/join-link`, {
+          linkId,
+          welcomeMessage: groupLinkWelcomeMsg.value
+        });
+        if (res.data?.conversationId) {
+          toast.success('Gia nhập nhóm thành công');
+          emit('opened', res.data.conversationId);
+        } else {
+          toast.error('Không tìm thấy cuộc trò chuyện sau khi gia nhập');
+        }
+      }
+      emit('update:modelValue', false);
+      return;
+    }
+
     if (pickedKind.value === 'friend' && pickedId.value) {
       // KH đã có Friend với nick này → mở conv (idempotent ensure)
       const res = await api.post<{ conversationId: string; created: boolean }>(
