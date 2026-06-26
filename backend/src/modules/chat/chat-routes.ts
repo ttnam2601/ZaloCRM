@@ -1058,7 +1058,11 @@ export async function chatRoutes(app: FastifyInstance) {
         sendPayload.styles = styles;
       }
       if (Array.isArray(mentions) && mentions.length > 0) {
-        sendPayload.mentions = mentions;
+        sendPayload.mentions = mentions.map((m: any) => ({
+          pos: Number(m.pos),
+          uid: String(m.uid || '').split('_')[0],
+          len: Number(m.len),
+        }));
       }
       if (quote) sendPayload.quote = quote;
       const sendResult = await instance.api.sendMessage(sendPayload, threadId, threadType);

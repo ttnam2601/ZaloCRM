@@ -152,25 +152,27 @@
     <EditorContent :editor="editor" class="editor-content" />
 
     <!-- Mentions Autocomplete Popover -->
-    <div
-      v-if="showSuggestions && suggestionProps && suggestionProps.items.length"
-      class="mention-suggestions"
-      :style="suggestionStyle"
-    >
+    <Teleport to="body">
       <div
-        v-for="(item, index) in suggestionProps.items"
-        :key="item.uid"
-        class="mention-suggestion-item"
-        :class="{ active: index === suggestionIndex }"
-        @mousedown.prevent="selectSuggestion(Number(index))"
+        v-if="showSuggestions && suggestionProps && suggestionProps.items.length"
+        class="mention-suggestions"
+        :style="suggestionStyle"
       >
-        <v-avatar size="24" class="mr-2" color="primary">
-          <v-img v-if="item.avatar" :src="item.avatar" />
-          <span v-else class="text-caption text-white">{{ item.name.charAt(0).toUpperCase() }}</span>
-        </v-avatar>
-        <span class="mention-name">{{ item.name }}</span>
+        <div
+          v-for="(item, index) in suggestionProps.items"
+          :key="item.uid"
+          class="mention-suggestion-item"
+          :class="{ active: index === suggestionIndex }"
+          @mousedown.prevent="selectSuggestion(Number(index))"
+        >
+          <v-avatar size="24" class="mr-2" color="primary">
+            <v-img v-if="item.avatar" :src="item.avatar" />
+            <span v-else class="text-caption text-white">{{ item.name.charAt(0).toUpperCase() }}</span>
+          </v-avatar>
+          <span class="mention-name">{{ item.name }}</span>
+        </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -279,14 +281,11 @@ const suggestionStyle = computed(() => {
   if (!suggestionProps.value || !suggestionProps.value.clientRect) return {};
   const rect = suggestionProps.value.clientRect();
   if (!rect) return {};
-  const editorEl = editor.value?.view.dom;
-  if (!editorEl) return {};
-  const editorRect = editorEl.getBoundingClientRect();
   return {
-    position: 'absolute' as const,
-    top: `${rect.bottom - editorRect.top + 5}px`,
-    left: `${rect.left - editorRect.left}px`,
-    zIndex: 1000,
+    position: 'fixed' as const,
+    bottom: `${window.innerHeight - rect.top + 5}px`,
+    left: `${rect.left}px`,
+    zIndex: 9999,
   };
 });
 
@@ -350,6 +349,7 @@ const editor = useEditor({
             },
             onExit: () => {
               showSuggestions.value = false;
+              suggestionProps.value = null;
             },
           };
         },
@@ -359,6 +359,9 @@ const editor = useEditor({
   editorProps: {
     handleKeyDown(_view, event) {
       if (event.key === 'Enter' && !event.shiftKey) {
+        if (showSuggestions.value && suggestionProps.value?.items?.length) {
+          return false; // let the mention extension's keydown handler run
+        }
         event.preventDefault();
         emit('submit');
         return true;
