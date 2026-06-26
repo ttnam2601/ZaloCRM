@@ -90,6 +90,7 @@
       :conversation="selectedConv"
       class="smax-info-col"
       @close="showContactPanel = false"
+      @left="showContactPanel = false; fetchConversations()"
     />
 
     <!-- COL 4b: contact info panel (khi chat 1-1 có contact) -->
