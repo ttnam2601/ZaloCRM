@@ -352,12 +352,16 @@ export async function groupModerationRoutes(app: FastifyInstance) {
 
       const detailMap = new Map<string, { name: string; avatar: string | null }>();
       for (const m of detailedMembers) {
-        const uid = String(m?.uid || m?.userId || m?.id || m?.zaloId || '');
-        if (uid) {
-          detailMap.set(uid, {
+        const rawUid = String(m?.uid || m?.userId || m?.id || m?.zaloId || '');
+        if (rawUid) {
+          const stripped = rawUid.split('_')[0];
+          const info = {
             name: m?.displayName || m?.name || m?.dName || m?.zaloName || '',
             avatar: m?.avatar || m?.avatarUrl || m?.avt || m?.fullAvt || null,
-          });
+          };
+          detailMap.set(rawUid, info);
+          detailMap.set(stripped, info);
+          detailMap.set(`${stripped}_0`, info);
         }
       }
 
@@ -374,7 +378,8 @@ export async function groupModerationRoutes(app: FastifyInstance) {
         const uid = typeof m === 'string' ? m : String(m?.uid || m?.userId || m?.id || '');
         const role = uid === ownerId ? 'owner' : adminIds.has(uid) ? 'admin' : 'member';
 
-        const detail = detailMap.get(uid);
+        const strippedUid = uid.split('_')[0];
+        const detail = detailMap.get(uid) || detailMap.get(strippedUid) || detailMap.get(`${strippedUid}_0`);
         let name = detail?.name || (typeof m === 'object' ? (m?.dName || m?.displayName || m?.name) : '') || 'Unknown';
         let avatar = detail?.avatar || (typeof m === 'object' ? (m?.avatar || m?.avt) : null) || null;
 
@@ -392,41 +397,55 @@ export async function groupModerationRoutes(app: FastifyInstance) {
         .map(m => m.uid);
 
       if (unknownUids.length > 0) {
+        const strippedUnknownUids = unknownUids.map(u => u.split('_')[0]);
+        const allQueryUids = [...new Set([...unknownUids, ...strippedUnknownUids])];
+
         const [friends, contacts, accounts] = await Promise.all([
           prisma.friend.findMany({
-            where: { zaloUidInNick: { in: unknownUids } },
+            where: { zaloUidInNick: { in: allQueryUids } },
             select: { zaloUidInNick: true, aliasInNick: true, zaloDisplayName: true, zaloAvatarUrl: true },
           }),
           prisma.contact.findMany({
-            where: { zaloUid: { in: unknownUids } },
+            where: { zaloUid: { in: allQueryUids } },
             select: { zaloUid: true, crmName: true, fullName: true, avatarUrl: true },
           }),
           prisma.zaloAccount.findMany({
-            where: { zaloUid: { in: unknownUids } },
+            where: { zaloUid: { in: allQueryUids } },
             select: { zaloUid: true, displayName: true, avatarUrl: true },
           }),
         ]);
 
         const dbNameMap = new Map<string, { name: string; avatar: string | null }>();
+        const setMap = (key: string, info: { name: string; avatar: string | null }) => {
+          if (!key) return;
+          const stripped = key.split('_')[0];
+          dbNameMap.set(key, info);
+          dbNameMap.set(stripped, info);
+          dbNameMap.set(`${stripped}_0`, info);
+        };
+
         for (const a of accounts) {
           if (a.zaloUid && a.displayName) {
-            dbNameMap.set(a.zaloUid, { name: a.displayName, avatar: a.avatarUrl || null });
+            setMap(a.zaloUid, { name: a.displayName, avatar: a.avatarUrl || null });
           }
         }
         for (const c of contacts) {
           if (c.zaloUid) {
             const name = c.crmName || c.fullName;
-            if (name) dbNameMap.set(c.zaloUid, { name, avatar: c.avatarUrl || dbNameMap.get(c.zaloUid)?.avatar || null });
+            if (name) setMap(c.zaloUid, { name, avatar: c.avatarUrl || null });
           }
         }
         for (const f of friends) {
           const name = f.aliasInNick || f.zaloDisplayName;
-          if (name) dbNameMap.set(f.zaloUidInNick, { name, avatar: f.zaloAvatarUrl || dbNameMap.get(f.zaloUidInNick)?.avatar || null });
+          const fUid = f.zaloUidInNick;
+          if (name && fUid) {
+            setMap(fUid, { name, avatar: f.zaloAvatarUrl || null });
+          }
         }
 
         for (const m of members) {
           if (m.name === 'Unknown' && m.uid) {
-            const resolved = dbNameMap.get(m.uid);
+            const resolved = dbNameMap.get(m.uid) || dbNameMap.get(m.uid.split('_')[0]) || dbNameMap.get(`${m.uid.split('_')[0]}_0`);
             if (resolved) {
               m.name = resolved.name;
               if (!m.avatar) m.avatar = resolved.avatar;
