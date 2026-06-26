@@ -994,10 +994,11 @@ export async function chatRoutes(app: FastifyInstance) {
     // 2026-05-21: thêm `styles` cho Zalo RTF (bold/italic/underline/strikethrough).
     // Format: [{st: 'b'|'i'|'u'|'s', start: number, len: number}, ...]
     // FE extract từ Tiptap editor JSON, BE pass thẳng vào api.sendMessage.
-    const { content, replyMessageId, styles } = request.body as {
+    const { content, replyMessageId, styles, mentions } = request.body as {
       content: string;
       replyMessageId?: string;
       styles?: Array<{ st: string; start: number; len: number }>;
+      mentions?: Array<{ pos: number; uid: string; len: number }>;
     };
 
     if (!content?.trim()) return reply.status(400).send({ error: 'Content required' });
@@ -1055,6 +1056,9 @@ export async function chatRoutes(app: FastifyInstance) {
       const sendPayload: Record<string, unknown> = { msg: content };
       if (Array.isArray(styles) && styles.length > 0) {
         sendPayload.styles = styles;
+      }
+      if (Array.isArray(mentions) && mentions.length > 0) {
+        sendPayload.mentions = mentions;
       }
       if (quote) sendPayload.quote = quote;
       const sendResult = await instance.api.sendMessage(sendPayload, threadId, threadType);

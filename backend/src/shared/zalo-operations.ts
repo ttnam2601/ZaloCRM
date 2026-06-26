@@ -460,9 +460,9 @@ async function getAllGroups(accountId: string) {
     (api) => api.getAllGroups());
 }
 
-async function getGroupMembersInfo(accountId: string, groupId: string) {
+async function getGroupMembersInfo(accountId: string, memberIds: string | string[]) {
   return exec({ accountId, category: 'group_read', operation: 'getGroupMembersInfo' },
-    (api) => api.getGroupMembersInfo(groupId));
+    (api) => api.getGroupMembersInfo(memberIds));
 }
 
 async function getGroupBlockedMembers(accountId: string, groupId: string) {

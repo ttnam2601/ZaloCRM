@@ -540,9 +540,9 @@ export function useChat() {
     void fetchAiUsage();
   }
 
-  async function sendMessage(content: string, replyMessageId?: string | null, styles?: Array<{ st: string; start: number; len: number }>) {
+  async function sendMessage(content: string, replyMessageId?: string | null, styles?: Array<{ st: string; start: number; len: number }>, mentions?: Array<{ pos: number; uid: string; len: number }>) {
     if (!selectedConvId.value || !content.trim()) return;
-    await sendMessageTo(selectedConvId.value, content, replyMessageId, styles);
+    await sendMessageTo(selectedConvId.value, content, replyMessageId, styles, mentions);
   }
 
   /** Insert message vào messages.value đúng vị trí — primary key zaloMsgIdNum (Zalo Snowflake),
@@ -565,7 +565,7 @@ export function useChat() {
     arr.splice(lo, 0, msg);
   }
 
-  async function sendMessageTo(conversationId: string, content: string, replyMessageId?: string | null, styles?: Array<{ st: string; start: number; len: number }>) {
+  async function sendMessageTo(conversationId: string, content: string, replyMessageId?: string | null, styles?: Array<{ st: string; start: number; len: number }>, mentions?: Array<{ pos: number; uid: string; len: number }>) {
     if (!content.trim()) return;
     sendingMsg.value = true;
     try {
@@ -573,6 +573,7 @@ export function useChat() {
       const payload: Record<string, unknown> = { content };
       if (replyMessageId) payload.replyMessageId = replyMessageId;
       if (styles && styles.length > 0) payload.styles = styles;
+      if (mentions && mentions.length > 0) payload.mentions = mentions;
       const res = await api.post(`/conversations/${conversationId}/messages`, payload);
       if (conversationId === selectedConvId.value) {
         if (!messages.value.find(m => m.id === res.data.id)) {
@@ -752,6 +753,21 @@ export function useChat() {
 
     socket.on('chat:unpinned', () => {
       fetchConversations({ bypassCache: true });
+    });
+
+    socket.on('conversation:updated', (data: any) => {
+      const idx = conversations.value.findIndex(c => c.id === data.id);
+      if (idx !== -1) {
+        const conv = conversations.value[idx];
+        conv.groupName = data.groupName ?? conv.groupName;
+        conv.groupAvatarUrl = data.groupAvatarUrl ?? conv.groupAvatarUrl;
+        conv.groupMembersCount = data.groupMembersCount ?? conv.groupMembersCount;
+      }
+      if (selectedConvId.value === data.id && selectedConv.value) {
+        selectedConv.value.groupName = data.groupName ?? selectedConv.value.groupName;
+        selectedConv.value.groupAvatarUrl = data.groupAvatarUrl ?? selectedConv.value.groupAvatarUrl;
+        selectedConv.value.groupMembersCount = data.groupMembersCount ?? selectedConv.value.groupMembersCount;
+      }
     });
 
     // ─── WAVE 1 — KH đang gõ tin nhắn ─────────────────────────────────────

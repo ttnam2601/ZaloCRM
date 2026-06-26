@@ -732,6 +732,66 @@ export function attachZaloListener(ctx: ListenerContext): void {
         }
       }
 
+      if (type === 'update_avatar' && (event.data?.avt || event.data?.fullAvt)) {
+        const groupAvatarUrl = event.data.avt || event.data.fullAvt;
+        const updated = await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { groupAvatarUrl },
+        });
+        io?.emit('conversation:updated', updated);
+
+        let actorName = 'Một thành viên';
+        const actorId = event?.actorId || event?.creatorId;
+        if (actorId) {
+          const [friend, contact, acc] = await Promise.all([
+            prisma.friend.findFirst({
+              where: { zaloUidInNick: actorId },
+              select: { aliasInNick: true, zaloDisplayName: true }
+            }),
+            prisma.contact.findFirst({
+              where: { zaloUid: actorId },
+              select: { crmName: true, fullName: true }
+            }),
+            prisma.zaloAccount.findFirst({
+              where: { zaloUid: actorId },
+              select: { displayName: true }
+            })
+          ]);
+          const name = friend?.aliasInNick || friend?.zaloDisplayName || contact?.crmName || contact?.fullName || acc?.displayName;
+          if (name) actorName = name;
+        }
+        logText = `${actorName} đã đổi ảnh đại diện nhóm`;
+      } else if (type === 'update' && event.data?.groupName) {
+        const groupName = event.data.groupName;
+        const updated = await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { groupName },
+        });
+        io?.emit('conversation:updated', updated);
+
+        let actorName = 'Một thành viên';
+        const actorId = event?.actorId || event?.creatorId;
+        if (actorId) {
+          const [friend, contact, acc] = await Promise.all([
+            prisma.friend.findFirst({
+              where: { zaloUidInNick: actorId },
+              select: { aliasInNick: true, zaloDisplayName: true }
+            }),
+            prisma.contact.findFirst({
+              where: { zaloUid: actorId },
+              select: { crmName: true, fullName: true }
+            }),
+            prisma.zaloAccount.findFirst({
+              where: { zaloUid: actorId },
+              select: { displayName: true }
+            })
+          ]);
+          const name = friend?.aliasInNick || friend?.zaloDisplayName || contact?.crmName || contact?.fullName || acc?.displayName;
+          if (name) actorName = name;
+        }
+        logText = `${actorName} đã đổi tên nhóm thành "${groupName}"`;
+      }
+
       if (logText) {
         const msgId = `sys-${Date.now()}-${randomUUID().slice(0, 8)}`;
         const now = new Date();
@@ -759,23 +819,6 @@ export function attachZaloListener(ctx: ListenerContext): void {
           },
           conversationId: conversation.id,
         });
-      }
-
-      // Realtime metadata updates from group_event updates
-      if (type === 'update_avatar' && (event.data?.avt || event.data?.fullAvt)) {
-        const groupAvatarUrl = event.data.avt || event.data.fullAvt;
-        const updated = await prisma.conversation.update({
-          where: { id: conversation.id },
-          data: { groupAvatarUrl },
-        });
-        io?.emit('conversation:updated', updated);
-      } else if (type === 'update' && event.data?.groupName) {
-        const groupName = event.data.groupName;
-        const updated = await prisma.conversation.update({
-          where: { id: conversation.id },
-          data: { groupName },
-        });
-        io?.emit('conversation:updated', updated);
       }
     } catch (err) {
       logger.error(`[zalo:${accountId}] group_event processing failed:`, err);

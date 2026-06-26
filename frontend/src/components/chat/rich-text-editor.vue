@@ -150,6 +150,27 @@
 
     <!-- Editor content -->
     <EditorContent :editor="editor" class="editor-content" />
+
+    <!-- Mentions Autocomplete Popover -->
+    <div
+      v-if="showSuggestions && suggestionProps && suggestionProps.items.length"
+      class="mention-suggestions"
+      :style="suggestionStyle"
+    >
+      <div
+        v-for="(item, index) in suggestionProps.items"
+        :key="item.uid"
+        class="mention-suggestion-item"
+        :class="{ active: index === suggestionIndex }"
+        @mousedown.prevent="selectSuggestion(Number(index))"
+      >
+        <v-avatar size="24" class="mr-2" color="primary">
+          <v-img v-if="item.avatar" :src="item.avatar" />
+          <span v-else class="text-caption text-white">{{ item.name.charAt(0).toUpperCase() }}</span>
+        </v-avatar>
+        <span class="mention-name">{{ item.name }}</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -229,13 +250,17 @@ const SIZE_OPTIONS = [
   { value: '22', label: 'Rất Lớn', preview: '20px' },
 ] as const;
 
+import Mention from '@tiptap/extension-mention';
+
 const props = withDefaults(defineProps<{
   modelValue: string;
   placeholder?: string;
   showToolbar?: boolean;
+  members?: Array<{ uid: string; name: string; avatar: string | null }>;
 }>(), {
   placeholder: 'Nhập tin nhắn...',
   showToolbar: false,
+  members: () => [],
 });
 
 const emit = defineEmits<{
@@ -246,6 +271,33 @@ const emit = defineEmits<{
 }>();
 
 const isFocused = ref(false);
+const showSuggestions = ref(false);
+const suggestionProps = ref<any>(null);
+const suggestionIndex = ref(0);
+
+const suggestionStyle = computed(() => {
+  if (!suggestionProps.value || !suggestionProps.value.clientRect) return {};
+  const rect = suggestionProps.value.clientRect();
+  if (!rect) return {};
+  const editorEl = editor.value?.view.dom;
+  if (!editorEl) return {};
+  const editorRect = editorEl.getBoundingClientRect();
+  return {
+    position: 'absolute' as const,
+    top: `${rect.bottom - editorRect.top + 5}px`,
+    left: `${rect.left - editorRect.left}px`,
+    zIndex: 1000,
+  };
+});
+
+function selectSuggestion(index: number) {
+  if (!suggestionProps.value || !suggestionProps.value.items) return;
+  const item = suggestionProps.value.items[index];
+  if (item && suggestionProps.value.command) {
+    suggestionProps.value.command({ id: item.uid, label: item.name });
+  }
+  showSuggestions.value = false;
+}
 
 const editor = useEditor({
   content: props.modelValue,
@@ -258,6 +310,51 @@ const editor = useEditor({
     Placeholder.configure({ placeholder: props.placeholder }),
     ZaloColorMark,
     ZaloSizeMark,
+    Mention.configure({
+      HTMLAttributes: {
+        class: 'mention',
+      },
+      suggestion: {
+        items: ({ query }: { query: string }) => {
+          return props.members
+            .filter(item => item.name.toLowerCase().includes(query.toLowerCase()))
+            .slice(0, 10);
+        },
+        render: () => {
+          return {
+            onStart: (props: any) => {
+              showSuggestions.value = true;
+              suggestionProps.value = props;
+              suggestionIndex.value = 0;
+            },
+            onUpdate: (props: any) => {
+              suggestionProps.value = props;
+            },
+            onKeyDown: (props: any) => {
+              if (props.event.key === 'ArrowUp') {
+                suggestionIndex.value = (suggestionIndex.value - 1 + suggestionProps.value.items.length) % suggestionProps.value.items.length;
+                props.event.preventDefault();
+                return true;
+              }
+              if (props.event.key === 'ArrowDown') {
+                suggestionIndex.value = (suggestionIndex.value + 1) % suggestionProps.value.items.length;
+                props.event.preventDefault();
+                return true;
+              }
+              if (props.event.key === 'Enter') {
+                selectSuggestion(suggestionIndex.value);
+                props.event.preventDefault();
+                return true;
+              }
+              return false;
+            },
+            onExit: () => {
+              showSuggestions.value = false;
+            },
+          };
+        },
+      },
+    }),
   ],
   editorProps: {
     handleKeyDown(_view, event) {
@@ -371,10 +468,12 @@ function insertText(text: string) {
 //   lst_1 / lst_2    → bullet / numbered list (apply per line)
 
 interface ZaloStyle { st: string; start: number; len: number }
+interface ZaloMention { pos: number; uid: string; len: number }
 interface TiptapMark { type: string; attrs?: Record<string, unknown> }
 interface TiptapNode {
   type: string;
   text?: string;
+  attrs?: Record<string, any>;
   marks?: TiptapMark[];
   content?: TiptapNode[];
 }
@@ -386,11 +485,11 @@ const MARK_TO_ZALO: Record<string, string> = {
   strike: 's',
 };
 
-function extractRichPayload(doc: TiptapNode | null): { text: string; styles: ZaloStyle[] } {
-  if (!doc) return { text: '', styles: [] };
+function extractRichPayload(doc: TiptapNode | null): { text: string; styles: ZaloStyle[]; mentions: ZaloMention[] } {
+  if (!doc) return { text: '', styles: [], mentions: [] };
   const styles: ZaloStyle[] = [];
+  const mentions: ZaloMention[] = [];
   let textBuf = '';
-  // Track list context — apply lst_1/lst_2 per line inside list nodes.
   let listType: 'bullet' | 'ordered' | null = null;
 
   function pushStyle(st: string, start: number, len: number) {
@@ -398,6 +497,17 @@ function extractRichPayload(doc: TiptapNode | null): { text: string; styles: Zal
   }
 
   function walkNode(node: TiptapNode, blockListType: typeof listType) {
+    if (node.type === 'mention') {
+      const start = textBuf.length;
+      const label = `@${node.attrs?.label || ''}`;
+      textBuf += label;
+      const len = label.length;
+      const uid = String(node.attrs?.id || '');
+      if (uid) {
+        mentions.push({ pos: start, uid, len });
+      }
+      return;
+    }
     if (node.type === 'text' && typeof node.text === 'string') {
       const start = textBuf.length;
       textBuf += node.text;
@@ -443,11 +553,11 @@ function extractRichPayload(doc: TiptapNode | null): { text: string; styles: Zal
   }
 
   walkNode(doc, listType);
-  return { text: textBuf, styles };
+  return { text: textBuf, styles, mentions };
 }
 
-function getRichPayload(): { text: string; styles: ZaloStyle[] } {
-  if (!editor.value) return { text: '', styles: [] };
+function getRichPayload(): { text: string; styles: ZaloStyle[]; mentions: ZaloMention[] } {
+  if (!editor.value) return { text: '', styles: [], mentions: [] };
   return extractRichPayload(editor.value.getJSON() as TiptapNode);
 }
 
@@ -705,6 +815,38 @@ onBeforeUnmount(() => { editor.value?.destroy(); });
 }
 .rich-text-editor { position: relative; }
 
+/* Mentions Autocomplete */
+.mention-suggestions {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--smax-grey-200, #ebedf0);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+  overflow-y: auto;
+  min-width: 180px;
+}
+.mention-suggestion-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.12s ease;
+  font-size: 13px;
+  color: var(--smax-text, #212121);
+}
+.mention-suggestion-item:hover,
+.mention-suggestion-item.active {
+  background: var(--smax-primary-soft, #e3f2fd);
+  color: var(--smax-primary, #2962ff);
+}
+.mention-name {
+  font-weight: 500;
+}
+
 /* Editor content */
 .editor-content :deep(.tiptap-input) {
   padding: 8px 13px;
@@ -747,5 +889,12 @@ onBeforeUnmount(() => { editor.value?.destroy(); });
   border-radius: 7px;
   font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
   margin: 4px 0;
+}
+.editor-content :deep(.tiptap-input .mention) {
+  background: var(--smax-primary-soft, #e3f2fd);
+  color: var(--smax-primary, #2962ff);
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-weight: 600;
 }
 </style>

@@ -93,13 +93,13 @@ const allMessages = computed(() => {
   return [...messages.value, ...pending];
 });
 
-async function handleSend(content: string, replyMessageId?: string | null) {
+async function handleSend(content: string, replyMessageId?: string | null, styles?: any[], mentions?: any[]) {
   if (!selectedConvId.value) return;
   if (!navigator.onLine) {
     enqueue(selectedConvId.value, content);
     return;
   }
-  await sendMessage(content, replyMessageId);
+  await sendMessage(content, replyMessageId, styles, mentions);
 }
 
 // Flush queue when coming back online

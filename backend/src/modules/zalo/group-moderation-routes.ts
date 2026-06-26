@@ -330,13 +330,21 @@ export async function groupModerationRoutes(app: FastifyInstance) {
       // Fetch detailed member profiles from Zalo SDK if possible
       let detailedMembers: any[] = [];
       try {
-        const res = await zaloOps.getGroupMembersInfo(accountId, groupId) as any;
-        if (Array.isArray(res)) {
-          detailedMembers = res;
-        } else if (res && Array.isArray(res.members)) {
-          detailedMembers = res.members;
-        } else if (res && typeof res === 'object') {
-          detailedMembers = Object.values(res);
+        const memberIds = rawMembers.map((m: any) => {
+          return typeof m === 'string' ? m : String(m?.uid || m?.userId || m?.id || '');
+        }).filter(Boolean);
+
+        if (memberIds.length > 0) {
+          const res = await zaloOps.getGroupMembersInfo(accountId, memberIds) as any;
+          if (res && res.profiles && typeof res.profiles === 'object') {
+            detailedMembers = Object.values(res.profiles);
+          } else if (Array.isArray(res)) {
+            detailedMembers = res;
+          } else if (res && Array.isArray(res.members)) {
+            detailedMembers = res.members;
+          } else if (res && typeof res === 'object') {
+            detailedMembers = Object.values(res);
+          }
         }
       } catch (err) {
         logger.warn(`[getGroupMembers] getGroupMembersInfo failed: ${(err as Error).message}`);
@@ -347,7 +355,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
         const uid = String(m?.uid || m?.userId || m?.id || m?.zaloId || '');
         if (uid) {
           detailMap.set(uid, {
-            name: m?.name || m?.dName || m?.displayName || m?.zaloName || '',
+            name: m?.displayName || m?.name || m?.dName || m?.zaloName || '',
             avatar: m?.avatar || m?.avatarUrl || m?.avt || m?.fullAvt || null,
           });
         }

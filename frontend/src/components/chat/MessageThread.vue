@@ -461,6 +461,7 @@
               v-model="inputText"
               :placeholder="inputPlaceholder"
               :show-toolbar="formatBarVisible"
+              :members="groupMembers"
               class="input-editor"
               @submit="handleSend"
               @typing="onTypingEvent"
@@ -822,9 +823,13 @@ const props = defineProps<{
   editingMessage?: Message | null;
   typingUsers?: { userId: string; userName: string }[];
 }>();
-
 const emit = defineEmits<{
-  send: [content: string, replyMessageId?: string | null, styles?: Array<{ st: string; start: number; len: number }>];
+  send: [
+    content: string,
+    replyMessageId?: string | null,
+    styles?: Array<{ st: string; start: number; len: number }>,
+    mentions?: Array<{ pos: number; uid: string; len: number }>
+  ];
   'toggle-contact-panel': [];
   'ask-ai': [];
   'add-reaction': [msgId: string, reaction: string];
@@ -903,6 +908,21 @@ async function onLinkedParent() {
   emit('refresh-thread');
 }
 const editorRef = ref<InstanceType<typeof RichTextEditor> | null>(null);
+const groupMembers = ref<Array<{ uid: string; name: string; avatar: string | null }>>([]);
+
+async function loadGroupMembers() {
+  groupMembers.value = [];
+  if (props.conversation?.threadType !== 'group') return;
+  const accountId = props.conversation.zaloAccount?.id;
+  const groupId = props.conversation.externalThreadId;
+  if (!accountId || !groupId) return;
+  try {
+    const res = await api.get(`/zalo-accounts/${accountId}/groups/${groupId}/members`);
+    groupMembers.value = res.data?.members ?? [];
+  } catch (err) {
+    console.error('Failed to load group members for mentions:', err);
+  }
+}
 const currentTypers = computed(() => props.typingUsers || []);
 
 // 2026-05-22 anh chốt Zalo native UX: chỉ tin OUTGOING CUỐI CÙNG mới hiện
@@ -2123,14 +2143,15 @@ function handleSend() {
 
   // 2026-05-21 fix: lấy rich payload {text, styles} từ editor để gửi format đi Zalo.
   // Nếu không có styles → behaves như plain text (backward compat).
-  const rich = (editorRef.value as any)?.getRichPayload?.() || { text: inputText.value, styles: [] };
+  const rich = (editorRef.value as any)?.getRichPayload?.() || { text: inputText.value, styles: [], mentions: [] };
   const textToSend = rich.text || inputText.value;
   const styles = Array.isArray(rich.styles) && rich.styles.length > 0 ? rich.styles : undefined;
+  const mentions = Array.isArray(rich.mentions) && rich.mentions.length > 0 ? rich.mentions : undefined;
 
   if (props.editingMessage) {
     emit('edit-message', props.editingMessage.id, textToSend);
   } else {
-    emit('send', textToSend, props.replyingTo?.id ?? null, styles);
+    emit('send', textToSend, props.replyingTo?.id ?? null, styles, mentions);
   }
   inputText.value = '';
   editorRef.value?.clear();
@@ -2200,7 +2221,8 @@ watch(() => props.conversation?.id, async (newId) => {
   if (typeof window !== 'undefined' && window.innerWidth >= 768) {
     setTimeout(() => editorRef.value?.focus(), 80);
   }
-});
+  loadGroupMembers();
+}, { immediate: true });
 
 // Auto-apply AI suggestion ngay khi generate xong (transition empty → non-empty).
 // User chỉ cần bấm ✨ → text vào input + caret cuối → Enter gửi luôn.
