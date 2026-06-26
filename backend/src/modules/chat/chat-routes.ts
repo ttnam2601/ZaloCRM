@@ -71,6 +71,7 @@ function buildReplyQuote(message: {
 // Profile (gender / phone / birthday) hiếm đổi → 5min cooldown đủ.
 const profileTouchCooldown = new Map<string, number>();
 const PROFILE_TOUCH_COOLDOWN_MS = 5 * 60_000;
+const groupHistorySyncCooldown = new Map<string, number>();
 
 export async function chatRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authMiddleware);
@@ -379,7 +380,7 @@ export async function chatRoutes(app: FastifyInstance) {
             // Primary sort by Zalo Snowflake numeric (match 100% Zalo Web), sentAt fallback
             // cho CRM-sent in-flight messages chưa nhận echo zaloMsgId.
             orderBy: [{ zaloMsgIdNum: { sort: 'desc', nulls: 'last' } }, { sentAt: 'desc' }],
-            select: { id: true, zaloMsgId: true, senderUid: true, senderName: true, content: true, contentType: true, senderType: true, sentAt: true, isDeleted: true, editedAt: true, reactions: { select: { emoji: true, reactorId: true } } },
+            select: { id: true, zaloMsgId: true, senderUid: true, senderName: true, content: true, contentType: true, senderType: true, sentAt: true, isDeleted: true, editedAt: true, reactions: { select: { emoji: true, reactorId: true, reactorName: true, reactorSource: true } } },
           },
         },
         orderBy: orderByClause,
@@ -775,10 +776,101 @@ export async function chatRoutes(app: FastifyInstance) {
       where: { id, orgId: user.orgId },
       select: {
         id: true,
-        zaloAccount: { select: { privacyMode: true, ownerUserId: true } },
+        threadType: true,
+        externalThreadId: true,
+        zaloAccountId: true,
+        zaloAccount: { select: { id: true, privacyMode: true, ownerUserId: true } },
       },
     });
     if (!conversation) return reply.status(404).send({ error: 'Conversation not found' });
+
+    // Sync group history & info on open
+    if (conversation.threadType === 'group' && conversation.externalThreadId) {
+      const now = Date.now();
+      const lastSync = groupHistorySyncCooldown.get(conversation.id) || 0;
+      if (now - lastSync > 15000) { // 15s cooldown
+        groupHistorySyncCooldown.set(conversation.id, now);
+        const api = zaloPool.getApi(conversation.zaloAccountId);
+        if (api) {
+          // 1. Sync Group Info
+          if (typeof api.getGroupInfo === 'function') {
+            try {
+              const result = await api.getGroupInfo(conversation.externalThreadId);
+              const info = result?.gridInfoMap?.[conversation.externalThreadId];
+              if (info) {
+                const members = info.memVerList || info.memList || info.members;
+                const groupName = info.name || '';
+                const groupAvatarUrl = info.avt || info.fullAvt || info.avatar || '';
+                const groupMembersCount = Array.isArray(members) ? members.length : (info.totalMember || null);
+
+                const currentConv = await prisma.conversation.findUnique({
+                  where: { id: conversation.id },
+                  select: { groupName: true, groupAvatarUrl: true, groupMembersCount: true },
+                });
+
+                if (!currentConv || currentConv.groupName !== groupName || currentConv.groupAvatarUrl !== groupAvatarUrl || currentConv.groupMembersCount !== groupMembersCount) {
+                  const updated = await prisma.conversation.update({
+                    where: { id: conversation.id },
+                    data: { groupName, groupAvatarUrl, groupMembersCount },
+                  });
+                  const io = (app as any).io as Server;
+                  io?.emit('conversation:updated', updated);
+                }
+              }
+            } catch (err) {
+              logger.warn(`[touch-profile-group] getGroupInfo failed: ${(err as Error).message}`);
+            }
+          }
+
+          // 2. Sync Group Chat History
+          if (typeof api.getGroupChatHistory === 'function') {
+            try {
+              const history = await api.getGroupChatHistory(conversation.externalThreadId, 30);
+              const rawMsgs = history?.groupMsgs || history?.data?.groupMsgs || [];
+              if (Array.isArray(rawMsgs) && rawMsgs.length > 0) {
+                const { detectContentType, extractAlbumInfo } = await import('../zalo/zalo-message-helpers.js');
+                const { handleIncomingMessage } = await import('./message-handler.js');
+
+                for (const msg of rawMsgs) {
+                  try {
+                    const zaloMsgId = String(msg?.data?.msgId || msg?.data?.cliMsgId || '');
+                    if (!zaloMsgId) continue;
+
+                    const rawContent = msg?.data?.content;
+                    const content = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent || '');
+                    const contentType = detectContentType(msg?.data?.msgType, rawContent);
+                    const album = extractAlbumInfo(contentType, rawContent);
+
+                    await handleIncomingMessage({
+                      accountId: conversation.zaloAccountId,
+                      senderUid: String(msg?.data?.uidFrom || ''),
+                      senderName: msg?.data?.dName || '',
+                      content,
+                      contentType,
+                      msgId: zaloMsgId,
+                      timestamp: parseInt(msg?.data?.ts || String(Date.now())),
+                      isSelf: Boolean(msg?.isSelf),
+                      threadId: conversation.externalThreadId,
+                      threadType: 'group',
+                      attachments: [],
+                      quote: msg?.data?.quote,
+                      albumKey: album.albumKey,
+                      albumIndex: album.albumIndex,
+                      albumTotal: album.albumTotal,
+                      isBackfill: true,
+                    });
+                  } catch (e) {
+                    // ignore
+                  }
+                }
+              }
+            } catch (err) {
+              logger.warn(`[sync-group-history] failed: ${(err as Error).message}`);
+            }
+          }
+        }
+      }
+    }
 
     // Phase Riêng Tư 2026-05-22: redact content nếu conv main-nick + viewer không own + chưa unlock
     const { buildPrivacyContext, redactMessage } = await import('../privacy/redact.js');
@@ -814,7 +906,7 @@ export async function chatRoutes(app: FastifyInstance) {
           albumKey: true,
           albumIndex: true,
           albumTotal: true,
-          reactions: { select: { emoji: true, reactorId: true } },
+          reactions: { select: { emoji: true, reactorId: true, reactorName: true, reactorSource: true } },
         },
       }),
       prisma.message.count({ where: { conversationId: id } }),

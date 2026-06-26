@@ -654,13 +654,99 @@ export function attachZaloListener(ctx: ListenerContext): void {
   });
 
   // Group system events: member join/leave/kick, name change, etc.
-  listener.on('group_event', (event: any) => {
+  listener.on('group_event', async (event: any) => {
     logger.info(`[zalo:${accountId}] Group event: type=${event?.type ?? 'unknown'}`, {
-      groupId: event?.groupId,
-      actorId: event?.actorId,
-      members: event?.members,
+      groupId: event?.groupId || event?.threadId,
+      actorId: event?.actorId || event?.creatorId,
+      members: event?.members || event?.data?.updateMembers,
     });
-    // Future: store as system message in the group conversation
+    try {
+      const type = event?.type;
+      const groupId = event?.groupId || event?.threadId;
+      if (!type || !groupId) return;
+
+      const conversation = await prisma.conversation.findFirst({
+        where: { zaloAccountId: accountId, externalThreadId: groupId },
+        select: { id: true, orgId: true },
+      });
+      if (!conversation) return;
+
+      let logText = '';
+      if (type === 'join') {
+        const members = event.data?.updateMembers || [];
+        if (members.length > 0) {
+          const names = members.map((m: any) => m.dName || 'Thành viên mới').join(', ');
+          logText = `${names} đã tham gia nhóm`;
+        } else if (event.isSelf) {
+          logText = `Bạn đã tham gia nhóm`;
+        } else {
+          logText = `Một thành viên đã tham gia nhóm`;
+        }
+      } else if (type === 'leave') {
+        const members = event.data?.updateMembers || [];
+        if (members.length > 0) {
+          const names = members.map((m: any) => m.dName || 'Thành viên').join(', ');
+          logText = `${names} đã rời nhóm`;
+        } else if (event.isSelf) {
+          logText = `Bạn đã rời nhóm`;
+        } else {
+          logText = `Một thành viên đã rời nhóm`;
+        }
+      } else if (type === 'remove_member') {
+        const members = event.data?.updateMembers || [];
+        if (members.length > 0) {
+          const names = members.map((m: any) => m.dName || 'Thành viên').join(', ');
+          logText = `${names} đã bị xóa khỏi nhóm`;
+        } else {
+          logText = `Một thành viên đã bị xóa khỏi nhóm`;
+        }
+      }
+
+      if (logText) {
+        const msgId = `sys-${Date.now()}-${randomUUID().slice(0, 8)}`;
+        const message = await prisma.message.create({
+          data: {
+            id: randomUUID(),
+            conversationId: conversation.id,
+            zaloMsgId: msgId,
+            senderType: 'system',
+            senderName: 'Hệ thống',
+            content: logText,
+            contentType: 'system_event',
+            attachments: [],
+            sentAt: new Date(),
+          },
+        });
+
+        io?.emit('chat:message', {
+          accountId,
+          message: {
+            ...message,
+            zaloMsgIdNum: null,
+          },
+          conversationId: conversation.id,
+        });
+      }
+
+      // Realtime metadata updates from group_event updates
+      if (type === 'update_avatar' && (event.data?.avt || event.data?.fullAvt)) {
+        const groupAvatarUrl = event.data.avt || event.data.fullAvt;
+        const updated = await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { groupAvatarUrl },
+        });
+        io?.emit('conversation:updated', updated);
+      } else if (type === 'update' && event.data?.groupName) {
+        const groupName = event.data.groupName;
+        const updated = await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { groupName },
+        });
+        io?.emit('conversation:updated', updated);
+      }
+    } catch (err) {
+      logger.error(`[zalo:${accountId}] group_event processing failed:`, err);
+    }
   });
 
   // Note: duplicate 'friend_event' listener đã xoá ở chỗ này (legacy stub).

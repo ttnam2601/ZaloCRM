@@ -765,13 +765,13 @@ const reactionPopupReactions = ref<Array<{ emoji: string; count: number; reacted
 const reactionPopupDetails = ref<Array<{ userId: string; userName?: string | null; emoji: string; source?: 'crm' | 'zalo' }>>([]);
 function onOpenReactionDetail(payload: { reactions: any[]; message: Message }) {
   reactionPopupReactions.value = payload.reactions;
-  // Build details từ message.reactions (raw row per-user per-emoji)
-  const raw = (payload.message as any).reactions ?? [];
+  // Build details từ message.reactionDetails (raw row per-user per-emoji)
+  const raw = (payload.message as any).reactionDetails ?? [];
   reactionPopupDetails.value = raw.map((r: any) => ({
-    userId: r.reactorId || r.userId || '',
-    userName: r.reactorName || r.userName || null,
+    userId: r.userId || '',
+    userName: r.userName || null,
     emoji: r.emoji,
-    source: r.reactorSource || r.source,
+    source: r.source,
   }));
   reactionPopupOpen.value = true;
 }

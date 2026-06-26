@@ -59,7 +59,7 @@ export interface ReplyMessageRef {
 
 interface RawMessage extends Omit<Message, 'reactions' | 'reply'> {
   quote?: ReplyMessageRef | null;
-  reactions?: Array<{ emoji: string; reactorId: string; count?: number; reacted?: boolean }>;
+  reactions?: Array<{ emoji: string; reactorId: string; reactorName?: string | null; reactorSource?: string; count?: number; reacted?: boolean }>;
 }
 
 export interface FriendshipInfo {
@@ -136,6 +136,7 @@ export interface Message {
   albumTotal: number | null;
   reply?: ReplyMessageRef | null;
   reactions?: MessageReactionView[];
+  reactionDetails?: Array<{ userId: string; userName?: string | null; emoji: string; source?: 'crm' | 'zalo' }>;
   // Edit audit (2026-05-21) — set khi sale sửa tin trên CRM. Edit chỉ áp dụng local, không sync Zalo.
   originalContent?: string | null;
   editedAt?: string | null;
@@ -368,6 +369,12 @@ export function useChat() {
       ...base,
       reply,
       reactions: Array.from(counts.entries()).map(([emoji, count]) => ({ emoji, count, reacted: myEmojis.has(emoji) })),
+      reactionDetails: message.reactions?.map(r => ({
+        userId: r.reactorId,
+        userName: r.reactorName || null,
+        emoji: r.emoji,
+        source: (r.reactorSource || 'crm') as 'crm' | 'zalo',
+      })) || [],
     };
   }
 
@@ -675,7 +682,7 @@ export function useChat() {
       }
     });
 
-    socket.on('chat:reactions', (data: { messageId?: string; msgId?: string; zaloMsgId?: string; reactions: { userId: string; userName: string; reaction: string; action: 'add' | 'remove'; totalCount?: number }[] }) => {
+    socket.on('chat:reactions', (data: { messageId?: string; msgId?: string; zaloMsgId?: string; reactions: { userId: string; userName: string; reaction: string; action: 'add' | 'remove'; totalCount?: number; source?: 'crm' | 'zalo' }[] }) => {
       const msg = messages.value.find(m => m.id === data.messageId || m.id === data.msgId || m.zaloMsgId === data.zaloMsgId);
       if (!msg) return;
       // Merge với reactions hiện có thay vì replace — tránh mất emoji của user khác
@@ -712,6 +719,29 @@ export function useChat() {
         }
       }
       msg.reactions = Array.from(counts.entries()).map(([emoji, count]) => ({ emoji, count, reacted: myEmojis.has(emoji) }));
+
+      // Update reactionDetails real-time
+      if (!msg.reactionDetails) {
+        msg.reactionDetails = [];
+      }
+      for (const r of data.reactions) {
+        if (r.action === 'add') {
+          const existing = msg.reactionDetails.find(rd => rd.userId === r.userId && rd.emoji === r.reaction);
+          if (existing) {
+            existing.userName = r.userName;
+            existing.source = r.source || 'crm';
+          } else {
+            msg.reactionDetails.push({
+              userId: r.userId,
+              userName: r.userName,
+              emoji: r.reaction,
+              source: r.source || 'crm',
+            });
+          }
+        } else if (r.action === 'remove') {
+          msg.reactionDetails = msg.reactionDetails.filter(rd => !(rd.userId === r.userId && rd.emoji === r.reaction));
+        }
+      }
     });
 
     // Pin/unpin: bypass cache vì pin state đã đổi server-side, cache cũ sẽ flicker
