@@ -32,15 +32,6 @@ export async function groupRoutes(app: FastifyInstance) {
     } catch (err) { return handleError(reply, err, 'getGroupInfo'); }
   });
 
-  app.get<{ Params: { accountId: string; groupId: string } }>(`${BASE}/:groupId/members`, async (request, reply) => {
-    const { accountId, groupId } = request.params;
-    try {
-      await resolveAccount(accountId, request.user!.orgId);
-      if (!(await checkAccess(request, reply, accountId, 'read'))) return;
-      return { members: await zaloOps.getGroupMembersInfo(accountId, groupId) };
-    } catch (err) { return handleError(reply, err, 'getGroupMembersInfo'); }
-  });
-
   // ── Group CRUD ──────────────────────────────────────────────────────────────
 
   app.post<{ Params: { accountId: string }; Body: { name: string; memberIds: string[] } }>(BASE, async (request, reply) => {
