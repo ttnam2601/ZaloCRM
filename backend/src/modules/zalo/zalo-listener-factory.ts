@@ -86,6 +86,9 @@ async function handleZaloReaction(accountId: string, io: Server | null, reaction
       reactorName = 'Người dùng';
     }
 
+    // Sanitize: never persist 'Người dùng' placeholder — store null so future lookups can resolve it.
+    const finalReactorName = (reactorName && reactorName !== 'Người dùng') ? reactorName : null;
+
     // Phase A v3 (2026-05-21) — selective self-echo guard via reaction-echo-cache.
     // BAD fix cũ: skip tất cả reactorUid === ownNickUid → SAI vì cũng skip genuine
     // reaction từ Zalo App của anh (cùng UID).
@@ -111,13 +114,14 @@ async function handleZaloReaction(accountId: string, io: Server | null, reaction
             emoji: displayEmoji,
           },
         },
-        update: { reactorName: reactorName || undefined },
+        // Only update reactorName if we have a real name (don't overwrite a previously resolved name with null)
+        update: finalReactorName ? { reactorName: finalReactorName } : {},
         create: {
           id: randomUUID(),
           messageId: message.id,
           reactorId: reactorZaloUid,
           reactorSource: 'zalo',
-          reactorName: reactorName || null,
+          reactorName: finalReactorName,
           emoji: displayEmoji,
         },
       });
@@ -139,7 +143,7 @@ async function handleZaloReaction(accountId: string, io: Server | null, reaction
       msgId: message.id,
       reactions: [{
         userId: reactorZaloUid,
-        userName: reactorName,
+        userName: finalReactorName || reactorName,
         reaction: displayEmoji,
         action: (!rawIcon || rType < 0) ? 'remove' : 'add',
         source: 'zalo',
