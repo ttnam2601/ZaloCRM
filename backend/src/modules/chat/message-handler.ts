@@ -70,8 +70,9 @@ export interface HandleMessageResult {
   contactId: string | null;
 }
 
-// 'file' (PDF/doc) is intentionally excluded — PDFs are NOT mirrored to cloud storage.
-const MIRROR_CONTENT_TYPES = new Set(['image', 'video', 'gif', 'voice', 'audio']);
+// Only image and audio types are mirrored to cloud storage.
+// 'video' and 'file' (PDF/doc) are intentionally excluded — sent via Zalo CDN only.
+const MIRROR_CONTENT_TYPES = new Set(['image', 'gif', 'voice', 'audio']);
 const MEDIA_URL_FIELDS = ['hdUrl', 'href', 'normalUrl', 'fileUrl', 'url', 'thumbUrl', 'thumb', 'thumbnail'] as const;
 
 function safeParseJsonObject(value: string): Record<string, unknown> | null {

@@ -1,8 +1,8 @@
 /**
  * chat-attachment-routes.ts — Upload chat attachments (image/video) and send via Zalo.
  * Accepts multipart form with 1+ files + optional caption.
- * Flow: validate → save to tmp → upload image/video to MinIO/R2 → call zca-js sendImage/sendVideo with local path → persist Message rows.
- * NOTE: PDF and other document files are sent via Zalo only (NOT mirrored to cloud storage).
+ * Flow: validate → save to tmp → upload IMAGE to R2/MinIO → call zca-js sendImage/sendVideo/sendFile with local path → persist Message rows.
+ * NOTE: Video, audio, PDF and other documents are sent via Zalo only (NOT mirrored to cloud storage).
  */
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'node:crypto';
@@ -131,8 +131,8 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
           const tmpPath = path.join(tmpRoot, `${i}-${f.filename || 'upload'}`);
           await writeFile(tmpPath, f.buffer);
           tmpPaths[i] = tmpPath;
-          // Only mirror images and videos to cloud storage — PDFs/docs are NOT uploaded to R2.
-          if (f.kind === 'image' || f.kind === 'video') {
+          // Only mirror IMAGES to cloud storage — video, audio, PDF are NOT uploaded to R2.
+          if (f.kind === 'image') {
             mirrors[i] = await uploadBuffer(f.buffer, f.mimeType, f.filename);
           }
         }));
@@ -180,7 +180,7 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
           }
         }
 
-        // Send videos one-by-one using native sendVideo
+        // Send videos one-by-one (video NOT mirrored to cloud storage)
         for (const i of videoIndexes) {
           zaloRateLimiter.recordSend(conversation.zaloAccountId);
           let generatedThumbnail: Awaited<ReturnType<typeof generateThumbnail>> | null = null;
@@ -189,6 +189,7 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
             generatedThumbnail = await generateThumbnail(tmpPaths[i]);
             const thumbnailBuffer = await readFile(generatedThumbnail.path);
             const baseName = path.parse(files[i].filename || 'video').name || 'video';
+            // Thumbnail is an image (jpeg) → still upload to R2
             thumbnailMirror = await uploadBuffer(thumbnailBuffer, 'image/jpeg', `${baseName}-thumbnail.jpg`);
           } catch (err) {
             logger.warn('[chat-attachment] Video thumbnail generation failed:', err);
@@ -203,8 +204,8 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
               message: caption,
             });
             const zaloMsgId = String((sendResult as any)?.msgId || (sendResult as any)?.data?.msgId || '');
-            const mirror = mirrors[i];
-            const thumbUrl = thumbnailMirror?.url ?? mirror.url;
+            const thumbUrl = thumbnailMirror?.url ?? null;
+            const f = files[i];
             const msg = await prisma.message.create({
               data: {
                 id: randomUUID(),
@@ -215,11 +216,9 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
                 senderUid: conversation.zaloAccount.zaloUid || '',
                 senderName: 'Staff',
                 content: JSON.stringify({
-                  href: mirror.url,
-                  thumb: thumbUrl,
-                  thumbUrl,
-                  thumbnail: thumbUrl,
-                  size: mirror.size,
+                  ...(thumbUrl ? { thumb: thumbUrl, thumbUrl, thumbnail: thumbUrl } : {}),
+                  name: f.filename,
+                  size: f.size,
                 }),
                 contentType: 'video',
                 sentAt: new Date(),
@@ -238,8 +237,8 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
               io,
             );
             const zaloMsgId = String(sendResult?.msgId || sendResult?.data?.msgId || '');
-            const mirror = mirrors[i];
-            const thumbUrl = thumbnailMirror?.url ?? mirror.url;
+            const thumbUrl = thumbnailMirror?.url ?? null;
+            const f = files[i];
             const msg = await prisma.message.create({
               data: {
                 id: randomUUID(),
@@ -250,11 +249,9 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
                 senderUid: conversation.zaloAccount.zaloUid || '',
                 senderName: 'Staff',
                 content: JSON.stringify({
-                  href: mirror.url,
-                  thumb: thumbUrl,
-                  thumbUrl,
-                  thumbnail: thumbUrl,
-                  size: mirror.size,
+                  ...(thumbUrl ? { thumb: thumbUrl, thumbUrl, thumbnail: thumbUrl } : {}),
+                  name: f.filename,
+                  size: f.size,
                 }),
                 contentType: 'video',
                 sentAt: new Date(),

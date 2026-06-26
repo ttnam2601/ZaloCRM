@@ -7,8 +7,8 @@
  *   Cloudflare R2      : {S3_PUBLIC_URL}/{key}  (set S3_OMIT_BUCKET_IN_URL=true)
  *
  * Image-only mirror policy:
- *   Only image/* MIME types are mirrored to R2/S3 storage.
- *   PDF and other binary documents are NOT uploaded to cloud storage.
+ *   Only image/* MIME types (jpg, png, webp, gif) are mirrored to R2/S3 storage.
+ *   Video, audio, PDF and other binary documents are NOT uploaded to cloud storage.
  */
 import { Client } from 'minio';
 import { randomUUID } from 'node:crypto';
@@ -35,18 +35,12 @@ export const minioClient = new Client({
 
 const BUCKET = config.s3Bucket;
 
-/** MIME types that are allowed to be uploaded to cloud storage (images only, no PDF). */
+/** MIME types that are allowed to be uploaded to cloud storage (images only). */
 const ALLOWED_STORAGE_MIMES = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
   'image/gif',
-  'video/mp4',
-  'video/quicktime',
-  'video/webm',
-  'audio/mpeg',
-  'audio/mp4',
-  'audio/ogg',
 ]);
 
 /** Returns true if this MIME type should be mirrored to cloud storage. */
