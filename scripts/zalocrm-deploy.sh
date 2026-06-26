@@ -40,6 +40,45 @@ env_val() {  # đọc giá trị KEY từ .env; rỗng nếu chưa có .env / kh
 }
 gen() { openssl rand -hex "${1:-32}"; }
 
+# ── Kiểm tra & né port trùng ──────────────────────────────────────────────────
+# port_in_use PORT → 0 nếu CÓ gì đó đang LISTEN ở 127.0.0.1:PORT.
+# Dùng /dev/tcp của bash (chạy được Linux/macOS/Git Bash trên Windows); dự phòng
+# bằng container Docker khác đang publish port đó.
+port_in_use() {
+  (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && { exec 3>&- 3<&- 2>/dev/null; return 0; }
+  docker ps --format '{{.Ports}}' 2>/dev/null | grep -qE "(^|[^0-9]):$1->" && return 0
+  return 1
+}
+# find_free_port PORT → in ra port trống đầu tiên ≥ PORT.
+find_free_port() {
+  local p="$1"
+  while port_in_use "$p"; do p=$((p+1)); [ "$p" -gt 65000 ] && die "Không tìm được port trống từ $1."; done
+  echo "$p"
+}
+# app_port → port host của app (APP_PORT trong .env, mặc định PORT_DEFAULT).
+app_port() { local p; p="$(env_val APP_PORT)"; echo "${p:-$PORT_DEFAULT}"; }
+
+# ensure_ports — với từng dịch vụ, nếu port mặc định bận thì nhảy sang port trống
+# rồi GHI vào .env (compose đọc ${APP_PORT}…). Cập nhật URL theo port mới. Chỉ gọi
+# lúc TẠO .env (cài mới) — bản đang chạy giữ nguyên port trong .env (chính nó giữ port).
+ensure_ports() {
+  log "Kiểm tra port trống cho các dịch vụ (app/db/redis/minio)…"
+  local changed=0 pair key def cur free
+  for pair in "APP_PORT:3080" "DB_PORT:5433" "REDIS_PORT:6379" "MINIO_PORT:9000" "MINIO_CONSOLE_PORT:9001"; do
+    key="${pair%%:*}"; def="${pair##*:}"
+    cur="$(env_val "$key")"; cur="${cur:-$def}"
+    free="$(find_free_port "$cur")"
+    if [ "$free" != "$cur" ]; then warn "Port $cur ($key) đang bận → dùng $free."; changed=1; fi
+    set_env "$key" "$free"
+  done
+  # APP_PORT / MINIO_PORT có thể đổi → cập nhật URL công khai cho khớp.
+  local appp miniop; appp="$(env_val APP_PORT)"; miniop="$(env_val MINIO_PORT)"
+  set_env APP_URL       "http://localhost:${appp}"
+  set_env CRM_LOGIN_URL "http://localhost:${appp}"
+  set_env S3_PUBLIC_URL "http://localhost:${miniop}/zalocrm-attachments"
+  [ "$changed" = 1 ] && warn "Đã đổi port để né trùng — chi tiết trong .env." || ok "Các port mặc định đều trống."
+}
+
 # ── Pre-flight ────────────────────────────────────────────────────────────────
 need docker; need openssl
 docker compose version >/dev/null 2>&1 || die "Cần Docker Compose v2 (lệnh 'docker compose')."
@@ -55,8 +94,12 @@ ensure_env() {
   [ -f .env.example ] || die "Thiếu .env.example để tạo .env."
   log "Chưa có .env — tạo mới + sinh secret ngẫu nhiên…"
   cp .env.example .env
-  local appurl="${APP_URL:-http://localhost:${PORT_DEFAULT}}"
-  local s3pub="${S3_PUBLIC_URL:-http://localhost:9000/zalocrm-attachments}"
+  # Né port trùng TRƯỚC khi đặt URL — set_env APP_PORT/MINIO_PORT + URL khớp port mới.
+  ensure_ports
+  # Ưu tiên APP_URL truyền qua biến môi trường (domain production); nếu không có thì
+  # dùng URL localhost theo port vừa chọn (ensure_ports đã ghi vào .env).
+  local appurl="${APP_URL:-$(env_val APP_URL)}"; appurl="${appurl:-http://localhost:$(app_port)}"
+  local s3pub="${S3_PUBLIC_URL:-$(env_val S3_PUBLIC_URL)}"; s3pub="${s3pub:-http://localhost:$(env_val MINIO_PORT)/zalocrm-attachments}"
   local miniopw; miniopw="$(gen 16)"
   set_env JWT_SECRET          "$(gen 32)"
   set_env ENCRYPTION_KEY      "$(gen 32)"
@@ -123,15 +166,28 @@ cutover() {
 restart_app() { log "Khởi động lại app cho sạch…"; docker compose restart app >/dev/null; }
 
 health() {
-  local url; url="$(env_val APP_URL)"; url="${url:-http://localhost:${PORT_DEFAULT}}"
+  local p; p="$(app_port)"
   log "Kiểm tra sức khoẻ…"
   for _ in $(seq 1 30); do
-    [ "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT_DEFAULT}/" 2>/dev/null)" = "200" ] && break
+    [ "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${p}/" 2>/dev/null)" = "200" ] && break
     sleep 1 || true
   done
-  local code; code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT_DEFAULT}/" 2>/dev/null || echo 000)"
-  [ "$code" = "200" ] && ok "App phục vụ OK (HTTP 200) tại http://localhost:${PORT_DEFAULT}" \
+  local code; code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${p}/" 2>/dev/null || echo 000)"
+  [ "$code" = "200" ] && ok "App phục vụ OK (HTTP 200) tại http://localhost:${p}" \
                        || warn "App chưa trả 200 (mã $code) — xem: docker logs $APP"
+}
+
+# Mở URL bằng trình duyệt mặc định (best-effort, đa nền tảng). NO_OPEN=1 để tắt
+# (vd deploy trên server không màn hình).
+open_url() {
+  [ "${NO_OPEN:-0}" = "1" ] && return 0
+  local url="$1"
+  if   command -v open >/dev/null 2>&1;            then open "$url" >/dev/null 2>&1 || return 0        # macOS
+  elif command -v xdg-open >/dev/null 2>&1;        then xdg-open "$url" >/dev/null 2>&1 || return 0    # Linux desktop
+  elif command -v cmd.exe >/dev/null 2>&1;         then cmd.exe /c start "" "$url" >/dev/null 2>&1 || return 0  # Windows (Git Bash)
+  elif command -v powershell.exe >/dev/null 2>&1;  then powershell.exe -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1 || return 0
+  else return 0; fi
+  ok "Đã mở $url trên trình duyệt."
 }
 
 # ── Luồng chính ───────────────────────────────────────────────────────────────
@@ -152,7 +208,8 @@ if [ "$MODE" = "install" ]; then
   health
   echo ""
   ok "HOÀN TẤT cài mới."
-  echo "→ Mở http://localhost:${PORT_DEFAULT} → trang /setup tự hiện → tạo tổ chức + tài khoản chủ."
+  echo "→ Mở http://localhost:$(app_port) → trang /setup tự hiện → tạo tổ chức + tài khoản chủ."
+  open_url "http://localhost:$(app_port)/setup"
 else
   echo "═══ NÂNG CẤP ZCRM Community (giữ dữ liệu) ═══"
   [ -f .env ] || die "Không thấy .env — đây không phải bản đang chạy. Dùng 'install' để cài mới."
@@ -165,4 +222,5 @@ else
   health
   echo ""
   ok "HOÀN TẤT nâng cấp. User cần đăng nhập lại 1 lần (đúng, do cutover)."
+  open_url "http://localhost:$(app_port)"
 fi

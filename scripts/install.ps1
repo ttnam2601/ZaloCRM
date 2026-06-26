@@ -121,5 +121,12 @@ if ($env:SKIP_DEPLOY -eq '1') {
 
 Write-Host ""
 Ok "HOÀN TẤT. Mã nguồn tại: $AppDir"
-Write-Host "→ Mở http://localhost:3080 → trang /setup tạo tổ chức + tài khoản chủ."
+# Port có thể đã đổi nếu 3080 bận — đọc APP_PORT thật từ .env.
+$appPort = '3080'
+$envFile = Join-Path $AppDir '.env'
+if (Test-Path $envFile) {
+  $m = Select-String -Path $envFile -Pattern '^APP_PORT=(\d+)' | Select-Object -First 1
+  if ($m) { $appPort = $m.Matches[0].Groups[1].Value }
+}
+Write-Host "→ Mở http://localhost:$appPort → trang /setup tạo tổ chức + tài khoản chủ."
 Write-Host "→ Hướng dẫn sử dụng: https://docs.locnguyendata.com/"

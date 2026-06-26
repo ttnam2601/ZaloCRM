@@ -8,7 +8,7 @@ services:
     container_name: zalo-crm-app
     restart: unless-stopped
     ports:
-      - "3080:3000"
+      - "${APP_PORT:-3080}:3000"
     env_file:
       - .env
     environment:
@@ -64,7 +64,7 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-crmuser}"]
       interval: 10s
@@ -102,7 +102,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -133,8 +133,8 @@ services:
       #   - rate-limits per IP
       #   - keeps the admin console (:9001) firewalled to ops VPN only.
       # The :9001 admin console IS bound to 127.0.0.1 below — never expose it.
-      - "9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
