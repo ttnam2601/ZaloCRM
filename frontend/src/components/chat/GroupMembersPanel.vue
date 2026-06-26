@@ -1,8 +1,8 @@
-﻿<template>
+<template>
   <aside class="group-panel">
     <!-- Header -->
     <header class="gp-header">
-      <button class="gp-close" title="Dong" @click="$emit('close')">x</button>
+      <button class="gp-close" title="Đóng" @click="$emit('close')">×</button>
       <div class="gp-avatar-wrap">
         <Avatar
           :src="conversation.groupAvatarUrl ?? undefined"
@@ -16,7 +16,7 @@
       <div class="gp-group-name" :title="groupName">{{ groupName }}</div>
       <div class="gp-meta">
         <span v-if="conversation.groupMembersCount" class="gp-member-count">
-          👥 {{ conversation.groupMembersCount }} thanh vien
+          👥 {{ conversation.groupMembersCount }} thành viên
         </span>
         <span v-if="joinedAtLabel" class="gp-joined">
           📅 Tham gia: {{ joinedAtLabel }}
@@ -27,25 +27,25 @@
     <!-- Members list -->
     <div class="gp-body">
       <div class="gp-section-title">
-        <span>Thanh vien nhom</span>
-        <button class="gp-refresh-btn" :disabled="loading" title="Tai lai" @click="loadMembers">
+        <span>Thành viên nhóm</span>
+        <button class="gp-refresh-btn" :disabled="loading" title="Tải lại" @click="loadMembers">
           <span :class="{ spin: loading }">↻</span>
         </button>
       </div>
 
       <div v-if="loading" class="gp-loading">
         <v-progress-circular indeterminate size="24" color="primary" />
-        <span class="gp-loading-text">Dang tai thanh vien...</span>
+        <span class="gp-loading-text">Đang tải thành viên...</span>
       </div>
 
       <div v-else-if="error" class="gp-error">
         <v-icon color="error" size="20">mdi-alert-circle-outline</v-icon>
         <span>{{ error }}</span>
-        <button class="gp-retry" @click="loadMembers">Thu lai</button>
+        <button class="gp-retry" @click="loadMembers">Thử lại</button>
       </div>
 
       <div v-else-if="members.length === 0" class="gp-empty">
-        Khong co du lieu thanh vien
+        Không có dữ liệu thành viên
       </div>
 
       <ul v-else class="gp-member-list">
@@ -66,8 +66,8 @@
             <span class="gp-member-name">{{ m.name }}</span>
             <span class="gp-member-uid">UID: {{ m.uid }}</span>
           </div>
-          <span v-if="m.role === 'owner'" class="gp-role-badge owner" title="Chu nhom">👑</span>
-          <span v-else-if="m.role === 'admin'" class="gp-role-badge admin" title="Quan tri vien">🛡</span>
+          <span v-if="m.role === 'owner'" class="gp-role-badge owner" title="Chủ nhóm">👑</span>
+          <span v-else-if="m.role === 'admin'" class="gp-role-badge admin" title="Quản trị viên">🛡</span>
         </li>
       </ul>
     </div>
@@ -98,7 +98,7 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 const groupName = computed(() =>
-  (props.conversation as any).groupName || 'Nhom khong ten'
+  (props.conversation as any).groupName || 'Nhóm không tên'
 );
 
 const joinedAtLabel = computed(() => {
@@ -128,7 +128,7 @@ async function loadMembers() {
   const accountId = props.conversation.zaloAccount?.id;
   const groupId = props.conversation.externalThreadId;
   if (!accountId || !groupId) {
-    error.value = 'Thieu thong tin tai khoan hoac nhom';
+    error.value = 'Thiếu thông tin tài khoản hoặc nhóm';
     return;
   }
   loading.value = true;
@@ -137,7 +137,7 @@ async function loadMembers() {
     const res = await api.get(`/zalo-accounts/${accountId}/groups/${groupId}/members`);
     members.value = res.data?.members ?? [];
   } catch (err: any) {
-    error.value = err?.response?.data?.error || 'Khong the tai danh sach thanh vien';
+    error.value = err?.response?.data?.error || 'Không thể tải danh sách thành viên';
   } finally {
     loading.value = false;
   }
