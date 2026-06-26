@@ -122,13 +122,19 @@ fetch_source
 
 cd "$APP_DIR"
 [ -x scripts/zalocrm-deploy.sh ] || chmod +x scripts/zalocrm-deploy.sh 2>/dev/null || true
-log "Chạy deploy (tự phát hiện cài mới / nâng cấp)…"
-# Dùng sudo cho docker nếu user chưa thuộc nhóm docker trong phiên hiện tại.
-if docker info >/dev/null 2>&1; then
-  bash scripts/zalocrm-deploy.sh "${1:-auto}"
+
+# SKIP_DEPLOY=1 → chỉ tải/cập nhật mã nguồn, KHÔNG build/chạy (dùng để chuẩn bị nguồn / CI / test).
+if [ "${SKIP_DEPLOY:-0}" = "1" ]; then
+  warn "SKIP_DEPLOY=1 → đã tải/cập nhật mã nguồn ở '$APP_DIR', BỎ QUA deploy."
 else
-  warn "Phiên hiện tại chưa có quyền docker → chạy deploy bằng sudo."
-  $SUDO bash scripts/zalocrm-deploy.sh "${1:-auto}"
+  log "Chạy deploy (tự phát hiện cài mới / nâng cấp)…"
+  # Dùng sudo cho docker nếu user chưa thuộc nhóm docker trong phiên hiện tại.
+  if docker info >/dev/null 2>&1; then
+    bash scripts/zalocrm-deploy.sh "${1:-auto}"
+  else
+    warn "Phiên hiện tại chưa có quyền docker → chạy deploy bằng sudo."
+    $SUDO bash scripts/zalocrm-deploy.sh "${1:-auto}"
+  fi
 fi
 
 echo ""
