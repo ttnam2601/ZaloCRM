@@ -687,7 +687,7 @@ export function attachZaloListener(ctx: ListenerContext): void {
   listener.on('group_event', async (event: any) => {
     logger.info(`[zalo:${accountId}] Group event: type=${event?.type ?? 'unknown'}`, {
       groupId: event?.groupId || event?.threadId,
-      actorId: event?.actorId || event?.creatorId,
+      actorId: event?.data?.actorId || event?.data?.sourceId || event?.data?.creatorId || event?.actorId || event?.creatorId,
       members: event?.members || event?.data?.updateMembers,
     });
     try {
@@ -741,7 +741,7 @@ export function attachZaloListener(ctx: ListenerContext): void {
         io?.emit('conversation:updated', updated);
 
         let actorName = 'Một thành viên';
-        const actorId = event?.actorId || event?.creatorId;
+        const actorId = event?.data?.actorId || event?.data?.sourceId || event?.data?.creatorId || event?.actorId || event?.creatorId;
         if (actorId) {
           const actorIdStripped = actorId.split('_')[0];
           const actorIdWithSuffix = `${actorIdStripped}_0`;
@@ -799,7 +799,7 @@ export function attachZaloListener(ctx: ListenerContext): void {
         io?.emit('conversation:updated', updated);
 
         let actorName = 'Một thành viên';
-        const actorId = event?.actorId || event?.creatorId;
+        const actorId = event?.data?.actorId || event?.data?.sourceId || event?.data?.creatorId || event?.actorId || event?.creatorId;
         if (actorId) {
           const actorIdStripped = actorId.split('_')[0];
           const actorIdWithSuffix = `${actorIdStripped}_0`;
