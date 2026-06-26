@@ -53,6 +53,11 @@ export const config = {
   s3AccessKey: envValue('S3_ACCESS_KEY') || 'minioadmin',
   s3SecretKey: envValue('S3_SECRET_KEY') || 'minioadmin',
   s3Region: envValue('S3_REGION') || 'us-east-1',
+  // Cloudflare R2 public URL already points at the bucket root — set to 'true' to
+  // omit the bucket name segment when building object public URLs.
+  // MinIO/Amazon S3: leave unset (default false) → URL = {publicUrl}/{bucket}/{key}
+  // Cloudflare R2  : set S3_OMIT_BUCKET_IN_URL=true  → URL = {publicUrl}/{key}
+  s3OmitBucketInUrl: envValue('S3_OMIT_BUCKET_IN_URL') === 'true',
 
   aiDefaultProvider: envValue('AI_DEFAULT_PROVIDER') || 'anthropic',
   aiDefaultModel: envValue('AI_DEFAULT_MODEL') || 'claude-sonnet-4-6',

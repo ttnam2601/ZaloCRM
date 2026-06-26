@@ -1,7 +1,8 @@
 /**
  * chat-attachment-routes.ts — Upload chat attachments (image/video) and send via Zalo.
  * Accepts multipart form with 1+ files + optional caption.
- * Flow: validate → save to tmp → upload to MinIO → call zca-js sendImage/sendVideo with local path → persist Message rows.
+ * Flow: validate → save to tmp → upload image/video to MinIO/R2 → call zca-js sendImage/sendVideo with local path → persist Message rows.
+ * NOTE: PDF and other document files are sent via Zalo only (NOT mirrored to cloud storage).
  */
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'node:crypto';
@@ -130,7 +131,10 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
           const tmpPath = path.join(tmpRoot, `${i}-${f.filename || 'upload'}`);
           await writeFile(tmpPath, f.buffer);
           tmpPaths[i] = tmpPath;
-          mirrors[i] = await uploadBuffer(f.buffer, f.mimeType, f.filename);
+          // Only mirror images and videos to cloud storage — PDFs/docs are NOT uploaded to R2.
+          if (f.kind === 'image' || f.kind === 'video') {
+            mirrors[i] = await uploadBuffer(f.buffer, f.mimeType, f.filename);
+          }
         }));
 
         const created: any[] = [];
@@ -263,7 +267,7 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
           }
         }
 
-        // Send files (generic) one-by-one
+        // Send files (generic) one-by-one — NOT mirrored to cloud storage
         for (const i of fileIndexes) {
           zaloRateLimiter.recordSend(conversation.zaloAccountId);
           const sendResult: any = await zaloOps.sendFile(
@@ -275,7 +279,7 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
             caption,
           );
           const zaloMsgId = String(sendResult?.msgId || sendResult?.data?.msgId || '');
-          const mirror = mirrors[i];
+          // mirrors[i] is undefined for files — do not include a cloud URL
           const f = files[i];
           const msg = await prisma.message.create({
             data: {
@@ -286,7 +290,7 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
               senderType: 'self',
               senderUid: conversation.zaloAccount.zaloUid || '',
               senderName: 'Staff',
-              content: JSON.stringify({ href: mirror.url, name: f.filename, size: mirror.size, mime: f.mimeType }),
+              content: JSON.stringify({ name: f.filename, size: f.size, mime: f.mimeType }),
               contentType: 'file',
               sentAt: new Date(),
               repliedByUserId: user.id,

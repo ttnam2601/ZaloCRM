@@ -70,7 +70,8 @@ export interface HandleMessageResult {
   contactId: string | null;
 }
 
-const MIRROR_CONTENT_TYPES = new Set(['image', 'video', 'file', 'gif', 'voice', 'audio']);
+// 'file' (PDF/doc) is intentionally excluded — PDFs are NOT mirrored to cloud storage.
+const MIRROR_CONTENT_TYPES = new Set(['image', 'video', 'gif', 'voice', 'audio']);
 const MEDIA_URL_FIELDS = ['hdUrl', 'href', 'normalUrl', 'fileUrl', 'url', 'thumbUrl', 'thumb', 'thumbnail'] as const;
 
 function safeParseJsonObject(value: string): Record<string, unknown> | null {
@@ -84,7 +85,13 @@ function safeParseJsonObject(value: string): Record<string, unknown> | null {
 }
 
 function isLocalStorageUrl(value: string): boolean {
-  return value.startsWith(`${config.s3PublicUrl}/${config.s3Bucket}/`);
+  const publicBase = config.s3PublicUrl.replace(/\/+$/, '');
+  // R2 mode: URL = {publicUrl}/{key} (no bucket in path)
+  if (config.s3OmitBucketInUrl) {
+    return value.startsWith(`${publicBase}/`);
+  }
+  // MinIO/S3 mode: URL = {publicUrl}/{bucket}/{key}
+  return value.startsWith(`${publicBase}/${config.s3Bucket}/`);
 }
 
 function isMirrorableUrl(value: unknown): value is string {
