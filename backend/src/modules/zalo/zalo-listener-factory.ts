@@ -54,7 +54,37 @@ async function handleZaloReaction(accountId: string, io: Server | null, reaction
     if (!message) return;
 
     const displayEmoji = ZALO_REACTION_DISPLAY[rawIcon] || rawIcon || '👍';
-    const reactorName = String(data.dName || '');
+    let reactorName = String(data.dName || '').trim();
+    if (!reactorName || reactorName === 'Người dùng') {
+      const friend = await prisma.friend.findFirst({
+        where: { zaloUidInNick: reactorZaloUid },
+        select: { aliasInNick: true, zaloDisplayName: true }
+      });
+      if (friend) {
+        reactorName = friend.aliasInNick || friend.zaloDisplayName || '';
+      }
+      if (!reactorName) {
+        const contact = await prisma.contact.findFirst({
+          where: { zaloUid: reactorZaloUid },
+          select: { crmName: true, fullName: true }
+        });
+        if (contact) {
+          reactorName = contact.crmName || contact.fullName || '';
+        }
+      }
+      if (!reactorName) {
+        const acc = await prisma.zaloAccount.findFirst({
+          where: { zaloUid: reactorZaloUid },
+          select: { displayName: true }
+        });
+        if (acc) {
+          reactorName = acc.displayName || '';
+        }
+      }
+    }
+    if (!reactorName) {
+      reactorName = 'Người dùng';
+    }
 
     // Phase A v3 (2026-05-21) — selective self-echo guard via reaction-echo-cache.
     // BAD fix cũ: skip tất cả reactorUid === ownNickUid → SAI vì cũng skip genuine
@@ -704,17 +734,20 @@ export function attachZaloListener(ctx: ListenerContext): void {
 
       if (logText) {
         const msgId = `sys-${Date.now()}-${randomUUID().slice(0, 8)}`;
+        const now = new Date();
+        const syntheticMsgIdNum = BigInt(now.getTime()) * 10000n;
         const message = await prisma.message.create({
           data: {
             id: randomUUID(),
             conversationId: conversation.id,
             zaloMsgId: msgId,
+            zaloMsgIdNum: syntheticMsgIdNum,
             senderType: 'system',
             senderName: 'Hệ thống',
             content: logText,
             contentType: 'system_event',
             attachments: [],
-            sentAt: new Date(),
+            sentAt: now,
           },
         });
 
@@ -722,7 +755,7 @@ export function attachZaloListener(ctx: ListenerContext): void {
           accountId,
           message: {
             ...message,
-            zaloMsgIdNum: null,
+            zaloMsgIdNum: syntheticMsgIdNum.toString(),
           },
           conversationId: conversation.id,
         });

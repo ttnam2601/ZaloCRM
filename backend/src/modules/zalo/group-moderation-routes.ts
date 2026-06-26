@@ -280,6 +280,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
           await prisma.message.create({
             data: {
               conversationId: existingConv.id,
+              zaloMsgIdNum: BigInt(joinedAt.getTime()) * 10000n,
               senderType: 'system',
               contentType: 'system_event',
               content: `Đã gia nhập nhóm bởi ${userName} vào ${formattedTime}`,
@@ -312,28 +313,120 @@ export async function groupModerationRoutes(app: FastifyInstance) {
     try {
       await resolveAccount(accountId, request.user!.orgId);
       if (!(await checkAccess(request, reply, accountId, 'read'))) return;
+
       const groupInfo: any = await zaloOps.getGroupInfo(accountId, groupId);
       const resultInfo = groupInfo?.gridInfoMap?.[groupId] || groupInfo;
-      const rawMembers: any[] = (
+
+      let rawMembers: any[] = (
         resultInfo?.memVerList ||
         resultInfo?.memList ||
         resultInfo?.members ||
         []
       );
+      if (rawMembers && !Array.isArray(rawMembers) && typeof rawMembers === 'object') {
+        rawMembers = Object.keys(rawMembers);
+      }
+
+      // Fetch detailed member profiles from Zalo SDK if possible
+      let detailedMembers: any[] = [];
+      try {
+        const res = await zaloOps.getGroupMembersInfo(accountId, groupId) as any;
+        if (Array.isArray(res)) {
+          detailedMembers = res;
+        } else if (res && Array.isArray(res.members)) {
+          detailedMembers = res.members;
+        } else if (res && typeof res === 'object') {
+          detailedMembers = Object.values(res);
+        }
+      } catch (err) {
+        logger.warn(`[getGroupMembers] getGroupMembersInfo failed: ${(err as Error).message}`);
+      }
+
+      const detailMap = new Map<string, { name: string; avatar: string | null }>();
+      for (const m of detailedMembers) {
+        const uid = String(m?.uid || m?.userId || m?.id || m?.zaloId || '');
+        if (uid) {
+          detailMap.set(uid, {
+            name: m?.name || m?.dName || m?.displayName || m?.zaloName || '',
+            avatar: m?.avatar || m?.avatarUrl || m?.avt || m?.fullAvt || null,
+          });
+        }
+      }
+
+      if ((!Array.isArray(rawMembers) || rawMembers.length === 0) && detailedMembers.length > 0) {
+        rawMembers = detailedMembers;
+      }
+
       const ownerId = String(resultInfo?.creatorId || resultInfo?.ownerId || resultInfo?.owner || '');
       const adminIds = new Set<string>(
         (resultInfo?.adminIds || resultInfo?.adminList || []).map((x: any) => String(x?.uid || x))
       );
+
       const members = rawMembers.map((m: any) => {
-        const uid = String(m?.uid || m?.userId || m?.id || '');
+        const uid = typeof m === 'string' ? m : String(m?.uid || m?.userId || m?.id || '');
         const role = uid === ownerId ? 'owner' : adminIds.has(uid) ? 'admin' : 'member';
+
+        const detail = detailMap.get(uid);
+        let name = detail?.name || (typeof m === 'object' ? (m?.dName || m?.displayName || m?.name) : '') || 'Unknown';
+        let avatar = detail?.avatar || (typeof m === 'object' ? (m?.avatar || m?.avt) : null) || null;
+
         return {
           uid,
-          name: m?.dName || m?.displayName || m?.name || 'Unknown',
-          avatar: m?.avatar || m?.avt || null,
+          name,
+          avatar,
           role,
         };
       });
+
+      // Query database fallback for any remaining 'Unknown' member names
+      const unknownUids = members
+        .filter(m => m.name === 'Unknown' && m.uid)
+        .map(m => m.uid);
+
+      if (unknownUids.length > 0) {
+        const [friends, contacts, accounts] = await Promise.all([
+          prisma.friend.findMany({
+            where: { zaloUidInNick: { in: unknownUids } },
+            select: { zaloUidInNick: true, aliasInNick: true, zaloDisplayName: true, zaloAvatarUrl: true },
+          }),
+          prisma.contact.findMany({
+            where: { zaloUid: { in: unknownUids } },
+            select: { zaloUid: true, crmName: true, fullName: true, avatarUrl: true },
+          }),
+          prisma.zaloAccount.findMany({
+            where: { zaloUid: { in: unknownUids } },
+            select: { zaloUid: true, displayName: true, avatarUrl: true },
+          }),
+        ]);
+
+        const dbNameMap = new Map<string, { name: string; avatar: string | null }>();
+        for (const a of accounts) {
+          if (a.zaloUid && a.displayName) {
+            dbNameMap.set(a.zaloUid, { name: a.displayName, avatar: a.avatarUrl || null });
+          }
+        }
+        for (const c of contacts) {
+          if (c.zaloUid) {
+            const name = c.crmName || c.fullName;
+            if (name) dbNameMap.set(c.zaloUid, { name, avatar: c.avatarUrl || dbNameMap.get(c.zaloUid)?.avatar || null });
+          }
+        }
+        for (const f of friends) {
+          const name = f.aliasInNick || f.zaloDisplayName;
+          if (name) dbNameMap.set(f.zaloUidInNick, { name, avatar: f.zaloAvatarUrl || dbNameMap.get(f.zaloUidInNick)?.avatar || null });
+        }
+
+        for (const m of members) {
+          if (m.name === 'Unknown' && m.uid) {
+            const resolved = dbNameMap.get(m.uid);
+            if (resolved) {
+              m.name = resolved.name;
+              if (!m.avatar) m.avatar = resolved.avatar;
+            }
+          }
+        }
+      }
+
       return {
         members,
         ownerId,
@@ -374,6 +467,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
           await prisma.message.create({
             data: {
               conversationId: conversation.id,
+              zaloMsgIdNum: BigInt(now.getTime()) * 10000n,
               senderType: 'system',
               contentType: 'system_event',
               content: `Đã rời nhóm bởi ${userName} vào ${formattedTime}`,

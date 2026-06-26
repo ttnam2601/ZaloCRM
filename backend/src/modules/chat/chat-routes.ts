@@ -73,6 +73,68 @@ const profileTouchCooldown = new Map<string, number>();
 const PROFILE_TOUCH_COOLDOWN_MS = 5 * 60_000;
 const groupHistorySyncCooldown = new Map<string, number>();
 
+async function resolveReactorNames(messages: any[]) {
+  const missingUids = new Set<string>();
+  for (const msg of messages) {
+    if (msg?.reactions) {
+      for (const rx of msg.reactions) {
+        if (rx.reactorSource === 'zalo' && (!rx.reactorName || rx.reactorName === 'Người dùng')) {
+          missingUids.add(rx.reactorId);
+        }
+      }
+    }
+  }
+
+  if (missingUids.size === 0) return;
+
+  const uids = Array.from(missingUids);
+
+  const [friends, contacts, accounts] = await Promise.all([
+    prisma.friend.findMany({
+      where: { zaloUidInNick: { in: uids } },
+      select: { zaloUidInNick: true, aliasInNick: true, zaloDisplayName: true },
+    }),
+    prisma.contact.findMany({
+      where: { zaloUid: { in: uids } },
+      select: { zaloUid: true, crmName: true, fullName: true },
+    }),
+    prisma.zaloAccount.findMany({
+      where: { zaloUid: { in: uids } },
+      select: { zaloUid: true, displayName: true },
+    }),
+  ]);
+
+  const nameMap = new Map<string, string>();
+  for (const acc of accounts) {
+    if (acc.zaloUid && acc.displayName) {
+      nameMap.set(acc.zaloUid, acc.displayName);
+    }
+  }
+  for (const c of contacts) {
+    if (c.zaloUid) {
+      const name = c.crmName || c.fullName;
+      if (name) nameMap.set(c.zaloUid, name);
+    }
+  }
+  for (const f of friends) {
+    const name = f.aliasInNick || f.zaloDisplayName;
+    if (name) nameMap.set(f.zaloUidInNick, name);
+  }
+
+  for (const msg of messages) {
+    if (msg?.reactions) {
+      for (const rx of msg.reactions) {
+        if (rx.reactorSource === 'zalo' && (!rx.reactorName || rx.reactorName === 'Người dùng')) {
+          const resolved = nameMap.get(rx.reactorId);
+          if (resolved) {
+            rx.reactorName = resolved;
+          }
+        }
+      }
+    }
+  }
+}
+
 export async function chatRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authMiddleware);
 
@@ -379,7 +441,7 @@ export async function chatRoutes(app: FastifyInstance) {
             take: 1,
             // Primary sort by Zalo Snowflake numeric (match 100% Zalo Web), sentAt fallback
             // cho CRM-sent in-flight messages chưa nhận echo zaloMsgId.
-            orderBy: [{ zaloMsgIdNum: { sort: 'desc', nulls: 'last' } }, { sentAt: 'desc' }],
+            orderBy: [{ sentAt: 'desc' }, { zaloMsgIdNum: { sort: 'desc', nulls: 'last' } }],
             select: { id: true, zaloMsgId: true, senderUid: true, senderName: true, content: true, contentType: true, senderType: true, sentAt: true, isDeleted: true, editedAt: true, reactions: { select: { emoji: true, reactorId: true, reactorName: true, reactorSource: true } } },
           },
         },
@@ -483,6 +545,9 @@ export async function chatRoutes(app: FastifyInstance) {
         statusColor: f.statusRef?.color ?? null,
       }]));
     }
+
+    const latestMsgs = conversations.map(c => c.messages?.[0]).filter(Boolean);
+    await resolveReactorNames(latestMsgs);
 
     // PRIVACY REDACT 2026-05-22 — apply redactConversationRow + redactMessage
     // cho preview text ở cột 2 khi conv thuộc nick privacy='main' + non-owner.
@@ -881,7 +946,7 @@ export async function chatRoutes(app: FastifyInstance) {
         where: { conversationId: id },
         // Primary sort by Zalo Snowflake (zaloMsgIdNum) — match Zalo Web order.
         // sentAt fallback chỉ kick in cho row chưa có zaloMsgIdNum (CRM in-flight).
-        orderBy: [{ zaloMsgIdNum: { sort: 'desc', nulls: 'last' } }, { sentAt: 'desc' }],
+        orderBy: [{ sentAt: 'desc' }, { zaloMsgIdNum: { sort: 'desc', nulls: 'last' } }],
         skip: (parseInt(page) - 1) * parseInt(limit),
         take: parseInt(limit),
         select: {
@@ -913,6 +978,7 @@ export async function chatRoutes(app: FastifyInstance) {
     ]);
 
     const ordered = messages.reverse();
+    await resolveReactorNames(ordered);
     const redacted = ordered.map((m) => {
       const r = redactMessage(m as any, conversation as any, privacyCtx);
       // BigInt zaloMsgIdNum → string cho JSON serialize

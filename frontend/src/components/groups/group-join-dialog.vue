@@ -127,8 +127,10 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [val: boolean];
-  'success': [msg: string];
+  'success': [msg: string, conversationId?: string];
 }>();
+
+const lastJoinedConversationId = ref<string | null>(null);
 
 const open = ref(props.modelValue);
 watch(() => props.modelValue, v => {
@@ -177,6 +179,7 @@ function reset() {
   showResults.value = false;
   items.value = [];
   accountId.value = props.defaultAccountId;
+  lastJoinedConversationId.value = null;
 }
 
 function cancel() {
@@ -185,7 +188,7 @@ function cancel() {
 
 function closeResults() {
   open.value = false;
-  emit('success', 'Đã hoàn tất tiến trình gia nhập nhóm');
+  emit('success', 'Đã hoàn tất tiến trình gia nhập nhóm', lastJoinedConversationId.value || undefined);
 }
 
 async function startJoin() {
@@ -216,8 +219,11 @@ async function startJoin() {
 
     try {
       const res = await props.joinByLinkFn(accountId.value, cleanId);
-      if (res !== null) {
+      if (res) {
         item.status = 'success';
+        if (res.conversationId) {
+          lastJoinedConversationId.value = res.conversationId;
+        }
       } else {
         item.status = 'failed';
         item.error = 'Thao tác thất bại từ Zalo API';

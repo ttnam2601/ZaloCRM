@@ -302,10 +302,13 @@ async function onSharePoll(poll: { id?: string; pollId?: string }) {
   else notify('Chia sẻ bình chọn thất bại', 'error');
 }
 
-async function onJoinSuccess(msg: string) {
+async function onJoinSuccess(msg: string, conversationId?: string) {
   notify(msg);
   if (selectedAccountId.value) {
     await fetchGroups(selectedAccountId.value);
+  }
+  if (conversationId) {
+    router.push({ name: 'Chat', params: { convId: conversationId } });
   }
 }
 </script>
