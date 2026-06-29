@@ -145,6 +145,7 @@ export interface Message {
   /** Read receipts (Wave 1+2) — chỉ có giá trị cho tin OUTGOING (senderType='self') */
   deliveredAt?: string | null;
   seenAt?: string | null;
+  seenDetails?: Array<{ uid: string; name?: string | null; seenAt: string }>;
 }
 
 /** Sort comparator: primary by zaloMsgIdNum (Zalo Snowflake), fallback sentAt cho row chưa echo */
@@ -803,6 +804,7 @@ export function useChat() {
       zaloMsgId?: string | null;
       deliveredAt?: string | null;
       seenAt?: string | null;
+      seenDetails?: Array<{ uid: string; name?: string | null; seenAt: string }>;
     }) => {
       // Update local messages cache nếu đang mở conv đúng
       if (messagesConvId.value === data.conversationId) {
@@ -812,6 +814,7 @@ export function useChat() {
         if (msg) {
           msg.deliveredAt = data.deliveredAt ?? msg.deliveredAt;
           msg.seenAt = data.seenAt ?? msg.seenAt;
+          msg.seenDetails = data.seenDetails ?? msg.seenDetails;
         }
       }
       // Patch persistent cache (lần sau quay lại conv vẫn thấy status đúng)
@@ -823,6 +826,7 @@ export function useChat() {
         if (msg) {
           msg.deliveredAt = data.deliveredAt ?? msg.deliveredAt;
           msg.seenAt = data.seenAt ?? msg.seenAt;
+          msg.seenDetails = data.seenDetails ?? msg.seenDetails;
         }
       }
     });

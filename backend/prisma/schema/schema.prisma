@@ -571,6 +571,7 @@ model Message {
   // 'automation' = bot/sequence/broadcast/NBA suggest gửi qua engine
   // 'system' = CRM internal (reminder card, system notice — chưa dùng, reserved)
   sentVia         String    @default("user") @map("sent_via")
+  seenDetails     Json?     @map("seen_details")
   createdAt       DateTime  @default(now()) @map("created_at")
 
   conversation Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)

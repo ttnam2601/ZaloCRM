@@ -473,6 +473,12 @@ const receiptState = computed<'sending' | 'delivered' | 'seen' | 'sent'>(() => {
 
 const receiptTooltip = computed<string>(() => {
   const m = props.message;
+  if (m.seenDetails && Array.isArray(m.seenDetails) && m.seenDetails.length > 0) {
+    const list = m.seenDetails
+      .map((sd: any) => `• ${sd.name || 'Thành viên'} (${formatInOrgTz(sd.seenAt)})`)
+      .join('\n');
+    return `Đã xem bởi:\n${list}`;
+  }
   switch (receiptState.value) {
     case 'seen':      return `KH đã xem${m.seenAt ? ' lúc ' + formatTime(m.seenAt) : ''}`;
     case 'delivered': return `Đã gửi tới KH${m.deliveredAt ? ' lúc ' + formatTime(m.deliveredAt) : ''}`;
@@ -483,6 +489,9 @@ const receiptTooltip = computed<string>(() => {
 
 const receiptLabel = computed<string>(() => {
   const m = props.message;
+  if (m.seenDetails && Array.isArray(m.seenDetails) && m.seenDetails.length > 0) {
+    return `Đã xem (${m.seenDetails.length})`;
+  }
   switch (receiptState.value) {
     case 'seen':      return m.seenAt ? `Đã xem ${formatTime(m.seenAt)}` : 'Đã xem';
     case 'delivered': return 'Đã nhận';

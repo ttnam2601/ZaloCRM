@@ -314,37 +314,93 @@ export function attachZaloListener(ctx: ListenerContext): void {
         (messages || []).slice(0, 3).map(m => ({ threadId: m?.threadId, type: m?.type, data: m?.data })),
       ));
       const seenIds: string[] = [];
+      const now = new Date();
+      
       for (const m of messages || []) {
         const msgId = String(m?.data?.msgId || '');
-        if (msgId) seenIds.push(msgId);
-      }
-      if (!seenIds.length) return;
-      const now = new Date();
-      // Update tất cả msg ≤ msgId này → seen. Đơn giản: update các msg có zaloMsgId in list.
-      // (Sweep-to-msgId logic phức tạp, để wave sau nếu cần.)
-      const updated = await prisma.message.updateMany({
-        where: {
-          zaloMsgId: { in: seenIds },
-          senderType: 'self',
-          seenAt: null,
-        },
-        data: { seenAt: now, deliveredAt: now }, // seen implies delivered
-      });
-      if (updated.count > 0) {
-        // Emit để FE update bubble — gửi danh sách msgId được flip
-        const rows = await prisma.message.findMany({
-          where: { zaloMsgId: { in: seenIds }, senderType: 'self' },
-          select: { id: true, conversationId: true, zaloMsgId: true, deliveredAt: true, seenAt: true },
-        });
-        for (const r of rows) {
-          io?.emit('zalo:message-status', {
-            accountId,
-            conversationId: r.conversationId,
-            messageId: r.id,
-            zaloMsgId: r.zaloMsgId,
-            deliveredAt: r.deliveredAt,
-            seenAt: r.seenAt,
+        if (!msgId) continue;
+        
+        const seenUids = m?.data?.seenUids || [];
+        if (Array.isArray(seenUids) && seenUids.length > 0) {
+          // Group seen event containing UIDs of group members who read the message
+          const existingMsg = await prisma.message.findFirst({
+            where: { zaloMsgId: msgId, senderType: 'self' },
+            select: { id: true, seenDetails: true, conversationId: true },
           });
+          
+          if (existingMsg) {
+            let currentDetails = Array.isArray(existingMsg.seenDetails) 
+              ? (existingMsg.seenDetails as any[]) 
+              : [];
+            
+            let changed = false;
+            const nowIso = now.toISOString();
+            
+            for (const uid of seenUids) {
+              const uidStr = String(uid);
+              const exists = currentDetails.some(d => String(d.uid) === uidStr);
+              if (!exists) {
+                currentDetails.push({
+                  uid: uidStr,
+                  seenAt: nowIso
+                });
+                changed = true;
+              }
+            }
+            
+            if (changed) {
+              const updatedMsg = await prisma.message.update({
+                where: { id: existingMsg.id },
+                data: {
+                  seenDetails: currentDetails,
+                  seenAt: now,
+                  deliveredAt: now
+                },
+                select: { id: true, conversationId: true, zaloMsgId: true, deliveredAt: true, seenAt: true, seenDetails: true }
+              });
+              
+              io?.emit('zalo:message-status', {
+                accountId,
+                conversationId: updatedMsg.conversationId,
+                messageId: updatedMsg.id,
+                zaloMsgId: updatedMsg.zaloMsgId,
+                deliveredAt: updatedMsg.deliveredAt,
+                seenAt: updatedMsg.seenAt,
+                seenDetails: updatedMsg.seenDetails,
+              });
+            }
+          }
+        } else {
+          // Single chat seen event
+          seenIds.push(msgId);
+        }
+      }
+      
+      if (seenIds.length > 0) {
+        const updated = await prisma.message.updateMany({
+          where: {
+            zaloMsgId: { in: seenIds },
+            senderType: 'self',
+            seenAt: null,
+          },
+          data: { seenAt: now, deliveredAt: now }, // seen implies delivered
+        });
+        if (updated.count > 0) {
+          // Emit để FE update bubble — gửi danh sách msgId được flip
+          const rows = await prisma.message.findMany({
+            where: { zaloMsgId: { in: seenIds }, senderType: 'self' },
+            select: { id: true, conversationId: true, zaloMsgId: true, deliveredAt: true, seenAt: true },
+          });
+          for (const r of rows) {
+            io?.emit('zalo:message-status', {
+              accountId,
+              conversationId: r.conversationId,
+              messageId: r.id,
+              zaloMsgId: r.zaloMsgId,
+              deliveredAt: r.deliveredAt,
+              seenAt: r.seenAt,
+            });
+          }
         }
       }
     } catch (err) {

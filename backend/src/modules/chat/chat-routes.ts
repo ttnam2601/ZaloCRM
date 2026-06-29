@@ -145,6 +145,80 @@ async function resolveReactorNames(messages: any[], defaultZaloAccountId?: strin
   }
 }
 
+async function resolveSeenNames(messages: any[], defaultZaloAccountId?: string) {
+  const missingUids = new Set<string>();
+  for (const msg of messages) {
+    if (msg?.seenDetails && Array.isArray(msg.seenDetails)) {
+      for (const sd of msg.seenDetails) {
+        if (sd.uid && (!sd.name || sd.name === 'Người dùng')) {
+          missingUids.add(String(sd.uid));
+        }
+      }
+    }
+  }
+
+  if (missingUids.size === 0) return;
+
+  const uids = Array.from(missingUids);
+
+  const [friends, contacts, accounts] = await Promise.all([
+    prisma.friend.findMany({
+      where: { zaloUidInNick: { in: uids } },
+      select: { zaloUidInNick: true, aliasInNick: true, zaloDisplayName: true },
+    }),
+    prisma.contact.findMany({
+      where: { zaloUid: { in: uids } },
+      select: { zaloUid: true, crmName: true, fullName: true },
+    }),
+    prisma.zaloAccount.findMany({
+      where: { zaloUid: { in: uids } },
+      select: { zaloUid: true, displayName: true },
+    }),
+  ]);
+
+  const nameMap = new Map<string, string>();
+  for (const acc of accounts) {
+    if (acc.zaloUid && acc.displayName) {
+      nameMap.set(acc.zaloUid, acc.displayName);
+    }
+  }
+  for (const c of contacts) {
+    if (c.zaloUid) {
+      const name = c.crmName || c.fullName;
+      if (name) nameMap.set(c.zaloUid, name);
+    }
+  }
+  for (const f of friends) {
+    const name = f.aliasInNick || f.zaloDisplayName;
+    if (name) nameMap.set(f.zaloUidInNick, name);
+  }
+
+  for (const msg of messages) {
+    const zaloAccountId = msg.zaloAccountId || defaultZaloAccountId;
+    if (msg?.seenDetails && Array.isArray(msg.seenDetails)) {
+      for (const sd of msg.seenDetails) {
+        if (sd.uid) {
+          const resolved = nameMap.get(String(sd.uid));
+          if (resolved) {
+            sd.name = resolved;
+          } else if (zaloAccountId) {
+            const cachedProfile = getCachedMemberProfile(zaloAccountId, String(sd.uid));
+            if (cachedProfile) {
+              const name = cachedProfile.displayName || cachedProfile.name || cachedProfile.dName || cachedProfile.zaloName;
+              if (name) {
+                sd.name = name;
+              }
+            }
+          }
+          if (!sd.name) {
+            sd.name = 'Thành viên';
+          }
+        }
+      }
+    }
+  }
+}
+
 export async function chatRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authMiddleware);
 
@@ -988,6 +1062,7 @@ export async function chatRoutes(app: FastifyInstance) {
           albumIndex: true,
           albumTotal: true,
           reactions: { select: { emoji: true, reactorId: true, reactorName: true, reactorSource: true, createdAt: true } },
+          seenDetails: true,
         },
       }),
       prisma.message.count({ where: { conversationId: id } }),
@@ -995,6 +1070,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     const ordered = messages.reverse();
     await resolveReactorNames(ordered, conversation.zaloAccountId);
+    await resolveSeenNames(ordered, conversation.zaloAccountId);
     const redacted = ordered.map((m) => {
       const r = redactMessage(m as any, conversation as any, privacyCtx);
       // BigInt zaloMsgIdNum → string cho JSON serialize
