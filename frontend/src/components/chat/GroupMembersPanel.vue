@@ -144,6 +144,10 @@
           </label>
         </div>
 
+        <div v-if="leaveError" class="gp-dialog-error">
+          {{ leaveError }}
+        </div>
+
         <div class="gp-dialog-actions">
           <button class="gp-dialog-cancel" @click="leaveDialogOpen = false">Hủy</button>
           <button class="gp-dialog-confirm" :disabled="leaveLoading" @click="confirmLeave">
@@ -166,6 +170,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import type { Conversation } from '@/composables/use-chat';
 import Avatar from '@/components/ui/Avatar.vue';
 import { api } from '@/api';
+import { useToast } from '@/composables/use-toast';
 
 interface GroupMember {
   uid: string;
@@ -192,6 +197,7 @@ const leaveDialogOpen = ref(false);
 const leaveSilent = ref(true); // mặc định im lặng
 const leaveLoading = ref(false);
 const leaveError = ref<string | null>(null);
+const toast = useToast();
 
 const groupName = computed(() =>
   (props.conversation as any).groupName || 'Nhóm không tên'
@@ -258,10 +264,13 @@ async function confirmLeave() {
   try {
     await api.post(`/zalo-accounts/${accountId}/groups/${groupId}/leave`, { silent: leaveSilent.value });
     leaveDialogOpen.value = false;
+    toast.success('Đã rời nhóm thành công');
     emit('left');
     emit('close');
   } catch (err: any) {
-    leaveError.value = err?.response?.data?.error || err?.message || 'Lỗi kết nối';
+    const msg = err?.response?.data?.error || err?.message || 'Lỗi kết nối';
+    leaveError.value = msg;
+    toast.error('Rời nhóm thất bại: ' + msg);
   } finally {
     leaveLoading.value = false;
   }
@@ -734,6 +743,14 @@ onMounted(() => { loadMembers(); });
 .gp-toggle-desc {
   font-size: 11px;
   color: #64748b;
+}
+
+.gp-dialog-error {
+  color: #ef4444;
+  font-size: 11.5px;
+  padding: 4px 18px 8px;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 /* Dialog actions */

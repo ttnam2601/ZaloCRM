@@ -471,7 +471,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
     const { silent } = request.body ?? {};
     try {
       await resolveAccount(accountId, request.user!.orgId);
-      if (!(await checkAccess(request, reply, accountId, 'admin'))) return;
+      if (!(await checkAccess(request, reply, accountId, 'chat'))) return;
       const result = await zaloOps.leaveGroup(accountId, groupId, silent !== false);
 
       try {
