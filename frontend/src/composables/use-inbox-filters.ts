@@ -100,6 +100,7 @@ export interface FilterState {
   appointmentOverdue: boolean;
   // Phase 8 — Engagement heatmap patterns
   engagementPatterns: EngagementPatternKey[];
+  limit: number;
 }
 
 // ─── Default state ──────────────────────────────────────────────────────
@@ -132,6 +133,7 @@ export function defaultFilterState(): FilterState {
     appointmentWithin24h: false,
     appointmentOverdue: false,
     engagementPatterns: [],
+    limit: 100,
   };
 }
 
@@ -271,6 +273,7 @@ export function useInboxFilters() {
         break;
     }
     if (state.sortMode === 'unread-first') params.sortMode = 'unread-first';
+    if (state.limit) params.limit = String(state.limit);
 
     // Quick pills → individual query params
     if (state.quickPills.has('unread')) params.unread = 'true';

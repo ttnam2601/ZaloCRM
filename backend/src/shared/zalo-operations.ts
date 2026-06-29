@@ -383,6 +383,19 @@ async function getPinConversations(accountId: string) {
     (api) => api.getPinConversations());
 }
 
+// ─── Group Cache ────────────────────────────────────────────────────────────
+const groupInfoCache = new Map<string, { data: any; timestamp: number }>();
+const memberProfileCache = new Map<string, { data: any; timestamp: number }>();
+
+const GROUP_INFO_TTL_MS = 3 * 60 * 1000; // 3 minutes cache for group metadata
+const MEMBER_PROFILE_TTL_MS = 20 * 60 * 1000; // 20 minutes cache for member profiles
+
+function invalidateGroupCache(accountId: string, groupId: string) {
+  const cacheKey = `${accountId}:${groupId}`;
+  groupInfoCache.delete(cacheKey);
+  logger.info(`[zalo-ops:${accountId}] Invalidated getGroupInfo cache for group: ${groupId}`);
+}
+
 // ─── Group Management ───────────────────────────────────────────────────────
 async function createGroup(accountId: string, options: { name: string; memberIds: string[] }) {
   return exec({ accountId, category: 'group_admin', operation: 'createGroup' },
@@ -390,69 +403,104 @@ async function createGroup(accountId: string, options: { name: string; memberIds
 }
 
 async function renameGroup(accountId: string, name: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'renameGroup' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'renameGroup' },
     (api) => api.changeGroupName(name, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function changeGroupAvatar(accountId: string, avatarPath: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'changeGroupAvatar' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'changeGroupAvatar' },
     (api) => api.changeGroupAvatar(avatarPath, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function updateGroupSettings(accountId: string, settings: any, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'updateGroupSettings' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'updateGroupSettings' },
     (api) => api.updateGroupSettings(settings, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function addUserToGroup(accountId: string, userIds: string[], groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'addUserToGroup' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'addUserToGroup' },
     (api) => api.addUserToGroup(userIds, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function removeUserFromGroup(accountId: string, userIds: string[], groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'removeUserFromGroup' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'removeUserFromGroup' },
     (api) => api.removeUserFromGroup(userIds, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function addGroupDeputy(accountId: string, userId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'addGroupDeputy' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'addGroupDeputy' },
     (api) => api.addGroupDeputy(userId, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function removeGroupDeputy(accountId: string, userId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'removeGroupDeputy' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'removeGroupDeputy' },
     (api) => api.removeGroupDeputy(userId, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function changeGroupOwner(accountId: string, newOwnerId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'changeGroupOwner' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'changeGroupOwner' },
     (api) => api.changeGroupOwner(newOwnerId, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function blockGroupMember(accountId: string, userId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'blockGroupMember' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'blockGroupMember' },
     (api) => api.addGroupBlockedMember(userId, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function unblockGroupMember(accountId: string, userId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'unblockGroupMember' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'unblockGroupMember' },
     (api) => api.removeGroupBlockedMember(userId, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function leaveGroup(accountId: string, groupId: string, silent: boolean = true) {
-  return exec({ accountId, category: 'group_admin', operation: 'leaveGroup' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'leaveGroup' },
     (api) => api.leaveGroup(groupId, silent));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function disperseGroup(accountId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'disperseGroup' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'disperseGroup' },
     (api) => api.disperseGroup(groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 // ─── Group Read ─────────────────────────────────────────────────────────────
-async function getGroupInfo(accountId: string, groupId: string) {
-  return exec({ accountId, category: 'group_read', operation: 'getGroupInfo' },
+async function getGroupInfo(accountId: string, groupId: string, bypassCache: boolean = false) {
+  const cacheKey = `${accountId}:${groupId}`;
+  const now = Date.now();
+  if (!bypassCache) {
+    const cached = groupInfoCache.get(cacheKey);
+    if (cached && now - cached.timestamp < GROUP_INFO_TTL_MS) {
+      logger.debug(`[zalo-ops:${accountId}] Cache hit for getGroupInfo (group: ${groupId})`);
+      return cached.data;
+    }
+  }
+  const result = await exec({ accountId, category: 'group_read', operation: 'getGroupInfo' },
     (api) => api.getGroupInfo(groupId));
+  groupInfoCache.set(cacheKey, { data: result, timestamp: now });
+  return result;
 }
 
 async function getAllGroups(accountId: string) {
@@ -460,9 +508,65 @@ async function getAllGroups(accountId: string) {
     (api) => api.getAllGroups());
 }
 
-async function getGroupMembersInfo(accountId: string, memberIds: string | string[]) {
-  return exec({ accountId, category: 'group_read', operation: 'getGroupMembersInfo' },
-    (api) => api.getGroupMembersInfo(memberIds));
+async function getGroupMembersInfo(accountId: string, memberIds: string | string[], bypassCache: boolean = false) {
+  const ids = Array.isArray(memberIds) ? memberIds : [memberIds];
+  if (ids.length === 0) return [];
+
+  const now = Date.now();
+  const resultProfiles: any[] = [];
+  const uncachedIds: string[] = [];
+
+  if (!bypassCache) {
+    for (const id of ids) {
+      const cacheKey = `${accountId}:${id}`;
+      const cached = memberProfileCache.get(cacheKey);
+      if (cached && now - cached.timestamp < MEMBER_PROFILE_TTL_MS) {
+        resultProfiles.push(cached.data);
+      } else {
+        uncachedIds.push(id);
+      }
+    }
+  } else {
+    uncachedIds.push(...ids);
+  }
+
+  if (uncachedIds.length > 0) {
+    logger.info(`[zalo-ops:${accountId}] Cache miss for ${uncachedIds.length}/${ids.length} group members, fetching from SDK...`);
+    try {
+      const res = await exec({ accountId, category: 'group_read', operation: 'getGroupMembersInfo' },
+        (api) => api.getGroupMembersInfo(uncachedIds)) as any;
+
+      let profilesList: any[] = [];
+      if (res && res.profiles && typeof res.profiles === 'object') {
+        profilesList = Object.values(res.profiles);
+      } else if (Array.isArray(res)) {
+        profilesList = res;
+      } else if (res && Array.isArray(res.members)) {
+        profilesList = res.members;
+      } else if (res && typeof res === 'object') {
+        profilesList = Object.values(res);
+      }
+
+      for (const p of profilesList) {
+        const rawUid = String(p?.uid || p?.userId || p?.id || p?.zaloId || '');
+        if (rawUid) {
+          const cacheKey = `${accountId}:${rawUid}`;
+          memberProfileCache.set(cacheKey, { data: p, timestamp: now });
+          resultProfiles.push(p);
+
+          const stripped = rawUid.split('_')[0];
+          if (stripped && stripped !== rawUid) {
+            memberProfileCache.set(`${accountId}:${stripped}`, { data: p, timestamp: now });
+            memberProfileCache.set(`${accountId}:${stripped}_0`, { data: p, timestamp: now });
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn(`[zalo-ops:${accountId}] getGroupMembersInfo failed: ${(err as Error).message}`);
+    }
+  }
+
+  return resultProfiles;
 }
 
 async function getGroupBlockedMembers(accountId: string, groupId: string) {

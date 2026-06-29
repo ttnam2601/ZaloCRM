@@ -308,13 +308,14 @@ export async function groupModerationRoutes(app: FastifyInstance) {
 
   // ── Members ─────────────────────────────────────────────────────────────────
 
-  app.get<{ Params: { accountId: string; groupId: string } }>(`${BASE}/:groupId/members`, async (request, reply) => {
+  app.get<{ Params: { accountId: string; groupId: string }; Querystring: { refresh?: string } }>(`${BASE}/:groupId/members`, async (request, reply) => {
     const { accountId, groupId } = request.params;
+    const forceRefresh = request.query.refresh === 'true';
     try {
       await resolveAccount(accountId, request.user!.orgId);
       if (!(await checkAccess(request, reply, accountId, 'read'))) return;
 
-      const groupInfo: any = await zaloOps.getGroupInfo(accountId, groupId);
+      const groupInfo: any = await zaloOps.getGroupInfo(accountId, groupId, forceRefresh);
       const resultInfo = groupInfo?.gridInfoMap?.[groupId] || groupInfo;
 
       let rawMembers: any[] = (
@@ -335,7 +336,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
         }).filter(Boolean);
 
         if (memberIds.length > 0) {
-          const res = await zaloOps.getGroupMembersInfo(accountId, memberIds) as any;
+          const res = await zaloOps.getGroupMembersInfo(accountId, memberIds, forceRefresh) as any;
           if (res && res.profiles && typeof res.profiles === 'object') {
             detailedMembers = Object.values(res.profiles);
           } else if (Array.isArray(res)) {

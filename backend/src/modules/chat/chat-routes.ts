@@ -446,8 +446,8 @@ export async function chatRoutes(app: FastifyInstance) {
           },
         },
         orderBy: orderByClause,
-        skip: (parseInt(page) - 1) * Math.min(parseInt(limit), 200),
-        take: Math.min(parseInt(limit), 200),
+        skip: (parseInt(page) - 1) * Math.min(parseInt(limit), 500),
+        take: Math.min(parseInt(limit), 500),
       }),
       prisma.conversation.count({ where }),
     ]);

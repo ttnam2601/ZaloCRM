@@ -227,6 +227,7 @@ watch(
     inboxFilters.state.sortMode,
     inboxFilters.state.timeAxis,
     inboxFilters.state.timeRangePreset,
+    inboxFilters.state.limit,
   ],
   () => {
     if (filterApplyTimer) clearTimeout(filterApplyTimer);

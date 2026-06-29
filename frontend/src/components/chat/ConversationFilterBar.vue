@@ -56,7 +56,13 @@
     <!-- ③ Mini counter + sort row — half height, muted -->
     <div class="cfb-mini">
       <span class="mini-count">
-        <strong>{{ totalCount }}</strong> hội thoại
+        <select v-model="filters.state.limit" class="limit-select" title="Giới hạn hội thoại hiển thị">
+          <option :value="100">100</option>
+          <option :value="200">200</option>
+          <option :value="300">300</option>
+          <option :value="500">500</option>
+        </select>
+        hội thoại
         <template v-if="counts.unread">
           <span class="dot">·</span>
           <span class="accent">{{ counts.unread }} chưa đọc</span>
@@ -285,4 +291,31 @@ function toggleSort() {
 }
 .mini-sort:hover { color: #4338CA; background: white; }
 .mini-sort .ic { width: 10px; height: 10px; opacity: 0.7; }
+
+.limit-select {
+  border: 1px solid #E5E7EB;
+  border-radius: 4px;
+  background: white;
+  padding: 1px 16px 1px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #4B5563;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  margin-right: 2px;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 8px;
+}
+.limit-select:hover {
+  border-color: #D1D5DB;
+  background-color: #FAFBFC;
+}
+.limit-select:focus {
+  border-color: #6366F1;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.1);
+}
 </style>
