@@ -286,6 +286,7 @@
                   <img
                     v-for="m in item.messages"
                     :key="m.id"
+                    :id="m.zaloMsgId ? 'msg-' + m.zaloMsgId : undefined"
                     :src="getImageUrl(m)!"
                     alt="Hình ảnh"
                     class="album-tile"
@@ -303,14 +304,14 @@
           </div>
 
           <!-- Reminder notice — render inline timeline event (centered, no bubble) -->
-          <div v-else-if="isReminderNotice(item.msg)" class="msg-system-event reminder-notice">
+          <div v-else-if="isReminderNotice(item.msg)" :id="item.msg.zaloMsgId ? 'msg-' + item.msg.zaloMsgId : undefined" class="msg-system-event reminder-notice">
             <v-icon size="14" color="warning" class="mr-1">mdi-bell-ring</v-icon>
             <span>{{ reminderNoticeText(item.msg) }}</span>
             <span v-if="reminderNoticeTime(item.msg)" class="reminder-notice-time">· {{ reminderNoticeTime(item.msg) }}</span>
           </div>
 
           <!-- CRM System notice — render inline timeline event (centered, no bubble) -->
-          <div v-else-if="isSystemNotice(item.msg)" class="msg-system-event system-notice">
+          <div v-else-if="isSystemNotice(item.msg)" :id="item.msg.zaloMsgId ? 'msg-' + item.msg.zaloMsgId : undefined" class="msg-system-event system-notice">
             <v-icon size="14" color="grey" class="mr-1">mdi-information-outline</v-icon>
             <span>{{ item.msg.content }}</span>
           </div>
@@ -782,9 +783,14 @@ function onOpenReactionDetail(payload: { reactions: any[]; message: Message }) {
 
 function onReplyClick(zaloMsgId: string) {
   if (!zaloMsgId) return;
-  const el = document.getElementById('msg-' + zaloMsgId);
+  let el = document.getElementById('msg-' + zaloMsgId);
+  if (!el && zaloMsgId.length >= 13) {
+    const prefix = zaloMsgId.slice(0, 13);
+    el = document.querySelector(`[id^="msg-${prefix}"]`) as HTMLElement | null;
+  }
+
   if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     el.classList.add('msg-highlight-flash');
     setTimeout(() => {
       el.classList.remove('msg-highlight-flash');
