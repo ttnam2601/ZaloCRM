@@ -116,10 +116,18 @@ async function generateText(provider: string, apiKey: string, model: string, sys
   if (provider === 'anthropic') return generateWithAnthropic(baseUrl, apiKey, model, system, prompt, maxTokens);
   if (provider === 'gemini') return generateWithGemini(baseUrl, apiKey, model, system, prompt, maxTokens);
 
-  /* OpenAI, Qwen, Kimi all use OpenAI-compatible chat/completions API */
-  if (provider === 'openai') return generateWithOpenaiCompat(`${baseUrl}/v1/chat/completions`, apiKey, model, system, prompt, maxTokens);
-  if (provider === 'qwen') return generateWithOpenaiCompat(`${baseUrl}/compatible-mode/v1/chat/completions`, apiKey, model, system, prompt, maxTokens);
-  if (provider === 'kimi') return generateWithOpenaiCompat(`${baseUrl}/v1/chat/completions`, apiKey, model, system, prompt, maxTokens);
+  // Normalize baseUrl by removing trailing /v1 or /v1/ to prevent duplicate path segments
+  const cleanBaseUrl = baseUrl.replace(/\/v1\/?$/, '');
+
+  let finalUrl = '';
+  if (provider === 'openai') finalUrl = `${cleanBaseUrl}/v1/chat/completions`;
+  if (provider === 'qwen') finalUrl = `${cleanBaseUrl}/compatible-mode/v1/chat/completions`;
+  if (provider === 'kimi') finalUrl = `${cleanBaseUrl}/v1/chat/completions`;
+
+  if (finalUrl) {
+    logger.info(`[AI-DEBUG] calling provider: ${provider}, url: ${finalUrl}, model: ${model}, keyLength: ${apiKey?.length || 0}`);
+    return generateWithOpenaiCompat(finalUrl, apiKey, model, system, prompt, maxTokens);
+  }
 
   throw new Error(`Unsupported AI provider: ${provider}`);
 }
