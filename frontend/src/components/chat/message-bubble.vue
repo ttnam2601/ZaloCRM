@@ -44,7 +44,7 @@
         </div>
 
         <template v-else>
-          <div v-if="reply" class="reply-card">
+          <div v-if="reply" class="reply-card" @click.stop="emit('reply-click', reply.msgId)">
             <div class="reply-header">
               <v-icon size="11" class="reply-icon">mdi-reply</v-icon>
               <span class="reply-sender">Trả lời{{ replySenderLabel ? ' ' + replySenderLabel : '' }}</span>
@@ -298,6 +298,7 @@ const emit = defineEmits<{
   'open-profile': [uid: string];
   'open-reaction-detail': [payload: { reactions: any[]; message: Message }];
   'join-group-link': [linkId: string];
+  'reply-click': [msgId: string];
 }>();
 
 const SPECIAL_TYPES = new Set([
@@ -852,6 +853,11 @@ function openFile(href: string) {
   background: rgba(33, 150, 243, 0.08);
   border-left: 3px solid var(--smax-primary, #2962ff);
   margin-bottom: 6px;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+.reply-card:hover {
+  background: rgba(33, 150, 243, 0.14);
 }
 .reply-header {
   display: flex; align-items: center; gap: 4px;

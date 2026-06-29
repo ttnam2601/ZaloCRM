@@ -318,6 +318,7 @@
           <!-- Single message — MessageBubble component (wrap với privacy blur khi redacted) -->
           <div
             v-else
+            :id="item.msg.zaloMsgId ? 'msg-' + item.msg.zaloMsgId : undefined"
             class="msg-bubble-wrap"
             :class="{
               'msg-privacy-blurred': privacyVisibility.shouldBlurMessage(item.msg, conversation),
@@ -343,6 +344,7 @@
               @open-profile="onOpenProfileFromCard"
               @open-reaction-detail="onOpenReactionDetail"
               @join-group-link="onJoinGroupLink"
+              @reply-click="onReplyClick"
             />
           </div>
         </template>
@@ -776,6 +778,20 @@ function onOpenReactionDetail(payload: { reactions: any[]; message: Message }) {
     createdAt: r.createdAt || null,
   }));
   reactionPopupOpen.value = true;
+}
+
+function onReplyClick(zaloMsgId: string) {
+  if (!zaloMsgId) return;
+  const el = document.getElementById('msg-' + zaloMsgId);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('msg-highlight-flash');
+    setTimeout(() => {
+      el.classList.remove('msg-highlight-flash');
+    }, 1500);
+  } else {
+    toast.warning('Tin nhắn gốc đã cũ hoặc chưa được tải trong luồng này');
+  }
 }
 
 const privacyVisibility = usePrivacyVisibility();
@@ -3091,5 +3107,18 @@ watch(() => props.editingMessage?.id, async (id) => {
 }
 .cursor-pointer {
   cursor: pointer;
+}
+
+@keyframes highlight-flash {
+  0% {
+    background-color: rgba(255, 235, 59, 0.4);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.msg-bubble-wrap.msg-highlight-flash {
+  animation: highlight-flash 1.5s ease-out;
+  border-radius: 8px;
 }
 </style>
