@@ -50,6 +50,7 @@ export function redactMessage(
   ctx: PrivacyContext,
 ): any {
   if (canSeeConversationContent(conv, ctx)) return msg;
+  if (msg.senderType === 'system' || msg.contentType === 'system_event') return msg;
   // Allowlist: chỉ giữ field metadata an toàn
   return {
     id: msg.id,
