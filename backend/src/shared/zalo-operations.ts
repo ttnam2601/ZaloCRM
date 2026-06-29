@@ -569,6 +569,20 @@ async function getGroupMembersInfo(accountId: string, memberIds: string | string
   return resultProfiles;
 }
 
+export function getCachedMemberProfile(accountId: string, memberId: string) {
+  const cacheKey = `${accountId}:${memberId}`;
+  const cached = memberProfileCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < MEMBER_PROFILE_TTL_MS) {
+    return cached.data;
+  }
+  const stripped = memberId.split('_')[0];
+  const cachedStripped = memberProfileCache.get(`${accountId}:${stripped}`);
+  if (cachedStripped && Date.now() - cachedStripped.timestamp < MEMBER_PROFILE_TTL_MS) {
+    return cachedStripped.data;
+  }
+  return null;
+}
+
 async function getGroupBlockedMembers(accountId: string, groupId: string) {
   return exec({ accountId, category: 'group_read', operation: 'getGroupBlockedMembers' },
     (api) => api.getGroupBlockedMember({}, groupId));
@@ -816,6 +830,7 @@ export const zaloOps = {
   getGroupInfo,
   getAllGroups,
   getGroupMembersInfo,
+  getCachedMemberProfile,
   getGroupBlockedMembers,
   getPendingGroupMembers,
   getGroupLinkDetail,

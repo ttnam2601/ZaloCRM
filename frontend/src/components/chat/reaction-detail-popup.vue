@@ -51,7 +51,10 @@
             </span>
             <div class="user-info">
               <div class="user-name">{{ u.name }}</div>
-              <div v-if="u.source" class="user-source">{{ u.source === 'zalo' ? 'Từ Zalo App' : 'Từ CRM' }}</div>
+              <div class="user-meta">
+                <span v-if="u.source" class="user-source">{{ u.source === 'zalo' ? 'Từ Zalo App' : 'Từ CRM' }}</span>
+                <span v-if="u.createdAt" class="user-time">· {{ formatReactionTime(u.createdAt) }}</span>
+              </div>
             </div>
             <div class="user-emojis">
               <span v-for="e in u.emojis" :key="e" class="user-emoji">{{ e }}</span>
@@ -73,6 +76,7 @@ interface ReactionDetail {
   userName?: string | null;
   emoji: string;
   source?: 'crm' | 'zalo';
+  createdAt?: string | null;
 }
 
 const props = defineProps<{
@@ -104,7 +108,7 @@ const reactionsSorted = computed(() => {
 
 // Group details by userId → user row với list emoji
 const groupedUsers = computed(() => {
-  const map = new Map<string, { userId: string; name: string; source?: 'crm' | 'zalo'; emojis: string[] }>();
+  const map = new Map<string, { userId: string; name: string; source?: 'crm' | 'zalo'; emojis: string[]; createdAt: string | null }>();
   for (const d of props.details ?? []) {
     const existing = map.get(d.userId);
     if (existing) {
@@ -115,6 +119,7 @@ const groupedUsers = computed(() => {
         name: d.userName || 'Người dùng',
         source: d.source,
         emojis: [d.emoji],
+        createdAt: d.createdAt || null,
       });
     }
   }
@@ -126,6 +131,21 @@ const filteredUsers = computed(() => {
   if (activeTab.value === 'all') return groupedUsers.value;
   return groupedUsers.value.filter((u) => u.emojis.includes(activeTab.value));
 });
+
+function formatReactionTime(isoStr: string): string {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mMonth = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${hh}:${mm} ${dd}/${mMonth}/${yyyy}`;
+  } catch (e) {
+    return '';
+  }
+}
 
 function initials(name: string): string {
   if (!name) return '?';
@@ -264,10 +284,20 @@ function avatarColor(name: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.user-source {
+.user-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 10px;
   color: #9CA3AF;
   margin-top: 2px;
+}
+.user-source {
+  font-size: 10px;
+  color: #9CA3AF;
+}
+.user-time {
+  white-space: nowrap;
 }
 .user-emojis {
   display: flex;

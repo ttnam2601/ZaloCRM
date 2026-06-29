@@ -4,6 +4,7 @@
  */
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '../../shared/database/prisma-client.js';
+import { getCachedMemberProfile } from '../../shared/zalo-operations.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { requireZaloAccess } from '../zalo/zalo-access-middleware.js';
 import { zaloPool } from '../zalo/zalo-pool.js';
@@ -73,7 +74,7 @@ const profileTouchCooldown = new Map<string, number>();
 const PROFILE_TOUCH_COOLDOWN_MS = 5 * 60_000;
 const groupHistorySyncCooldown = new Map<string, number>();
 
-async function resolveReactorNames(messages: any[]) {
+async function resolveReactorNames(messages: any[], defaultZaloAccountId?: string) {
   const missingUids = new Set<string>();
   for (const msg of messages) {
     if (msg?.reactions) {
@@ -122,12 +123,21 @@ async function resolveReactorNames(messages: any[]) {
   }
 
   for (const msg of messages) {
+    const zaloAccountId = msg.zaloAccountId || defaultZaloAccountId;
     if (msg?.reactions) {
       for (const rx of msg.reactions) {
         if (rx.reactorSource === 'zalo' && (!rx.reactorName || rx.reactorName === 'Người dùng')) {
           const resolved = nameMap.get(rx.reactorId);
           if (resolved) {
             rx.reactorName = resolved;
+          } else if (zaloAccountId) {
+            const cachedProfile = getCachedMemberProfile(zaloAccountId, rx.reactorId);
+            if (cachedProfile) {
+              const name = cachedProfile.displayName || cachedProfile.name || cachedProfile.dName || cachedProfile.zaloName;
+              if (name) {
+                rx.reactorName = name;
+              }
+            }
           }
         }
       }
@@ -442,7 +452,7 @@ export async function chatRoutes(app: FastifyInstance) {
             // Primary sort by Zalo Snowflake numeric (match 100% Zalo Web), sentAt fallback
             // cho CRM-sent in-flight messages chưa nhận echo zaloMsgId.
             orderBy: [{ sentAt: 'desc' }, { zaloMsgIdNum: { sort: 'desc', nulls: 'last' } }],
-            select: { id: true, zaloMsgId: true, senderUid: true, senderName: true, content: true, contentType: true, senderType: true, sentAt: true, isDeleted: true, editedAt: true, reactions: { select: { emoji: true, reactorId: true, reactorName: true, reactorSource: true } } },
+            select: { id: true, zaloMsgId: true, senderUid: true, senderName: true, content: true, contentType: true, senderType: true, sentAt: true, isDeleted: true, editedAt: true, reactions: { select: { emoji: true, reactorId: true, reactorName: true, reactorSource: true, createdAt: true } } },
           },
         },
         orderBy: orderByClause,
@@ -546,7 +556,13 @@ export async function chatRoutes(app: FastifyInstance) {
       }]));
     }
 
-    const latestMsgs = conversations.map(c => c.messages?.[0]).filter(Boolean);
+    const latestMsgs = conversations.map(c => {
+      const msg = c.messages?.[0];
+      if (msg) {
+        (msg as any).zaloAccountId = c.zaloAccountId;
+      }
+      return msg;
+    }).filter(Boolean);
     await resolveReactorNames(latestMsgs);
 
     // PRIVACY REDACT 2026-05-22 — apply redactConversationRow + redactMessage
@@ -971,14 +987,14 @@ export async function chatRoutes(app: FastifyInstance) {
           albumKey: true,
           albumIndex: true,
           albumTotal: true,
-          reactions: { select: { emoji: true, reactorId: true, reactorName: true, reactorSource: true } },
+          reactions: { select: { emoji: true, reactorId: true, reactorName: true, reactorSource: true, createdAt: true } },
         },
       }),
       prisma.message.count({ where: { conversationId: id } }),
     ]);
 
     const ordered = messages.reverse();
-    await resolveReactorNames(ordered);
+    await resolveReactorNames(ordered, conversation.zaloAccountId);
     const redacted = ordered.map((m) => {
       const r = redactMessage(m as any, conversation as any, privacyCtx);
       // BigInt zaloMsgIdNum → string cho JSON serialize

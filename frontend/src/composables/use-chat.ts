@@ -59,7 +59,7 @@ export interface ReplyMessageRef {
 
 interface RawMessage extends Omit<Message, 'reactions' | 'reply'> {
   quote?: ReplyMessageRef | null;
-  reactions?: Array<{ emoji: string; reactorId: string; reactorName?: string | null; reactorSource?: string; count?: number; reacted?: boolean }>;
+  reactions?: Array<{ emoji: string; reactorId: string; reactorName?: string | null; reactorSource?: string; count?: number; reacted?: boolean; createdAt?: string | null }>;
 }
 
 export interface FriendshipInfo {
@@ -136,7 +136,7 @@ export interface Message {
   albumTotal: number | null;
   reply?: ReplyMessageRef | null;
   reactions?: MessageReactionView[];
-  reactionDetails?: Array<{ userId: string; userName?: string | null; emoji: string; source?: 'crm' | 'zalo' }>;
+  reactionDetails?: Array<{ userId: string; userName?: string | null; emoji: string; source?: 'crm' | 'zalo'; createdAt?: string | null }>;
   // Edit audit (2026-05-21) — set khi sale sửa tin trên CRM. Edit chỉ áp dụng local, không sync Zalo.
   originalContent?: string | null;
   editedAt?: string | null;
@@ -374,6 +374,7 @@ export function useChat() {
         userName: r.reactorName || null,
         emoji: r.emoji,
         source: (r.reactorSource || 'crm') as 'crm' | 'zalo',
+        createdAt: r.createdAt || null,
       })) || [],
     };
   }
@@ -737,6 +738,7 @@ export function useChat() {
               userName: r.userName,
               emoji: r.reaction,
               source: r.source || 'crm',
+              createdAt: new Date().toISOString(),
             });
           }
         } else if (r.action === 'remove') {
