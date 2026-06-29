@@ -492,7 +492,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
 
           const now = new Date();
           const formattedTime = formatVNTime(now);
-          await prisma.message.create({
+          const message = await prisma.message.create({
             data: {
               conversationId: conversation.id,
               zaloMsgIdNum: BigInt(now.getTime()) * 10000n,
@@ -502,6 +502,16 @@ export async function groupModerationRoutes(app: FastifyInstance) {
               sentVia: 'system',
               sentAt: now,
             },
+          });
+
+          const io = (app as any).io;
+          io?.emit('chat:message', {
+            accountId,
+            message: {
+              ...message,
+              zaloMsgIdNum: message.zaloMsgIdNum?.toString(),
+            },
+            conversationId: conversation.id,
           });
         }
       } catch (dbErr) {

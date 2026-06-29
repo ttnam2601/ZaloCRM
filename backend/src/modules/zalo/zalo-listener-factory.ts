@@ -706,11 +706,66 @@ export function attachZaloListener(ctx: ListenerContext): void {
       if (!conversation) return;
 
       let logText = '';
+      const actorId = event?.data?.actorId || event?.data?.sourceId || event?.data?.creatorId || event?.actorId || event?.creatorId;
+
+      const getActorName = async () => {
+        let actorName = 'Một thành viên';
+        if (actorId) {
+          const actorIdStripped = actorId.split('_')[0];
+          const actorIdWithSuffix = `${actorIdStripped}_0`;
+          const [friend, contact, acc] = await Promise.all([
+            prisma.friend.findFirst({
+              where: {
+                OR: [
+                  { zaloUidInNick: actorId },
+                  { zaloUidInNick: actorIdStripped },
+                  { zaloUidInNick: actorIdWithSuffix }
+                ]
+              },
+              select: { aliasInNick: true, zaloDisplayName: true }
+            }),
+            prisma.contact.findFirst({
+              where: {
+                zaloUid: { in: [actorId, actorIdStripped, actorIdWithSuffix] }
+              },
+              select: { crmName: true, fullName: true }
+            }),
+            prisma.zaloAccount.findFirst({
+              where: {
+                zaloUid: { in: [actorId, actorIdStripped, actorIdWithSuffix] }
+              },
+              select: { displayName: true }
+            })
+          ]);
+          const name = friend?.aliasInNick || friend?.zaloDisplayName || contact?.crmName || contact?.fullName || acc?.displayName;
+          if (name) {
+            actorName = name;
+          } else {
+            try {
+              const userInfo = await resolveZaloName(api, actorIdStripped, userInfoCache);
+              if (userInfo && userInfo.zaloName) actorName = userInfo.zaloName;
+            } catch (sdkErr) {
+              logger.warn(`[attachZaloListener] SDK lookup for actor ${actorId} failed: ${(sdkErr as Error).message}`);
+            }
+          }
+        }
+        return actorName;
+      };
+
       if (type === 'join') {
         const members = event.data?.updateMembers || [];
+        const memberUids = new Set(members.map((m: any) => String(m.uid || '')));
+        const actorIdStripped = actorId ? String(actorId).split('_')[0] : '';
+        const isSelfJoin = !actorIdStripped || memberUids.has(actorIdStripped);
+
         if (members.length > 0) {
           const names = members.map((m: any) => m.dName || 'Thành viên mới').join(', ');
-          logText = `${names} đã tham gia nhóm`;
+          if (isSelfJoin) {
+            logText = `${names} đã tham gia nhóm`;
+          } else {
+            const actorName = await getActorName();
+            logText = `${actorName} đã thêm ${names} vào nhóm`;
+          }
         } else if (event.isSelf) {
           logText = `Bạn đã tham gia nhóm`;
         } else {
@@ -730,13 +785,12 @@ export function attachZaloListener(ctx: ListenerContext): void {
         const members = event.data?.updateMembers || [];
         if (members.length > 0) {
           const names = members.map((m: any) => m.dName || 'Thành viên').join(', ');
-          logText = `${names} đã bị xóa khỏi nhóm`;
+          const actorName = await getActorName();
+          logText = `${names} đã bị xóa khỏi nhóm bởi ${actorName}`;
         } else {
           logText = `Một thành viên đã bị xóa khỏi nhóm`;
         }
-      }
-
-      if (type === 'update_avatar' && (event.data?.avt || event.data?.fullAvt)) {
+      } else if (type === 'update_avatar' && (event.data?.avt || event.data?.fullAvt)) {
         const groupAvatarUrl = event.data.avt || event.data.fullAvt;
         const updated = await prisma.conversation.update({
           where: { id: conversation.id },
@@ -744,47 +798,7 @@ export function attachZaloListener(ctx: ListenerContext): void {
         });
         io?.emit('conversation:updated', updated);
 
-        let actorName = 'Một thành viên';
-        const actorId = event?.data?.actorId || event?.data?.sourceId || event?.data?.creatorId || event?.actorId || event?.creatorId;
-        if (actorId) {
-          const actorIdStripped = actorId.split('_')[0];
-          const actorIdWithSuffix = `${actorIdStripped}_0`;
-          const [friend, contact, acc] = await Promise.all([
-            prisma.friend.findFirst({
-              where: {
-                OR: [
-                  { zaloUidInNick: actorId },
-                  { zaloUidInNick: actorIdStripped },
-                  { zaloUidInNick: actorIdWithSuffix }
-                ]
-              },
-              select: { aliasInNick: true, zaloDisplayName: true }
-            }),
-            prisma.contact.findFirst({
-              where: {
-                zaloUid: { in: [actorId, actorIdStripped, actorIdWithSuffix] }
-              },
-              select: { crmName: true, fullName: true }
-            }),
-            prisma.zaloAccount.findFirst({
-              where: {
-                zaloUid: { in: [actorId, actorIdStripped, actorIdWithSuffix] }
-              },
-              select: { displayName: true }
-            })
-          ]);
-          const name = friend?.aliasInNick || friend?.zaloDisplayName || contact?.crmName || contact?.fullName || acc?.displayName;
-          if (name) {
-            actorName = name;
-          } else {
-            try {
-              const userInfo = await resolveZaloName(api, actorIdStripped, userInfoCache);
-              if (userInfo && userInfo.zaloName) actorName = userInfo.zaloName;
-            } catch (sdkErr) {
-              logger.warn(`[attachZaloListener] SDK lookup for actor ${actorId} failed: ${(sdkErr as Error).message}`);
-            }
-          }
-        }
+        const actorName = await getActorName();
         logText = `${actorName} đã đổi ảnh đại diện nhóm`;
       } else if (type === 'update' && event.data?.groupName) {
         const groupName = event.data.groupName;
@@ -802,47 +816,7 @@ export function attachZaloListener(ctx: ListenerContext): void {
         });
         io?.emit('conversation:updated', updated);
 
-        let actorName = 'Một thành viên';
-        const actorId = event?.data?.actorId || event?.data?.sourceId || event?.data?.creatorId || event?.actorId || event?.creatorId;
-        if (actorId) {
-          const actorIdStripped = actorId.split('_')[0];
-          const actorIdWithSuffix = `${actorIdStripped}_0`;
-          const [friend, contact, acc] = await Promise.all([
-            prisma.friend.findFirst({
-              where: {
-                OR: [
-                  { zaloUidInNick: actorId },
-                  { zaloUidInNick: actorIdStripped },
-                  { zaloUidInNick: actorIdWithSuffix }
-                ]
-              },
-              select: { aliasInNick: true, zaloDisplayName: true }
-            }),
-            prisma.contact.findFirst({
-              where: {
-                zaloUid: { in: [actorId, actorIdStripped, actorIdWithSuffix] }
-              },
-              select: { crmName: true, fullName: true }
-            }),
-            prisma.zaloAccount.findFirst({
-              where: {
-                zaloUid: { in: [actorId, actorIdStripped, actorIdWithSuffix] }
-              },
-              select: { displayName: true }
-            })
-          ]);
-          const name = friend?.aliasInNick || friend?.zaloDisplayName || contact?.crmName || contact?.fullName || acc?.displayName;
-          if (name) {
-            actorName = name;
-          } else {
-            try {
-              const userInfo = await resolveZaloName(api, actorIdStripped, userInfoCache);
-              if (userInfo && userInfo.zaloName) actorName = userInfo.zaloName;
-            } catch (sdkErr) {
-              logger.warn(`[attachZaloListener] SDK lookup for actor ${actorId} failed: ${(sdkErr as Error).message}`);
-            }
-          }
-        }
+        const actorName = await getActorName();
 
         if (oldGroupName && oldGroupName !== groupName) {
           logText = `${actorName} đã đổi tên nhóm từ "${oldGroupName}" thành "${groupName}"`;
