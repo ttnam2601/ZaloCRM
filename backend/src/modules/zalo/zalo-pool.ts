@@ -91,6 +91,18 @@ class ZaloAccountPool {
   // Initiate QR-based login; emits QR events to frontend via Socket.IO
   async loginQR(accountId: string, proxyUrl?: string | null): Promise<void> {
     this.manuallyDisabled.delete(accountId);
+
+    // Cleanup previous instance if it exists
+    const prevInstance = this.instances.get(accountId);
+    if (prevInstance?.api?.listener) {
+      try {
+        prevInstance.api.listener.stop();
+      } catch (err) {
+        logger.warn(`[zalo:${accountId}] Error stopping previous listener during QR login:`, err);
+      }
+    }
+    stopMessageSync(accountId);
+
     const zalo = new Zalo({ logging: false, selfListen: true, imageMetadataGetter });
     this.instances.set(accountId, { zalo, api: null, status: 'qr_pending', lastActivity: new Date() });
 
@@ -200,6 +212,18 @@ class ZaloAccountPool {
   // Reconnect using previously saved session credentials
   async reconnect(accountId: string, credentials: ZaloCredentials, proxyUrl?: string | null): Promise<void> {
     this.manuallyDisabled.delete(accountId);
+
+    // Cleanup previous instance if it exists
+    const prevInstance = this.instances.get(accountId);
+    if (prevInstance?.api?.listener) {
+      try {
+        prevInstance.api.listener.stop();
+      } catch (err) {
+        logger.warn(`[zalo:${accountId}] Error stopping previous listener during reconnect:`, err);
+      }
+    }
+    stopMessageSync(accountId);
+
     const zalo = new Zalo({ logging: false, selfListen: true, imageMetadataGetter });
     this.instances.set(accountId, { zalo, api: null, status: 'connecting', lastActivity: new Date() });
 

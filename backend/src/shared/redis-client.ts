@@ -26,12 +26,20 @@ export async function getRedis(): Promise<Redis | null> {
       retryStrategy: (times: number) => Math.min(times * 200, 3000),
       lazyConnect: true,
     });
+    redisInstance.on('error', (err) => {
+      logger.warn('[redis] ioredis error: %s', err.message);
+    });
     await redisInstance.connect();
     logger.info('[redis] Connected to %s', url.replace(/\/\/.*@/, '//*:*@'));
     return redisInstance;
   } catch (err) {
     logger.warn('[redis] Connection failed, falling back to in-memory: %s', (err as Error).message);
-    redisInstance = null;
+    if (redisInstance) {
+      try {
+        redisInstance.disconnect();
+      } catch {}
+      redisInstance = null;
+    }
     return null;
   }
 }
