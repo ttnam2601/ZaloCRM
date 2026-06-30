@@ -38,74 +38,105 @@
       </div>
     </header>
 
+    <!-- ════════ Tab bar ════════ -->
+    <nav class="gp-tabs">
+      <button
+        class="gp-tab"
+        :class="{ active: activeTab === 'members' }"
+        @click="activeTab = 'members'"
+      >
+        <span class="ic">👥</span> Thành viên
+      </button>
+      <button
+        class="gp-tab"
+        :class="{ active: activeTab === 'notes' }"
+        @click="activeTab = 'notes'"
+      >
+        <span class="ic">📝</span> Ghi chú
+      </button>
+    </nav>
+
     <!-- Body -->
-    <div class="gp-body">
-      <!-- Section title -->
-      <div class="gp-section-title">
-        <span>Thành viên nhóm</span>
-        <button class="gp-refresh-btn" :disabled="loading" title="Tải lại danh sách" @click="() => loadMembers(true)">
-          <svg :class="{ spin: loading }" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
-          </svg>
-        </button>
-      </div>
-
-      <!-- Loading -->
-      <div v-if="loading" class="gp-loading">
-        <div class="gp-spinner">
-          <div class="gp-spinner-ring" />
+    <div class="gp-body" :class="{ 'no-scroll': activeTab === 'notes' }">
+      <!-- TAB 1: MEMBERS -->
+      <div v-show="activeTab === 'members'" class="gp-tab-pane">
+        <!-- Section title -->
+        <div class="gp-section-title">
+          <span>Thành viên nhóm</span>
+          <button class="gp-refresh-btn" :disabled="loading" title="Tải lại danh sách" @click="() => loadMembers(true)">
+            <svg :class="{ spin: loading }" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+            </svg>
+          </button>
         </div>
-        <span class="gp-loading-text">Đang tải danh sách thành viên...</span>
-      </div>
 
-      <!-- Error -->
-      <div v-else-if="error" class="gp-error">
-        <div class="gp-error-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-          </svg>
-        </div>
-        <p>{{ error }}</p>
-        <button class="gp-retry-btn" @click="() => loadMembers()">Thử lại</button>
-      </div>
-
-      <!-- Empty -->
-      <div v-else-if="members.length === 0" class="gp-empty">
-        <div class="gp-empty-icon">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor" opacity="0.3">
-            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-          </svg>
-        </div>
-        <p>Không có dữ liệu thành viên</p>
-      </div>
-
-      <!-- Member list -->
-      <ul v-else class="gp-member-list">
-        <li
-          v-for="m in membersSorted"
-          :key="m.uid"
-          class="gp-member-item"
-          :class="`role-${m.role}`"
-        >
-          <div class="gp-member-avatar-wrap">
-            <Avatar
-              :src="m.avatar ?? undefined"
-              :name="m.name"
-              :size="38"
-              :gradient-seed="m.uid"
-              class="gp-member-avatar"
-            />
-            <span v-if="m.role === 'owner'" class="gp-role-dot owner" title="Chủ nhóm">👑</span>
-            <span v-else-if="m.role === 'admin'" class="gp-role-dot admin" title="Quản trị viên">🛡️</span>
+        <!-- Loading -->
+        <div v-if="loading" class="gp-loading">
+          <div class="gp-spinner">
+            <div class="gp-spinner-ring" />
           </div>
-          <div class="gp-member-info">
-            <span class="gp-member-name">{{ m.name }}</span>
-            <span class="gp-member-uid">{{ m.uid }}</span>
+          <span class="gp-loading-text">Đang tải danh sách thành viên...</span>
+        </div>
+
+        <!-- Error -->
+        <div v-else-if="error" class="gp-error">
+          <div class="gp-error-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
           </div>
-          <span v-if="m.role === 'owner'" class="gp-role-label owner">Chủ nhóm</span>
-          <span v-else-if="m.role === 'admin'" class="gp-role-label admin">Phó nhóm</span>
-        </li>
-      </ul>
+          <p>{{ error }}</p>
+          <button class="gp-retry-btn" @click="() => loadMembers()">Thử lại</button>
+        </div>
+
+        <!-- Empty -->
+        <div v-else-if="members.length === 0" class="gp-empty">
+          <div class="gp-empty-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor" opacity="0.3">
+              <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+            </svg>
+          </div>
+          <p>Không có dữ liệu thành viên</p>
+        </div>
+
+        <!-- Member list -->
+        <ul v-else class="gp-member-list">
+          <li
+            v-for="m in membersSorted"
+            :key="m.uid"
+            class="gp-member-item"
+            :class="`role-${m.role}`"
+          >
+            <div class="gp-member-avatar-wrap">
+              <Avatar
+                :src="m.avatar ?? undefined"
+                :name="m.name"
+                :size="38"
+                :gradient-seed="m.uid"
+                class="gp-member-avatar"
+              />
+              <span v-if="m.role === 'owner'" class="gp-role-dot owner" title="Chủ nhóm">👑</span>
+              <span v-else-if="m.role === 'admin'" class="gp-role-dot admin" title="Quản trị viên">🛡️</span>
+            </div>
+            <div class="gp-member-info">
+              <span class="gp-member-name">{{ m.name }}</span>
+              <span class="gp-member-uid">{{ m.uid }}</span>
+            </div>
+            <span v-if="m.role === 'owner'" class="gp-role-label owner">Chủ nhóm</span>
+            <span v-else-if="m.role === 'admin'" class="gp-role-label admin">Phó nhóm</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- TAB 2: NOTES -->
+      <div v-show="activeTab === 'notes'" class="gp-tab-pane gp-notes-pane">
+        <section class="gp-section gp-notes-section">
+          <CustomerTimelineSection
+            :contact-id="conversation.contact?.id || null"
+            :contact-name="groupName"
+          />
+        </section>
+      </div>
     </div>
 
     <!-- Footer: Leave Group Button -->
@@ -171,6 +202,7 @@ import type { Conversation } from '@/composables/use-chat';
 import Avatar from '@/components/ui/Avatar.vue';
 import { api } from '@/api';
 import { useToast } from '@/composables/use-toast';
+import CustomerTimelineSection from './CustomerTimelineSection.vue';
 
 interface GroupMember {
   uid: string;
@@ -182,6 +214,8 @@ interface GroupMember {
 const props = defineProps<{
   conversation: Conversation;
 }>();
+
+const activeTab = ref<'members' | 'notes'>('members');
 
 const emit = defineEmits<{
   close: [];
@@ -277,7 +311,10 @@ async function confirmLeave() {
 }
 
 // Reload when conversation changes
-watch(() => props.conversation.id, () => { loadMembers(); }, { immediate: false });
+watch(() => props.conversation.id, () => {
+  activeTab.value = 'members';
+  loadMembers();
+}, { immediate: false });
 onMounted(() => { loadMembers(); });
 </script>
 
@@ -807,5 +844,68 @@ onMounted(() => { loadMembers(); });
   border-top-color: #fff;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
+}
+
+/* ─── Tabs & Tab Panels ─── */
+.gp-tabs {
+  display: flex;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  flex-shrink: 0;
+}
+
+.gp-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 10px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: inherit;
+  position: relative;
+  transition: all 0.15s;
+}
+
+.gp-tab .ic {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.gp-tab:hover {
+  color: #1b6ca8;
+  background: #f1f5f9;
+}
+
+.gp-tab.active {
+  color: #1b6ca8;
+  border-bottom-color: #1b6ca8;
+  background: #fff;
+  font-weight: 600;
+}
+
+.gp-tab-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.gp-notes-pane {
+  padding: 12px 14px;
+}
+
+.gp-notes-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.gp-body.no-scroll {
+  overflow-y: hidden;
 }
 </style>
