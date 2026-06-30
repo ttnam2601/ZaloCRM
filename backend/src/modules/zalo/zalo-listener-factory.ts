@@ -499,10 +499,17 @@ export function attachZaloListener(ctx: ListenerContext): void {
       let groupAvatarUrl: string | undefined;
       let groupMembersCount: number | undefined;
       if (isGroup && message.threadId) {
-        const groupInfo = await resolveGroupInfo(api, message.threadId);
-        groupName = groupInfo.name || undefined;
-        groupAvatarUrl = groupInfo.avatar || undefined;
-        groupMembersCount = groupInfo.membersCount ?? undefined;
+        // Only resolve group info from Zalo API if group is new or does not have metadata in DB
+        const existingConv = await prisma.conversation.findFirst({
+          where: { zaloAccountId: accountId, externalThreadId: message.threadId },
+          select: { id: true, groupName: true },
+        });
+        if (!existingConv || !existingConv.groupName) {
+          const groupInfo = await resolveGroupInfo(api, message.threadId);
+          groupName = groupInfo.name || undefined;
+          groupAvatarUrl = groupInfo.avatar || undefined;
+          groupMembersCount = groupInfo.membersCount ?? undefined;
+        }
       }
 
       const rawContent = message.data?.content;
@@ -693,10 +700,17 @@ export function attachZaloListener(ctx: ListenerContext): void {
         let groupAvatarUrl: string | undefined;
         let groupMembersCount: number | undefined;
         if (threadType === 'group' && resolvedThreadId) {
-          const groupInfo = await resolveGroupInfo(api, resolvedThreadId);
-          groupName = groupInfo.name || undefined;
-          groupAvatarUrl = groupInfo.avatar || undefined;
-          groupMembersCount = groupInfo.membersCount ?? undefined;
+          // Only resolve group info from Zalo API if group is new or does not have metadata in DB
+          const existingConv = await prisma.conversation.findFirst({
+            where: { zaloAccountId: accountId, externalThreadId: resolvedThreadId },
+            select: { id: true, groupName: true },
+          });
+          if (!existingConv || !existingConv.groupName) {
+            const groupInfo = await resolveGroupInfo(api, resolvedThreadId);
+            groupName = groupInfo.name || undefined;
+            groupAvatarUrl = groupInfo.avatar || undefined;
+            groupMembersCount = groupInfo.membersCount ?? undefined;
+          }
         }
 
         const rawContent = message.data?.content;
