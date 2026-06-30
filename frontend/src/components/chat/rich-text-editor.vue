@@ -396,12 +396,15 @@ const editor = useEditor({
   onBlur() { isFocused.value = false; },
 });
 
-// Sync external modelValue changes into editor
 watch(() => props.modelValue, (val) => {
   if (!editor.value) return;
   const current = editor.value.getText();
   if (val !== current) {
-    editor.value.commands.setContent(val || '');
+    const html = (val || '')
+      .split('\n')
+      .map(line => `<p>${line || '<br>'}</p>`)
+      .join('');
+    editor.value.commands.setContent(html);
   }
 });
 
