@@ -613,7 +613,7 @@ async function joinGroupByLink(accountId: string, linkIdOrUrl: string) {
   const fullLink = linkIdOrUrl.startsWith('http') 
     ? linkIdOrUrl 
     : `https://zalo.me/g/${linkIdOrUrl}`;
-  return exec({ accountId, category: 'group_admin', operation: 'joinGroupByLink' },
+  return exec({ accountId, category: 'group_read', operation: 'joinGroupByLink' },
     (api) => api.joinGroupLink(fullLink));
 }
 
