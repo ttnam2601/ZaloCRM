@@ -237,6 +237,7 @@ export function useChat() {
   const searchQuery = ref('');
   const accountFilter = ref<string | null>(null);
   const aiSuggestion = ref('');
+  const aiSuggestionStyles = ref<any[]>([]);
   const aiSuggestionLoading = ref(false);
   const aiSuggestionError = ref('');
   const aiSummary = ref('');
@@ -267,6 +268,7 @@ export function useChat() {
 
   function clearAiState() {
     aiSuggestion.value = '';
+    aiSuggestionStyles.value = [];
     aiSuggestionError.value = '';
     aiSummary.value = '';
     aiSentiment.value = null;
@@ -468,6 +470,7 @@ export function useChat() {
     try {
       const res = await api.post('/ai/suggest', { conversationId: selectedConvId.value });
       aiSuggestion.value = res.data.content || '';
+      aiSuggestionStyles.value = res.data.styles || [];
       await fetchAiUsage();
     } catch (err: any) {
       aiSuggestionError.value = err.response?.data?.error || 'Không thể tạo gợi ý AI';
@@ -849,6 +852,7 @@ export function useChat() {
     accountFilter,
     extraFilters,
     aiSuggestion,
+    aiSuggestionStyles,
     aiSuggestionLoading,
     aiSuggestionError,
     aiSummary,

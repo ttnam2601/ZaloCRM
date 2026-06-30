@@ -49,6 +49,7 @@
       :loading="loadingMsgs"
       :sending="sendingMsg"
       :ai-suggestion="aiSuggestion"
+      :ai-suggestion-styles="aiSuggestionStyles"
       :ai-suggestion-loading="aiSuggestionLoading"
       :ai-suggestion-error="aiSuggestionError"
       :all-conversations="conversations"
@@ -142,7 +143,7 @@ const router = useRouter();
 const {
   conversations, selectedConvId, selectedConv, messages,
   loadingConvs, loadingMsgs, sendingMsg, searchQuery, accountFilter, extraFilters,
-  aiSuggestion, aiSuggestionLoading, aiSuggestionError,
+  aiSuggestion, aiSuggestionStyles, aiSuggestionLoading, aiSuggestionError,
   aiSummary, aiSummaryLoading, aiSentiment, aiSentimentLoading,
   fetchConversations, fetchAiConfig, fetchMessages, selectConversation, sendMessage,
   generateAiSuggestion, generateAiSummary, generateAiSentiment,

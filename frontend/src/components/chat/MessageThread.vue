@@ -839,6 +839,7 @@ const props = defineProps<{
   sending: boolean;
   showContactPanel?: boolean;
   aiSuggestion: string;
+  aiSuggestionStyles?: any[];
   aiSuggestionLoading: boolean;
   aiSuggestionError: string;
   allConversations?: Conversation[];
@@ -2185,11 +2186,16 @@ function handleSend() {
 async function applySuggestion(text?: string) {
   const t = text || props.aiSuggestion;
   if (!t) return;
-  inputText.value = t;
-  // setContent ở RichTextEditor là async qua watch — đợi nextTick để editor update
-  // xong rồi mới focus 'end' (caret tại cuối text). Tránh focus trước khi content mount.
-  await nextTick();
-  setTimeout(() => editorRef.value?.focus('end'), 30);
+  
+  if (props.aiSuggestionStyles && props.aiSuggestionStyles.length > 0) {
+    editorRef.value?.applyRichPayload({ text: t, styles: props.aiSuggestionStyles });
+  } else {
+    inputText.value = t;
+    // setContent ở RichTextEditor là async qua watch — đợi nextTick để editor update
+    // xong rồi mới focus 'end' (caret tại cuối text). Tránh focus trước khi content mount.
+    await nextTick();
+    setTimeout(() => editorRef.value?.focus('end'), 30);
+  }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
