@@ -737,14 +737,25 @@ async function findOrCreateConversation(
 
   const existing = await prisma.conversation.findFirst({
     where: { zaloAccountId: msg.accountId, externalThreadId },
-    select: { id: true, groupName: true, groupAvatarUrl: true, groupMembersCount: true },
+    select: { id: true, contactId: true, groupName: true, groupAvatarUrl: true, groupMembersCount: true },
   });
 
   if (existing) {
     // Update group metadata if changed (sync mới hơn so với DB)
     if (msg.threadType === 'group') {
       const updates: { groupName?: string; groupAvatarUrl?: string; groupMembersCount?: number } = {};
-      if (msg.groupName && msg.groupName !== existing.groupName) updates.groupName = msg.groupName;
+      if (msg.groupName && msg.groupName !== existing.groupName) {
+        updates.groupName = msg.groupName;
+        // Also update contact fullName representing the group
+        if (existing.contactId) {
+          await prisma.contact.update({
+            where: { id: existing.contactId },
+            data: { fullName: msg.groupName },
+          }).catch((err) => {
+            logger.warn('[message-handler] failed to update group contact name', err);
+          });
+        }
+      }
       if (msg.groupAvatarUrl && msg.groupAvatarUrl !== existing.groupAvatarUrl) updates.groupAvatarUrl = msg.groupAvatarUrl;
       if (msg.groupMembersCount != null && msg.groupMembersCount !== existing.groupMembersCount) {
         updates.groupMembersCount = msg.groupMembersCount;

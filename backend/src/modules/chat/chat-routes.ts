@@ -329,10 +329,17 @@ export async function chatRoutes(app: FastifyInstance) {
     // Contact-level filter — gộp vào where.contact nested
     const contactWhere: Record<string, unknown> = {};
     if (search) {
-      contactWhere.OR = [
-        { fullName: { contains: search, mode: 'insensitive' } },
-        { crmName: { contains: search, mode: 'insensitive' } },
-        { phone: { contains: search } },
+      where.OR = [
+        { groupName: { contains: search, mode: 'insensitive' } },
+        {
+          contact: {
+            OR: [
+              { fullName: { contains: search, mode: 'insensitive' } },
+              { crmName: { contains: search, mode: 'insensitive' } },
+              { phone: { contains: search } },
+            ]
+          }
+        }
       ];
     }
     if (statusId) contactWhere.statusId = statusId;
@@ -374,16 +381,7 @@ export async function chatRoutes(app: FastifyInstance) {
             },
           },
         ];
-        // Combine với search OR (nếu có) qua AND wrapper — tránh overwrite.
-        if (contactWhere.OR) {
-          contactWhere.AND = [
-            { OR: contactWhere.OR as Record<string, unknown>[] },
-            { OR: tagSourceOR },
-          ];
-          delete contactWhere.OR;
-        } else {
-          contactWhere.OR = tagSourceOR;
-        }
+        contactWhere.OR = tagSourceOR;
       }
     }
     // KH có ít nhất 1 Friend với kind trong list (Friend level filter)
