@@ -473,7 +473,7 @@ async function unblockGroupMember(accountId: string, userId: string, groupId: st
 }
 
 async function leaveGroup(accountId: string, groupId: string, silent: boolean = true) {
-  const result = await exec({ accountId, category: 'group_admin', operation: 'leaveGroup' },
+  const result = await exec({ accountId, category: 'group_read', operation: 'leaveGroup' },
     (api) => api.leaveGroup(groupId, silent));
   invalidateGroupCache(accountId, groupId);
   return result;
