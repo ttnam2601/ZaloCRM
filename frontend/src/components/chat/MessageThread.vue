@@ -469,6 +469,7 @@
               @submit="handleSend"
               @typing="onTypingEvent"
               @paste-image="onPasteImage"
+              @focus="onEditorFocus"
             />
             <!-- Privacy lock overlay — chỉ phủ input editor, KHÔNG che toolbar bên ngoài -->
             <div
@@ -947,6 +948,18 @@ async function loadGroupMembers() {
     console.error('Failed to load group members for mentions:', err);
   }
 }
+
+function onEditorFocus() {
+  if (props.conversation?.threadType === 'group' && groupMembers.value.length === 0) {
+    void loadGroupMembers();
+  }
+}
+
+watch(() => inputText.value, (newText) => {
+  if (props.conversation?.threadType === 'group' && newText.includes('@') && groupMembers.value.length === 0) {
+    void loadGroupMembers();
+  }
+});
 const currentTypers = computed(() => props.typingUsers || []);
 
 // 2026-05-22 anh chốt Zalo native UX: chỉ tin OUTGOING CUỐI CÙNG mới hiện
@@ -2243,6 +2256,7 @@ watch(() => props.messages.length, async () => {
 // + Auto-focus input editor → gõ tin được ngay không cần click thêm
 //   (matching Zalo/Messenger native behavior). Skip mobile để tránh bật bàn phím ảo.
 watch(() => props.conversation?.id, async (newId) => {
+  groupMembers.value = []; // Reset members list on conversation change
   if (!newId) return;
   await nextTick();
   scrollToBottom();
@@ -2250,7 +2264,6 @@ watch(() => props.conversation?.id, async (newId) => {
   if (typeof window !== 'undefined' && window.innerWidth >= 768) {
     setTimeout(() => editorRef.value?.focus(), 80);
   }
-  loadGroupMembers();
 }, { immediate: true });
 
 // Auto-apply AI suggestion ngay khi generate xong (transition empty → non-empty).

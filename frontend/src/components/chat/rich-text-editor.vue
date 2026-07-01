@@ -270,6 +270,7 @@ const emit = defineEmits<{
   submit: [];
   typing: [];
   'paste-image': [files: File[]];
+  focus: [];
 }>();
 
 const isFocused = ref(false);
@@ -392,7 +393,10 @@ const editor = useEditor({
     emit('update:modelValue', text);
     emit('typing');
   },
-  onFocus() { isFocused.value = true; },
+  onFocus() {
+    isFocused.value = true;
+    emit('focus');
+  },
   onBlur() { isFocused.value = false; },
 });
 

@@ -387,8 +387,8 @@ async function getPinConversations(accountId: string) {
 const groupInfoCache = new Map<string, { data: any; timestamp: number }>();
 const memberProfileCache = new Map<string, { data: any; timestamp: number }>();
 
-const GROUP_INFO_TTL_MS = 3 * 60 * 1000; // 3 minutes cache for group metadata
-const MEMBER_PROFILE_TTL_MS = 20 * 60 * 1000; // 20 minutes cache for member profiles
+const GROUP_INFO_TTL_MS = 30 * 60 * 1000; // 30 minutes cache for group metadata
+const MEMBER_PROFILE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours cache for member profiles
 
 function invalidateGroupCache(accountId: string, groupId: string) {
   const cacheKey = `${accountId}:${groupId}`;
