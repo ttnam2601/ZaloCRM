@@ -27,7 +27,7 @@
         Không có tài khoản Zalo nào đang kết nối
       </div>
 
-      <div v-slot:default v-else-if="selectedAccount">
+      <div v-else-if="selectedAccount">
         <div v-if="accounts.length === 1" class="account-name-single mb-3 text-grey-darken-1">
           Tài khoản: <strong>{{ selectedAccount.displayName }}</strong> ({{ selectedAccount.phone }})
         </div>
