@@ -417,8 +417,12 @@ export function useChat() {
           merged.sort(compareMessages);
           messages.value = merged;
         }
+        messagesCache.set(convId, messages.value);
+      } else {
+        // Nếu user đã chuyển sang conversation khác, ta vẫn lưu kết quả fetch được của conv cũ vào cache để lần sau vào lại có sẵn.
+        // Nhưng phải lưu `list` (kết quả fetch của conv cũ), KHÔNG được lưu `messages.value` (đã chuyển sang conv mới).
+        messagesCache.set(convId, list);
       }
-      messagesCache.set(convId, messages.value);
     } catch (err) {
       console.error('Failed to fetch messages:', err);
     } finally {
@@ -550,11 +554,10 @@ export function useChat() {
     await sendMessageTo(selectedConvId.value, content, replyMessageId, styles, mentions);
   }
 
-  /** Insert message vào messages.value đúng vị trí — primary key zaloMsgIdNum (Zalo Snowflake),
+  /** Insert message vào array đúng vị trí — primary key zaloMsgIdNum (Zalo Snowflake),
    *  fallback sentAt cho in-flight CRM message chưa nhận echo zaloMsgId.
    *  Binary search O(log N) — không re-sort toàn array. */
-  function insertMessageSorted(msg: Message) {
-    const arr = messages.value;
+  function insertMessageSorted(arr: Message[], msg: Message) {
     // Fast path: append-to-end (msg mới nhất, thường case)
     if (arr.length === 0 || compareMessages(arr[arr.length - 1], msg) <= 0) {
       arr.push(msg);
@@ -582,7 +585,7 @@ export function useChat() {
       const res = await api.post(`/conversations/${conversationId}/messages`, payload);
       if (conversationId === selectedConvId.value) {
         if (!messages.value.find(m => m.id === res.data.id)) {
-          insertMessageSorted(res.data);
+          insertMessageSorted(messages.value, res.data);
         }
       }
     } catch (err) {
@@ -614,17 +617,28 @@ export function useChat() {
         }
       }
 
+      const normalizedMsg = normalizeMessage(data.message as RawMessage);
+
       if (data.conversationId === selectedConvId.value) {
-        if (!messages.value.find(m => m.id === data.message.id)) {
+        if (!messages.value.find(m => m.id === normalizedMsg.id)) {
           // INSERT theo sortedBy sentAt thay vì push cuối array. Lý do: socket có
           // thể giao messages KHÔNG theo chronological order (vd old_messages backfill
           // delivers reverse, hoặc 2 msg cùng giây tới khác thứ tự server vs client).
           // Nếu push cuối thì msg cũ tới muộn → hiển thị sai vị trí (user báo
           // case "Đúng rồi bác" sent at 15:14:14 nhưng hiển thị SAU "ố toẹt vời"
           // sent at 15:14:23 vì old_messages giao ngược).
-          insertMessageSorted(normalizeMessage(data.message as RawMessage));
+          insertMessageSorted(messages.value, normalizedMsg);
         }
       }
+
+      // Luôn cập nhật cache nếu cache có tồn tại cho conversationId này
+      const cached = messagesCache.get(data.conversationId);
+      if (cached) {
+        if (!cached.find(m => m.id === normalizedMsg.id)) {
+          insertMessageSorted(cached, normalizedMsg);
+        }
+      }
+
       // Optimistic update conversation list — tránh fetch full HTTP mỗi message
       // (cũ: fetchConversations() per event → 143 rows re-render → lag rõ).
       const idx = conversations.value.findIndex(c => c.id === data.conversationId);
@@ -657,27 +671,59 @@ export function useChat() {
       scheduleConvSync();
     });
 
-    socket.on('chat:deleted', (data: { messageId?: string; zaloMsgId?: string }) => {
+    socket.on('chat:deleted', (data: { messageId?: string; zaloMsgId?: string; conversationId?: string }) => {
+      const targetId = data.messageId;
+      const targetZaloId = data.zaloMsgId;
+
       // Cột 3: update message bubble trong thread đang mở
-      const msg = messages.value.find(m => m.id === data.messageId || m.zaloMsgId === data.zaloMsgId);
+      const msg = messages.value.find(m => m.id === targetId || (targetZaloId && m.zaloMsgId === targetZaloId));
       if (msg) msg.isDeleted = true;
+
+      // Cập nhật cả cache
+      if (data.conversationId) {
+        const cached = messagesCache.get(data.conversationId);
+        const cachedMsg = cached?.find(m => m.id === targetId || (targetZaloId && m.zaloMsgId === targetZaloId));
+        if (cachedMsg) cachedMsg.isDeleted = true;
+      } else {
+        // Fallback search across all cache
+        for (const cached of messagesCache.values()) {
+          const cachedMsg = cached.find(m => m.id === targetId || (targetZaloId && m.zaloMsgId === targetZaloId));
+          if (cachedMsg) cachedMsg.isDeleted = true;
+        }
+      }
+
       // Cột 2: update preview tin cuối trong conv list — match theo id/zaloMsgId
       for (const conv of conversations.value) {
         const preview = conv.messages?.[0];
-        if (preview && (preview.id === data.messageId || preview.zaloMsgId === data.zaloMsgId)) {
+        if (preview && (preview.id === targetId || (targetZaloId && preview.zaloMsgId === targetZaloId))) {
           preview.isDeleted = true;
         }
       }
     });
 
-    socket.on('chat:message-edited', (data: { messageId?: string; zaloMsgId?: string; content: string; originalContent?: string | null; editedAt?: string }) => {
+    socket.on('chat:message-edited', (data: { conversationId?: string; messageId?: string; zaloMsgId?: string; content: string; originalContent?: string | null; editedAt?: string }) => {
+      const updateMsg = (m: Message) => {
+        m.content = data.content;
+        if (data.originalContent !== undefined) m.originalContent = data.originalContent;
+        if (data.editedAt) m.editedAt = data.editedAt;
+      };
+
       // Cột 3: cập nhật content + edit audit fields
       const msg = messages.value.find(m => m.id === data.messageId || m.zaloMsgId === data.zaloMsgId);
-      if (msg) {
-        msg.content = data.content;
-        if (data.originalContent !== undefined) msg.originalContent = data.originalContent;
-        if (data.editedAt) msg.editedAt = data.editedAt;
+      if (msg) updateMsg(msg);
+
+      // Cập nhật cả cache
+      if (data.conversationId) {
+        const cached = messagesCache.get(data.conversationId);
+        const cachedMsg = cached?.find(m => m.id === data.messageId || m.zaloMsgId === data.zaloMsgId);
+        if (cachedMsg) updateMsg(cachedMsg);
+      } else {
+        for (const cached of messagesCache.values()) {
+          const cachedMsg = cached.find(m => m.id === data.messageId || m.zaloMsgId === data.zaloMsgId);
+          if (cachedMsg) updateMsg(cachedMsg);
+        }
       }
+
       // Cột 2: preview tin cuối cũng đổi content + flag editedAt
       for (const conv of conversations.value) {
         const preview = conv.messages?.[0];
@@ -688,65 +734,80 @@ export function useChat() {
       }
     });
 
-    socket.on('chat:reactions', (data: { messageId?: string; msgId?: string; zaloMsgId?: string; reactions: { userId: string; userName: string; reaction: string; action: 'add' | 'remove'; totalCount?: number; source?: 'crm' | 'zalo' }[] }) => {
-      const msg = messages.value.find(m => m.id === data.messageId || m.id === data.msgId || m.zaloMsgId === data.zaloMsgId);
-      if (!msg) return;
-      // Merge với reactions hiện có thay vì replace — tránh mất emoji của user khác
-      const counts = new Map<string, number>();
-      const myEmojis = new Set<string>();
-      for (const r of msg.reactions || []) {
-        counts.set(r.emoji, r.count);
-        if (r.reacted) myEmojis.add(r.emoji);
-      }
-      const myId = authStore.user?.id || '';
-      for (const r of data.reactions) {
-        const emoji = r.reaction;
-        const isMine = r.userId === myId;
-        // ANTI-DRIFT FIX 2026-05-22: prefer authoritative totalCount từ BE post-mutation.
-        // Trước fix: Zalo gửi 10 events → FE increment +1 mỗi event → count=10 realtime,
-        // refresh REST trả 1 (DB composite key msg×reactor×emoji = 1 row) → mismatch.
-        // Giờ BE emit totalCount = count thực từ DB → FE set thay vì increment.
-        if (typeof r.totalCount === 'number') {
-          if (r.totalCount > 0) counts.set(emoji, r.totalCount);
-          else counts.delete(emoji);
-          if (isMine) {
-            if (r.action === 'add') myEmojis.add(emoji);
-            else if (r.action === 'remove') myEmojis.delete(emoji);
-          }
-        } else if (r.action === 'add') {
-          // Fallback cho legacy emit không kèm totalCount
-          counts.set(emoji, (counts.get(emoji) || 0) + 1);
-          if (isMine) myEmojis.add(emoji);
-        } else if (r.action === 'remove') {
-          const cur = (counts.get(emoji) || 0) - 1;
-          if (cur > 0) counts.set(emoji, cur);
-          else counts.delete(emoji);
-          if (isMine) myEmojis.delete(emoji);
+    socket.on('chat:reactions', (data: { conversationId?: string; messageId?: string; msgId?: string; zaloMsgId?: string; reactions: { userId: string; userName: string; reaction: string; action: 'add' | 'remove'; totalCount?: number; source?: 'crm' | 'zalo' }[] }) => {
+      const updateReactions = (msg: Message) => {
+        // Merge với reactions hiện có thay vì replace — tránh mất emoji của user khác
+        const counts = new Map<string, number>();
+        const myEmojis = new Set<string>();
+        for (const r of msg.reactions || []) {
+          counts.set(r.emoji, r.count);
+          if (r.reacted) myEmojis.add(r.emoji);
         }
-      }
-      msg.reactions = Array.from(counts.entries()).map(([emoji, count]) => ({ emoji, count, reacted: myEmojis.has(emoji) }));
-
-      // Update reactionDetails real-time
-      if (!msg.reactionDetails) {
-        msg.reactionDetails = [];
-      }
-      for (const r of data.reactions) {
-        if (r.action === 'add') {
-          const existing = msg.reactionDetails.find(rd => rd.userId === r.userId && rd.emoji === r.reaction);
-          if (existing) {
-            existing.userName = r.userName;
-            existing.source = r.source || 'crm';
-          } else {
-            msg.reactionDetails.push({
-              userId: r.userId,
-              userName: r.userName,
-              emoji: r.reaction,
-              source: r.source || 'crm',
-              createdAt: new Date().toISOString(),
-            });
+        const myId = authStore.user?.id || '';
+        for (const r of data.reactions) {
+          const emoji = r.reaction;
+          const isMine = r.userId === myId;
+          // ANTI-DRIFT FIX 2026-05-22: prefer authoritative totalCount từ BE post-mutation.
+          // Trước fix: Zalo gửi 10 events → FE increment +1 mỗi event → count=10 realtime,
+          // refresh REST trả 1 (DB composite key msg×reactor×emoji = 1 row) → mismatch.
+          // Giờ BE emit totalCount = count thực từ DB → FE set thay vì increment.
+          if (typeof r.totalCount === 'number') {
+            if (r.totalCount > 0) counts.set(emoji, r.totalCount);
+            else counts.delete(emoji);
+            if (isMine) {
+              if (r.action === 'add') myEmojis.add(emoji);
+              else if (r.action === 'remove') myEmojis.delete(emoji);
+            }
+          } else if (r.action === 'add') {
+            // Fallback cho legacy emit không kèm totalCount
+            counts.set(emoji, (counts.get(emoji) || 0) + 1);
+            if (isMine) myEmojis.add(emoji);
+          } else if (r.action === 'remove') {
+            const cur = (counts.get(emoji) || 0) - 1;
+            if (cur > 0) counts.set(emoji, cur);
+            else counts.delete(emoji);
+            if (isMine) myEmojis.delete(emoji);
           }
-        } else if (r.action === 'remove') {
-          msg.reactionDetails = msg.reactionDetails.filter(rd => !(rd.userId === r.userId && rd.emoji === r.reaction));
+        }
+        msg.reactions = Array.from(counts.entries()).map(([emoji, count]) => ({ emoji, count, reacted: myEmojis.has(emoji) }));
+
+        // Update reactionDetails real-time
+        if (!msg.reactionDetails) {
+          msg.reactionDetails = [];
+        }
+        for (const r of data.reactions) {
+          if (r.action === 'add') {
+            const existing = msg.reactionDetails.find(rd => rd.userId === r.userId && rd.emoji === r.reaction);
+            if (existing) {
+              existing.userName = r.userName;
+              existing.source = r.source || 'crm';
+            } else {
+              msg.reactionDetails.push({
+                userId: r.userId,
+                userName: r.userName,
+                emoji: r.reaction,
+                source: r.source || 'crm',
+                createdAt: new Date().toISOString(),
+              });
+            }
+          } else if (r.action === 'remove') {
+            msg.reactionDetails = msg.reactionDetails.filter(rd => !(rd.userId === r.userId && rd.emoji === r.reaction));
+          }
+        }
+      };
+
+      const msg = messages.value.find(m => m.id === data.messageId || m.id === data.msgId || m.zaloMsgId === data.zaloMsgId);
+      if (msg) updateReactions(msg);
+
+      // Cập nhật cả cache
+      if (data.conversationId) {
+        const cached = messagesCache.get(data.conversationId);
+        const cachedMsg = cached?.find(m => m.id === data.messageId || m.id === data.msgId || m.zaloMsgId === data.zaloMsgId);
+        if (cachedMsg) updateReactions(cachedMsg);
+      } else {
+        for (const cached of messagesCache.values()) {
+          const cachedMsg = cached.find(m => m.id === data.messageId || m.id === data.msgId || m.zaloMsgId === data.zaloMsgId);
+          if (cachedMsg) updateReactions(cachedMsg);
         }
       }
     });
