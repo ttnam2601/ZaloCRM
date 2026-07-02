@@ -1342,6 +1342,22 @@ export async function chatRoutes(app: FastifyInstance) {
         data: { lastMessageAt: new Date(), isReplied: true, unreadCount: 0 },
       });
 
+      for (const m of createdMessages) {
+        const aggInput = {
+          conversationId: id,
+          message: {
+            id: m.id,
+            content: m.content,
+            contentType: m.contentType,
+            sentAt: m.sentAt,
+            senderType: 'self' as const,
+          },
+          outboundUserId: user.id,
+        };
+        void applyContactAggregateFromMessage(aggInput);
+        void applyFriendAggregate(aggInput);
+      }
+
       const io = (app as any).io as Server;
       for (const m of createdMessages) {
         // PRIVACY 2026-05-22: kèm _privacyMeta để FE detect & blur cho non-owner

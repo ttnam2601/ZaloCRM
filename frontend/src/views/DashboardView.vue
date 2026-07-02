@@ -33,7 +33,7 @@
         <MessageVolumeChart :data="messageVolume" />
       </v-col>
       <v-col cols="12" md="4">
-        <PipelineChart :data="pipeline" />
+        <ZaloRateLimiterCard />
       </v-col>
     </v-row>
 
@@ -52,7 +52,7 @@
 import { onMounted } from 'vue';
 import KpiCards from '@/components/dashboard/KpiCards.vue';
 import MessageVolumeChart from '@/components/dashboard/MessageVolumeChart.vue';
-import PipelineChart from '@/components/dashboard/PipelineChart.vue';
+import ZaloRateLimiterCard from '@/components/dashboard/ZaloRateLimiterCard.vue';
 import SourceChart from '@/components/dashboard/SourceChart.vue';
 import AppointmentChart from '@/components/dashboard/AppointmentChart.vue';
 import { useDashboard } from '@/composables/use-dashboard';
@@ -62,7 +62,7 @@ import { useAttribution } from '@/composables/use-attribution';
 const attribution = useAttribution();
 
 const {
-  kpi, messageVolume, pipeline, sources, appointments,
+  kpi, messageVolume, sources, appointments,
   loading, fetchAll,
 } = useDashboard();
 

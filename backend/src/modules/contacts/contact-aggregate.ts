@@ -66,12 +66,33 @@ export async function applyContactAggregateFromMessage(
   try {
     const conv = await prisma.conversation.findUnique({
       where: { id: args.conversationId },
-      select: { contactId: true, zaloAccountId: true, threadType: true },
+      select: { contactId: true, zaloAccountId: true, threadType: true, orgId: true },
     });
     if (!conv?.contactId) return;
-    if (conv.threadType === 'group') return;
 
     const { message } = args;
+
+    if (conv.threadType === 'group') {
+      if (message.senderType === 'self' && args.outboundUserId) {
+        const user = await prisma.user.findUnique({
+          where: { id: args.outboundUserId },
+          select: { fullName: true, email: true },
+        });
+        await logActivity({
+          orgId: conv.orgId,
+          userId: args.outboundUserId,
+          action: 'group_message_sent',
+          entityType: 'contact',
+          entityId: conv.contactId,
+          details: {
+            userName: user?.fullName || user?.email || 'Nhân viên',
+            messageId: message.id,
+          },
+        });
+      }
+      return;
+    }
+
     const sentAt = message.sentAt;
     const preview = makePreview(message.content, message.contentType);
     const isInbound = message.senderType === 'contact';

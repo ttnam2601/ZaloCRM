@@ -6,6 +6,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { logger } from '../../shared/utils/logger.js';
+import { zaloRateLimiter } from '../zalo/zalo-rate-limiter.js';
 
 type QueryParams = Record<string, string>;
 
@@ -160,6 +161,42 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
     } catch (err) {
       logger.error('[dashboard] Appointments error:', err);
       return reply.status(500).send({ error: 'Failed to fetch appointment stats' });
+    }
+  });
+
+  // GET /api/v1/dashboard/zalo-rate
+  app.get('/api/v1/dashboard/zalo-rate', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { orgId } = request.user!;
+      const zaloAccounts = await prisma.zaloAccount.findMany({
+        where: { orgId, status: 'connected', purged: false },
+        select: { id: true, displayName: true, phone: true },
+      });
+
+      const config = zaloRateLimiter.getLimitsConfig();
+      const data = [];
+
+      for (const acc of zaloAccounts) {
+        const counts = await zaloRateLimiter.getAllDailyCounts(acc.id);
+        const rates: Record<string, { current: number; max: number }> = {};
+        for (const cat of Object.keys(config)) {
+          rates[cat] = {
+            current: counts[cat] || 0,
+            max: config[cat as any]?.daily ?? 0,
+          };
+        }
+        data.push({
+          accountId: acc.id,
+          displayName: acc.displayName || 'Tài khoản không tên',
+          phone: acc.phone || '',
+          rates,
+        });
+      }
+
+      return { data };
+    } catch (err) {
+      logger.error('[dashboard] Zalo rate error:', err);
+      return reply.status(500).send({ error: 'Failed to fetch Zalo rate data' });
     }
   });
 }

@@ -3,11 +3,13 @@
  * Routes: /api/v1/zalo-accounts/:accountId/groups/:groupId/...
  */
 import type { FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { zaloOps, ZaloOpError } from '../../shared/zalo-operations.js';
 import { resolveAccount, checkAccess, handleError } from './zalo-route-helpers.js';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
+import { logActivity } from '../activity/activity-logger.js';
 
 /** Format một Date thành chuỗi "HH:mm dd/MM/yyyy" theo giờ Việt Nam (UTC+7). */
 function formatVNTime(date: Date): string {
@@ -153,20 +155,38 @@ export async function groupModerationRoutes(app: FastifyInstance) {
             logger.warn(`[groups] Failed to fetch group info for grid=${grid}:`, groupInfoErr);
           }
 
+          // Ensure group Contact record exists
+          let groupContact = await prisma.contact.findFirst({
+            where: { zaloUid: grid, orgId: request.user!.orgId },
+            select: { id: true },
+          });
+          if (!groupContact) {
+            groupContact = await prisma.contact.create({
+              data: {
+                id: randomUUID(),
+                orgId: request.user!.orgId,
+                zaloUid: grid,
+                fullName: groupName || 'Nhóm Zalo',
+                metadata: { isGroup: true },
+              },
+              select: { id: true },
+            });
+          }
+
           let existing = await prisma.conversation.findFirst({
             where: {
               zaloAccountId: accountId,
               externalThreadId: grid,
               threadType: 'group',
             },
-            select: { id: true },
+            select: { id: true, contactId: true },
           });
           if (!existing) {
             existing = await prisma.conversation.create({
               data: {
                 orgId: request.user!.orgId,
                 zaloAccountId: accountId,
-                contactId: null,
+                contactId: groupContact.id,
                 threadType: 'group',
                 externalThreadId: grid,
                 groupName,
@@ -176,7 +196,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
                 unreadCount: 0,
                 isReplied: false,
               },
-              select: { id: true },
+              select: { id: true, contactId: true },
             });
           } else {
             await prisma.conversation.update({
@@ -185,6 +205,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
                 groupName,
                 groupAvatarUrl,
                 groupMembersCount,
+                contactId: existing.contactId || groupContact.id,
               },
             });
           }
@@ -229,13 +250,32 @@ export async function groupModerationRoutes(app: FastifyInstance) {
       }
 
       const joinedAt = new Date();
+
+      // Ensure group Contact record exists
+      let groupContact = await prisma.contact.findFirst({
+        where: { zaloUid: finalGrid, orgId: request.user!.orgId },
+        select: { id: true },
+      });
+      if (!groupContact) {
+        groupContact = await prisma.contact.create({
+          data: {
+            id: randomUUID(),
+            orgId: request.user!.orgId,
+            zaloUid: finalGrid,
+            fullName: groupName || 'Nhóm Zalo',
+            metadata: { isGroup: true },
+          },
+          select: { id: true },
+        });
+      }
+
       let existingConv = await prisma.conversation.findFirst({
         where: {
           zaloAccountId: accountId,
           externalThreadId: finalGrid,
           threadType: 'group',
         },
-        select: { id: true },
+        select: { id: true, contactId: true },
       });
 
       if (!existingConv) {
@@ -243,7 +283,7 @@ export async function groupModerationRoutes(app: FastifyInstance) {
           data: {
             orgId: request.user!.orgId,
             zaloAccountId: accountId,
-            contactId: null,
+            contactId: groupContact.id,
             threadType: 'group',
             externalThreadId: finalGrid,
             groupName,
@@ -254,17 +294,19 @@ export async function groupModerationRoutes(app: FastifyInstance) {
             unreadCount: 0,
             isReplied: false,
           },
-          select: { id: true },
+          select: { id: true, contactId: true },
         });
       } else {
-        await prisma.conversation.update({
+        existingConv = await prisma.conversation.update({
           where: { id: existingConv.id },
           data: {
             groupName,
             groupAvatarUrl,
             groupMembersCount,
             groupJoinedAt: joinedAt,
+            contactId: existingConv.contactId || groupContact.id,
           },
+          select: { id: true, contactId: true },
         });
       }
 
@@ -273,21 +315,34 @@ export async function groupModerationRoutes(app: FastifyInstance) {
         try {
           const userDetails = await prisma.user.findUnique({
             where: { id: request.user!.id },
-            select: { fullName: true },
+            select: { fullName: true, email: true },
           });
-          const userName = userDetails?.fullName || 'Hệ thống';
+          const userName = userDetails?.fullName || userDetails?.email || 'Hệ thống';
           const formattedTime = formatVNTime(joinedAt);
-          await prisma.message.create({
+          const message = await prisma.message.create({
             data: {
               conversationId: existingConv.id,
               zaloMsgIdNum: BigInt(joinedAt.getTime()) * 10000n,
               senderType: 'system',
               contentType: 'system_event',
-              content: `Đã gia nhập nhóm bởi ${userName} vào ${formattedTime}`,
+              content: `Đã tham gia nhóm bởi ${userName} vào ${formattedTime}`,
               sentVia: 'system',
               sentAt: joinedAt,
             },
           });
+
+          if (existingConv.contactId) {
+            void logActivity({
+              orgId: request.user!.orgId,
+              userId: request.user!.id,
+              action: 'group_member_join',
+              entityType: 'contact',
+              entityId: existingConv.contactId,
+              details: {
+                userName,
+              },
+            });
+          }
         } catch (msgErr) {
           logger.error('[groups] Failed to record system message after joining group:', msgErr);
         }
@@ -481,14 +536,14 @@ export async function groupModerationRoutes(app: FastifyInstance) {
             externalThreadId: groupId,
             threadType: 'group',
           },
-          select: { id: true },
+          select: { id: true, contactId: true },
         });
         if (conversation) {
           const userDetails = await prisma.user.findUnique({
             where: { id: request.user!.id },
-            select: { fullName: true },
+            select: { fullName: true, email: true },
           });
-          const userName = userDetails?.fullName || 'Hệ thống';
+          const userName = userDetails?.fullName || userDetails?.email || 'Hệ thống';
 
           const now = new Date();
           const formattedTime = formatVNTime(now);
@@ -503,6 +558,19 @@ export async function groupModerationRoutes(app: FastifyInstance) {
               sentAt: now,
             },
           });
+
+          if (conversation.contactId) {
+            void logActivity({
+              orgId: request.user!.orgId,
+              userId: request.user!.id,
+              action: 'group_member_leave',
+              entityType: 'contact',
+              entityId: conversation.contactId,
+              details: {
+                userName,
+              },
+            });
+          }
 
           const io = (app as any).io;
           io?.emit('chat:message', {

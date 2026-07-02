@@ -91,6 +91,9 @@ export const ACTION_META: Record<string, ActionMeta> = {
   silent_30d:              { label: 'Im lặng 30 ngày', icon: '🔇' },
   call_logged:             { label: 'Đã gọi', icon: '📞' },
   meeting_logged:          { label: 'Đã gặp', icon: '🤝' },
+  group_message_sent:      { label: 'Đã nhắn tin vào nhóm', icon: '💬' },
+  group_member_join:       { label: 'Đã tham gia nhóm', icon: '📥' },
+  group_member_leave:      { label: 'Đã rời nhóm', icon: '📤' },
 
   // system
   contact_link_parent:     { label: 'Liên kết KH cha' },
@@ -126,6 +129,8 @@ export function categoryOf(action: string, fallback: ActivityCategory = 'system'
     appointment_reschedule: 'appointment', appointment_no_show: 'appointment',
     first_inbound: 'interaction', first_outbound: 'interaction',
     silent_30d: 'interaction', call_logged: 'interaction', meeting_logged: 'interaction',
+    group_message_sent: 'interaction', group_member_join: 'interaction',
+    group_member_leave: 'interaction',
     contact_link_parent: 'system', contact_unlink_parent: 'system',
     parent_candidate_accept: 'system', contact_merge: 'system',
     contact_split: 'system', data_import: 'system', data_export: 'system',

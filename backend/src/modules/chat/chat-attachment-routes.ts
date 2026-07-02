@@ -301,6 +301,22 @@ export async function chatAttachmentRoutes(app: FastifyInstance) {
           data: { lastMessageAt: new Date(), isReplied: true, unreadCount: 0 },
         });
 
+        const { applyContactAggregateFromMessage } = await import('../contacts/contact-aggregate.js');
+        for (const m of created) {
+          const aggInput = {
+            conversationId: id,
+            message: {
+              id: m.id,
+              content: m.content,
+              contentType: m.contentType,
+              sentAt: m.sentAt,
+              senderType: 'self' as const,
+            },
+            outboundUserId: user.id,
+          };
+          void applyContactAggregateFromMessage(aggInput);
+        }
+
         for (const m of created) {
           // PRIVACY 2026-05-22: kèm _privacyMeta cho FE realtime blur
           io?.emit('chat:message', {

@@ -36,6 +36,12 @@
           Tham gia {{ joinedAtLabel }}
         </div>
       </div>
+      <div v-if="conversation.contact" class="gp-care-status mt-2">
+        <CareStatusBadge
+          :model-value="groupContactStatus"
+          @update:model-value="onChangeGroupStatus"
+        />
+      </div>
     </header>
 
     <!-- ════════ Tab bar ════════ -->
@@ -203,6 +209,11 @@ import Avatar from '@/components/ui/Avatar.vue';
 import { api } from '@/api';
 import { useToast } from '@/composables/use-toast';
 import CustomerTimelineSection from './CustomerTimelineSection.vue';
+import CareStatusBadge from '@/components/ui/CareStatusBadge.vue';
+import { useContacts } from '@/composables/use-contacts';
+
+const { updateContact } = useContacts();
+const groupContactStatus = ref<string | null>(null);
 
 interface GroupMember {
   uid: string;
@@ -232,6 +243,24 @@ const leaveSilent = ref(true); // mặc định im lặng
 const leaveLoading = ref(false);
 const leaveError = ref<string | null>(null);
 const toast = useToast();
+
+groupContactStatus.value = props.conversation.contact?.status || null;
+watch(() => props.conversation.contact?.status, (newStatus) => {
+  groupContactStatus.value = newStatus || null;
+});
+
+async function onChangeGroupStatus(value: string) {
+  const contactId = props.conversation.contact?.id;
+  if (!contactId) return;
+  groupContactStatus.value = value;
+  try {
+    await updateContact(contactId, { status: value });
+    toast.success('Cập nhật trạng thái nhóm thành công');
+    window.dispatchEvent(new CustomEvent('timeline-updated', { detail: { contactId } }));
+  } catch (err) {
+    toast.error('Lỗi khi cập nhật trạng thái nhóm');
+  }
+}
 
 const groupName = computed(() =>
   (props.conversation as any).groupName || 'Nhóm không tên'
