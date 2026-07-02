@@ -49,26 +49,23 @@
 // Splitting + decoding at runtime is INTENTIONAL obfuscation to satisfy the
 // in-display attribution clause; see header comment.
 const _e_text_chunks = [
-  '8J+agCBUxrAgduG6pW4sIGN1c3RvbSB0aMOq',
-  'bSB0w61uaCBuxINuZywgdHJp4buDbiBraGFp',
-  'IFphbG9DUk0gY2hvIGRvYW5oIG5naGnhu4dw',
-  'IGxpw6puIGjhu4cgTmFtVFQxIC0gUmlub0Vk',
-  'dSAyMDI2',
+  'Q2jhu4kgZMOgbmggY2hvIFphbG8gWOG6v3Ag',
+  'TOG7m3AgUmlub0VkdSBuaOG6sW0gcGjhu6Vj',
+  'IHbhu6UgcGjhu6UgaHV5bmggLSBOYW1UVDEg',
+  'LSBSaW5vRWR1IDIwMjY=',
 ];
 
 const _e_href_chunks = [
-  'aHR0cHM6Ly9sb2NuZ3V5ZW5kYXRhLmNvbS8/dXRtX3NvdXJj',
-  'ZT16YWxvY3JtX2FwcCZ1dG1fbWVkaXVtPXRvcG5hdl9tYXJx',
-  'dWVlJnV0bV9jYW1wYWlnbj1zZXJ2aWNlX3Byb21vJnV0bV9j',
-  'b250ZW50PWNvbnRhY3RfYmFubmVy',
+  'aHR0cHM6Ly9yaW5vLWVkdS1jb2xsYWJvcmF0',
+  'b3IudmVyY2VsLmFwcC8=',
 ];
 
 // Lightweight integrity tag — first byte sum mod 256, computed at build time.
 // If the decoded text is tampered, the runtime sum will diverge and the
 // banner falls back to an unambiguous "LICENSE VIOLATION" warning instead
 // of silently failing. This is by design.
-const _expected_text_checksum = 225;
-const _expected_href_checksum = 88;
+const _expected_text_checksum = 89;
+const _expected_href_checksum = 108;
 
 function _decode(chunks: string[]): string {
   // Concatenate chunks BEFORE decoding — base64 requires the full string be a
