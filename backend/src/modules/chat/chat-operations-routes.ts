@@ -382,7 +382,11 @@ export async function chatOperationsRoutes(app: FastifyInstance) {
 
     try {
       const threadType = conv.threadType === 'group' ? 1 : 0;
-      await zaloOps.sendTypingEvent(conv.zaloAccountId, conv.externalThreadId || '', threadType);
+      try {
+        await zaloOps.sendTypingEvent(conv.zaloAccountId, conv.externalThreadId || '', threadType);
+      } catch (zaloErr) {
+        logger.warn(`[typing] Failed to send typing indicator to Zalo: ${String(zaloErr)}`);
+      }
       eventBuffer.recordTyping(id, user.id, user.email);
       return { success: true };
     } catch (err) { return handleError(err, reply); }
