@@ -289,6 +289,9 @@
               🔍 Tra Zalo cho SĐT "{{ query }}" từ nick {{ accountTitle }}
               <div class="trigger-hint">UID Zalo per-nick — cùng KH ra UID khác nhau mỗi nick</div>
             </button>
+            <div v-else-if="isInvalidGroupLinkQuery" class="text-warning text-caption text-center font-weight-bold">
+              ⚠ Đường dẫn nhóm Zalo không hợp lệ (Vui lòng không chứa dấu cách, dấu nháy đơn, hoặc ký tự thừa ở cuối).
+            </div>
             <div v-else class="text-grey text-caption text-center">
               Không match KH nào. Nếu là SĐT (≥9 số), gõ đủ để tra Zalo.
             </div>
@@ -504,6 +507,11 @@ const groupLinkQueryId = computed(() => {
   const q = query.value.trim();
   const match = q.match(/^(?:https?:\/\/)?(?:www\.)?zalo\.me\/g\/([a-zA-Z0-9_-]+)\/?$/i);
   return match ? match[1] : null;
+});
+
+const isInvalidGroupLinkQuery = computed(() => {
+  const q = query.value.trim();
+  return q.toLowerCase().includes('zalo.me/g/') && !/^(?:https?:\/\/)?(?:www\.)?zalo\.me\/g\/[a-zA-Z0-9_-]+\/?$/i.test(q);
 });
 
 const isPhoneQuery = computed(() => {
