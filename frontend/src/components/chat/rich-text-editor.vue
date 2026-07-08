@@ -129,17 +129,6 @@
       >
         <CodeIcon :size="16" :stroke-width="2" />
       </v-btn>
-
-      <v-divider vertical class="mx-1" />
-
-      <v-btn
-        icon size="x-small" variant="text"
-        title="Nhập kịch bản khai giảng"
-        @click="openScriptDialog"
-      >
-        <FileTextIcon :size="16" :stroke-width="2" />
-      </v-btn>
-
     </div>
 
     <!-- AI Format — luôn hiện khi có text trong editor, không phụ thuộc vào toolbar.
@@ -880,50 +869,65 @@ function compileScriptText(template: string, name: string, cid: string, uid: str
   return result;
 }
 
-function findBoldRanges(text: string, name: string): ZaloStyle[] {
-  const ranges: { start: number; end: number }[] = [];
+function findStyledRanges(text: string, name: string): ZaloStyle[] {
+  const nameRanges: { start: number; end: number }[] = [];
+  const dateTimeRanges: { start: number; end: number }[] = [];
 
   if (name && name.trim()) {
     const escapedName = name.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
     const nameRegex = new RegExp(escapedName, 'gi');
     let match;
     while ((match = nameRegex.exec(text)) !== null) {
-      ranges.push({ start: match.index, end: match.index + match[0].length });
+      nameRanges.push({ start: match.index, end: match.index + match[0].length });
     }
   }
 
   const dayOfWeekRegex = /\bthứ\s*(?:[2-7]|chủ\s*nhật|hai|ba|tư|năm|sáu|bảy)\b/gi;
   let matchDay;
   while ((matchDay = dayOfWeekRegex.exec(text)) !== null) {
-    ranges.push({ start: matchDay.index, end: matchDay.index + matchDay[0].length });
+    dateTimeRanges.push({ start: matchDay.index, end: matchDay.index + matchDay[0].length });
   }
 
   const timeRegex = /(?:lúc\s*)?\b\d{1,2}(?:h\d{2}|:\d{2}|h)\b/gi;
   let matchTime;
   while ((matchTime = timeRegex.exec(text)) !== null) {
-    ranges.push({ start: matchTime.index, end: matchTime.index + matchTime[0].length });
+    dateTimeRanges.push({ start: matchTime.index, end: matchTime.index + matchTime[0].length });
   }
 
-  if (ranges.length === 0) return [];
+  const styles: ZaloStyle[] = [];
 
-  ranges.sort((a, b) => a.start - b.start);
-
-  const merged: { start: number; end: number }[] = [ranges[0]];
-  for (let i = 1; i < ranges.length; i++) {
-    const current = ranges[i];
-    const last = merged[merged.length - 1];
-    if (current.start <= last.end) {
-      last.end = Math.max(last.end, current.end);
-    } else {
-      merged.push(current);
+  function mergeRanges(rawRanges: { start: number; end: number }[]) {
+    if (rawRanges.length === 0) return [];
+    rawRanges.sort((a, b) => a.start - b.start);
+    const merged = [rawRanges[0]];
+    for (let i = 1; i < rawRanges.length; i++) {
+      const current = rawRanges[i];
+      const last = merged[merged.length - 1];
+      if (current.start <= last.end) {
+        last.end = Math.max(last.end, current.end);
+      } else {
+        merged.push(current);
+      }
     }
+    return merged;
   }
 
-  return merged.map(r => ({
-    st: 'b',
-    start: r.start,
-    len: r.end - r.start
-  }));
+  const mergedNameRanges = mergeRanges(nameRanges);
+  const mergedDateTimeRanges = mergeRanges(dateTimeRanges);
+
+  for (const r of mergedNameRanges) {
+    const len = r.end - r.start;
+    styles.push({ st: 'b', start: r.start, len });
+    styles.push({ st: 'c_db342e', start: r.start, len });
+  }
+
+  for (const r of mergedDateTimeRanges) {
+    const len = r.end - r.start;
+    styles.push({ st: 'b', start: r.start, len });
+    styles.push({ st: 'c_2962ff', start: r.start, len });
+  }
+
+  return styles;
 }
 
 watch(rawScriptInput, (newVal) => {
@@ -967,11 +971,11 @@ function compileAndApplyScript() {
   const template = parsed.body || rawScriptInput.value;
   
   const compiled = compileScriptText(template, name, cid, uid);
-  const boldRanges = findBoldRanges(compiled, name);
+  const styledRanges = findStyledRanges(compiled, name);
   
   applyRichPayload({
     text: compiled,
-    styles: boldRanges
+    styles: styledRanges
   });
   
   scriptDialogOpen.value = false;

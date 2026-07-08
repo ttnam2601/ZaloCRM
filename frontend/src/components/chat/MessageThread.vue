@@ -424,6 +424,9 @@
           <button class="icon-tool" title="Template tin nhắn (gõ /)" @click="openTemplatePopup">
             <ZapIcon :size="18" :stroke-width="1.5" />
           </button>
+          <button class="icon-tool" title="Nhập kịch bản khai giảng" @click="editorRef?.openScriptDialog()">
+            <FileTextIcon :size="18" :stroke-width="1.5" />
+          </button>
           <button class="icon-tool ai-btn" title="AI compose" :disabled="aiSuggestionLoading" @click="$emit('ask-ai')">
             <SparklesIcon :size="18" :stroke-width="1.5" />
           </button>
@@ -762,6 +765,7 @@ import {
   CalendarClock as CalendarClockIcon,
   Zap as ZapIcon,
   Sparkles as SparklesIcon,
+  FileText as FileTextIcon,
 } from 'lucide-vue-next';
 
 // Reaction detail popup state — anh chốt 2026-05-22: click reaction box → popup
