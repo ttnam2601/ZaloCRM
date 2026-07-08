@@ -130,6 +130,16 @@
         <CodeIcon :size="16" :stroke-width="2" />
       </v-btn>
 
+      <v-divider vertical class="mx-1" />
+
+      <v-btn
+        icon size="x-small" variant="text"
+        title="Nhập kịch bản khai giảng"
+        @click="openScriptDialog"
+      >
+        <FileTextIcon :size="16" :stroke-width="2" />
+      </v-btn>
+
     </div>
 
     <!-- AI Format — luôn hiện khi có text trong editor, không phụ thuộc vào toolbar.
@@ -173,6 +183,87 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- Script Dialog -->
+    <v-dialog v-model="scriptDialogOpen" max-width="600px">
+      <v-card class="pa-4 rounded-lg bg-surface border-thin">
+        <v-card-title class="d-flex align-center justify-space-between py-2 px-0">
+          <span class="text-h6 font-weight-bold text-gradient">Biên dịch kịch bản khai giảng</span>
+          <v-btn icon variant="text" size="small" @click="scriptDialogOpen = false">
+            <XIcon :size="16" />
+          </v-btn>
+        </v-card-title>
+        <v-card-text class="px-0 py-3">
+          <p class="text-caption text-muted mb-4">
+            Dán tin nhắn chứa thông tin học sinh (Tên, CID, UID) và kịch bản mẫu nằm trong ngoặc kép "..." hoặc “...”. Hệ thống sẽ tự động trích xuất thông tin, điền vào mẫu và tự động <strong>in đậm</strong> tên học sinh, giờ học, và thứ trong tuần.
+          </p>
+          <v-textarea
+            v-model="rawScriptInput"
+            label="Dán tin nhắn gốc vào đây"
+            placeholder="Ví dụ:&#10;Nguyễn Văn A&#10;CID: VH12345&#10;UID: HS67890&#10;“Em chào Phụ huynh học sinh [TÊN HS], em liên hệ từ RinoEdu để thông báo lịch học thứ 3 lúc 18:00...”"
+            rows="6"
+            variant="outlined"
+            density="comfortable"
+            hide-details
+            class="mb-4"
+          ></v-textarea>
+          
+          <!-- Cảnh báo cấu trúc -->
+          <v-alert
+            v-if="scriptWarnings.length"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mb-4 text-caption"
+            border="start"
+          >
+            <div v-for="(warn, idx) in scriptWarnings" :key="idx" class="d-flex align-center ga-1 py-0.5">
+              <span>• {{ warn }}</span>
+            </div>
+          </v-alert>
+          
+          <v-row v-if="extractedInfo.name || extractedInfo.cid || extractedInfo.uid" class="mt-2">
+            <v-col cols="12" class="pb-1">
+              <span class="text-caption font-weight-bold text-primary">Thông tin trích xuất (có thể điều chỉnh):</span>
+            </v-col>
+            <v-col cols="4" class="py-1">
+              <v-text-field
+                v-model="extractedInfo.name"
+                label="Tên HS"
+                variant="outlined"
+                density="compact"
+                hide-details
+              ></v-text-field>
+            </v-col>
+            <v-col cols="4" class="py-1">
+              <v-text-field
+                v-model="extractedInfo.cid"
+                label="Mã CID"
+                variant="outlined"
+                density="compact"
+                hide-details
+              ></v-text-field>
+            </v-col>
+            <v-col cols="4" class="py-1">
+              <v-text-field
+                v-model="extractedInfo.uid"
+                label="Mã UID/SID"
+                variant="outlined"
+                density="compact"
+                hide-details
+              ></v-text-field>
+            </v-col>
+          </v-row>
+        </v-card-text>
+        <v-card-actions class="px-0 pt-4">
+          <v-spacer></v-spacer>
+          <v-btn variant="text" color="grey" @click="scriptDialogOpen = false">Hủy</v-btn>
+          <v-btn color="primary" variant="flat" :disabled="!rawScriptInput.trim()" @click="compileAndApplyScript">
+            Áp Dụng
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -196,6 +287,8 @@ import {
   ListOrdered as ListOrderedIcon,
   Code as CodeIcon,
   Sparkles as SparklesIcon,
+  FileText as FileTextIcon,
+  X as XIcon,
 } from 'lucide-vue-next';
 
 const toast = useToast();
@@ -651,7 +744,241 @@ function applyRichPayload(payload: { text: string; styles?: Array<{ st: string; 
   editor.value.commands.focus('end');
 }
 
-defineExpose({ clear, focus, insertText, getRichPayload, applyRichPayload });
+// ── Script Compiler Feature 2026-07-08 ───────────────────────────────
+const scriptDialogOpen = ref(false);
+const rawScriptInput = ref('');
+const extractedInfo = ref({ name: '', cid: '', uid: '' });
+const scriptWarnings = ref<string[]>([]);
+
+function parseScriptInput(text: string) {
+  if (!text) return { name: '', cid: '', uid: '', body: '' };
+  
+  let name = '';
+  let cid = '';
+  let uid = '';
+  let body = '';
+  
+  const firstQuoteIdx = text.indexOf('"');
+  const lastQuoteIdx = text.lastIndexOf('"');
+  const firstSmartQuoteIdx = text.indexOf('“');
+  const lastSmartQuoteIdx = text.lastIndexOf('”');
+  
+  let quoteStart = -1;
+  let quoteEnd = -1;
+  
+  if (firstQuoteIdx !== -1 && lastQuoteIdx !== -1 && firstQuoteIdx < lastQuoteIdx) {
+    quoteStart = firstQuoteIdx;
+    quoteEnd = lastQuoteIdx;
+  } else if (firstSmartQuoteIdx !== -1 && lastSmartQuoteIdx !== -1 && firstSmartQuoteIdx < lastSmartQuoteIdx) {
+    quoteStart = firstSmartQuoteIdx;
+    quoteEnd = lastSmartQuoteIdx;
+  }
+  
+  let headerText = '';
+  if (quoteStart !== -1 && quoteEnd !== -1) {
+    body = text.substring(quoteStart + 1, quoteEnd).trim();
+    headerText = text.substring(0, quoteStart).trim();
+  } else {
+    const lines = text.split('\n');
+    let bodyStartIdx = 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].toLowerCase();
+      if (line.includes('em chào') || line.includes('chao phu huynh') || line.includes('lien he tu') || line.includes('hồ sơ học tập')) {
+        bodyStartIdx = i;
+        break;
+      }
+    }
+    
+    if (bodyStartIdx > 0) {
+      headerText = lines.slice(0, bodyStartIdx).join('\n').trim();
+      body = lines.slice(bodyStartIdx).join('\n').trim();
+    } else {
+      let hasMetadata = false;
+      for (let i = 0; i < Math.min(lines.length, 3); i++) {
+        if (lines[i].includes('CID:') || lines[i].includes('UID:') || lines[i].includes('SID:')) {
+          hasMetadata = true;
+          bodyStartIdx = i + 1;
+          break;
+        }
+      }
+      if (hasMetadata) {
+        headerText = lines.slice(0, bodyStartIdx).join('\n').trim();
+        body = lines.slice(bodyStartIdx).join('\n').trim();
+      } else {
+        body = text.trim();
+      }
+    }
+  }
+  
+  if ((body.startsWith('"') && body.endsWith('"')) || (body.startsWith('“') && body.endsWith('”'))) {
+    body = body.substring(1, body.length - 1).trim();
+  }
+  
+  if (headerText) {
+    const headerLines = headerText.split('\n').map(l => l.trim()).filter(Boolean);
+    let idLineIndex = -1;
+    for (let i = 0; i < headerLines.length; i++) {
+      if (headerLines[i].includes('CID:') || headerLines[i].includes('UID:') || headerLines[i].includes('SID:')) {
+        idLineIndex = i;
+        break;
+      }
+    }
+    
+    if (idLineIndex !== -1) {
+      for (let j = idLineIndex - 1; j >= 0; j--) {
+        if (headerLines[j]) {
+          name = headerLines[j];
+          break;
+        }
+      }
+      
+      const idLine = headerLines[idLineIndex];
+      const cidMatch = idLine.match(/CID:\s*([a-z0-9]+)/i);
+      if (cidMatch) cid = cidMatch[1];
+      
+      const uidMatch = idLine.match(/UID:\s*([a-z0-9]+)/i);
+      if (uidMatch) uid = uidMatch[1];
+      
+      const sidMatch = idLine.match(/SID:\s*([a-z0-9]+)/i);
+      let sid = sidMatch ? sidMatch[1] : '';
+      if (uid && sid) {
+        uid = `${uid} (SID: ${sid})`;
+      } else if (sid) {
+        uid = sid;
+      }
+    } else {
+      if (headerLines.length > 0) {
+        name = headerLines[0];
+      }
+    }
+  } else {
+    const cidMatch = text.match(/CID:\s*([a-z0-9]+)/i);
+    if (cidMatch) cid = cidMatch[1];
+    
+    const uidMatch = text.match(/UID:\s*([a-z0-9]+)/i);
+    if (uidMatch) uid = uidMatch[1];
+    
+    const sidMatch = text.match(/SID:\s*([a-z0-9]+)/i);
+    if (sidMatch) {
+      const sid = sidMatch[1];
+      uid = uid ? `${uid} (SID: ${sid})` : sid;
+    }
+  }
+  
+  return { name, cid, uid, body };
+}
+
+function compileScriptText(template: string, name: string, cid: string, uid: string) {
+  let result = template;
+  result = result.replace(/\[TÊN HS\]/g, name || '[TÊN HS]');
+  result = result.replace(/\[Tên HS\]/g, name || '[Tên HS]');
+  result = result.replace(/\[tên hs\]/g, name || '[tên hs]');
+  result = result.replace(/\{name\}/g, name || '{name}');
+  result = result.replace(/\{cid\}/g, cid || '{cid}');
+  result = result.replace(/\{uid\}/g, uid || '{uid}');
+  return result;
+}
+
+function findBoldRanges(text: string, name: string): ZaloStyle[] {
+  const ranges: { start: number; end: number }[] = [];
+
+  if (name && name.trim()) {
+    const escapedName = name.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const nameRegex = new RegExp(escapedName, 'gi');
+    let match;
+    while ((match = nameRegex.exec(text)) !== null) {
+      ranges.push({ start: match.index, end: match.index + match[0].length });
+    }
+  }
+
+  const dayOfWeekRegex = /\bthứ\s*(?:[2-7]|chủ\s*nhật|hai|ba|tư|năm|sáu|bảy)\b/gi;
+  let matchDay;
+  while ((matchDay = dayOfWeekRegex.exec(text)) !== null) {
+    ranges.push({ start: matchDay.index, end: matchDay.index + matchDay[0].length });
+  }
+
+  const timeRegex = /(?:lúc\s*)?\b\d{1,2}(?:h\d{2}|:\d{2}|h)\b/gi;
+  let matchTime;
+  while ((matchTime = timeRegex.exec(text)) !== null) {
+    ranges.push({ start: matchTime.index, end: matchTime.index + matchTime[0].length });
+  }
+
+  if (ranges.length === 0) return [];
+
+  ranges.sort((a, b) => a.start - b.start);
+
+  const merged: { start: number; end: number }[] = [ranges[0]];
+  for (let i = 1; i < ranges.length; i++) {
+    const current = ranges[i];
+    const last = merged[merged.length - 1];
+    if (current.start <= last.end) {
+      last.end = Math.max(last.end, current.end);
+    } else {
+      merged.push(current);
+    }
+  }
+
+  return merged.map(r => ({
+    st: 'b',
+    start: r.start,
+    len: r.end - r.start
+  }));
+}
+
+watch(rawScriptInput, (newVal) => {
+  const parsed = parseScriptInput(newVal);
+  extractedInfo.value.name = parsed.name;
+  extractedInfo.value.cid = parsed.cid;
+  extractedInfo.value.uid = parsed.uid;
+  
+  const warnings: string[] = [];
+  if (newVal.trim()) {
+    const hasQuotes = (newVal.indexOf('"') !== -1 && newVal.lastIndexOf('"') !== newVal.indexOf('"')) || 
+                      (newVal.indexOf('“') !== -1 && newVal.lastIndexOf('”') !== -1);
+    if (!hasQuotes) {
+      warnings.push('Thiếu cặp dấu ngoặc kép " " hoặc “ ” để bao quanh kịch bản.');
+    }
+    if (!parsed.name) {
+      warnings.push('Chưa nhận diện được Tên học sinh.');
+    }
+    if (!parsed.cid) {
+      warnings.push('Chưa nhận diện được Mã CID.');
+    }
+    if (!parsed.uid) {
+      warnings.push('Chưa nhận diện được Mã UID/SID.');
+    }
+  }
+  scriptWarnings.value = warnings;
+});
+
+function openScriptDialog() {
+  rawScriptInput.value = '';
+  extractedInfo.value = { name: '', cid: '', uid: '' };
+  scriptWarnings.value = [];
+  scriptDialogOpen.value = true;
+}
+
+function compileAndApplyScript() {
+  const parsed = parseScriptInput(rawScriptInput.value);
+  const name = extractedInfo.value.name || parsed.name;
+  const cid = extractedInfo.value.cid || parsed.cid;
+  const uid = extractedInfo.value.uid || parsed.uid;
+  const template = parsed.body || rawScriptInput.value;
+  
+  const compiled = compileScriptText(template, name, cid, uid);
+  const boldRanges = findBoldRanges(compiled, name);
+  
+  applyRichPayload({
+    text: compiled,
+    styles: boldRanges
+  });
+  
+  scriptDialogOpen.value = false;
+  toast.success('Đã biên dịch và áp dụng kịch bản thành công!');
+}
+
+defineExpose({ clear, focus, insertText, getRichPayload, applyRichPayload, openScriptDialog });
 
 onBeforeUnmount(() => { editor.value?.destroy(); });
 </script>
