@@ -325,6 +325,7 @@
         >
           {{ openButtonLabel }}
         </v-btn>
+      </v-card-actions>
     </v-card>
 
     <!-- Script Dialog -->
