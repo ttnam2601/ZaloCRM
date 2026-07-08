@@ -276,7 +276,6 @@ import {
   ListOrdered as ListOrderedIcon,
   Code as CodeIcon,
   Sparkles as SparklesIcon,
-  FileText as FileTextIcon,
   X as XIcon,
 } from 'lucide-vue-next';
 
