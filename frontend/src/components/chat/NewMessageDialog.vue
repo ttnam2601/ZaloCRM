@@ -496,11 +496,13 @@ const groupLinkChecked = ref(false);
 const groupLinkWelcomeMsg = ref('');
 
 const isGroupLinkQuery = computed(() => {
-  return /zalo\.me\/g\/([a-zA-Z0-9_-]+)/i.test(query.value.trim());
+  const q = query.value.trim();
+  return /^(?:https?:\/\/)?(?:www\.)?zalo\.me\/g\/[a-zA-Z0-9_-]+\/?$/i.test(q);
 });
 
 const groupLinkQueryId = computed(() => {
-  const match = query.value.trim().match(/zalo\.me\/g\/([a-zA-Z0-9_-]+)/i);
+  const q = query.value.trim();
+  const match = q.match(/^(?:https?:\/\/)?(?:www\.)?zalo\.me\/g\/([a-zA-Z0-9_-]+)\/?$/i);
   return match ? match[1] : null;
 });
 
