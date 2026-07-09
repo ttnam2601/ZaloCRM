@@ -35,7 +35,7 @@ export const CATEGORY_META: Record<ActivityCategory, CategoryMeta> = {
   status_care:   { label: 'Trạng thái',    icon: '🔄', color: '#388E3C', defaultVisible: true },
   score:         { label: 'Điểm số',       icon: '📈', color: '#F57C00', defaultVisible: true },
   appointment:   { label: 'Lịch hẹn',      icon: '📅', color: '#C2185B', defaultVisible: true },
-  interaction:   { label: 'Tương tác',     icon: '💬', color: '#5D4037', defaultVisible: false }, // nhiều event
+  interaction:   { label: 'Tương tác',     icon: '💬', color: '#5D4037', defaultVisible: true }, // nhiều event
   system:        { label: 'Hệ thống',      icon: '⚙️', color: '#546E7A', defaultVisible: false },
   automation:    { label: 'Tự động (Bot)', icon: '🤖', color: '#00897B', defaultVisible: true }, // bao gồm auto_tag_change — sale cần thấy KH state change
 };
@@ -94,6 +94,7 @@ export const ACTION_META: Record<string, ActionMeta> = {
   group_message_sent:      { label: 'Đã nhắn tin vào nhóm', icon: '💬' },
   group_member_join:       { label: 'Đã tham gia nhóm', icon: '📥' },
   group_member_leave:      { label: 'Đã rời nhóm', icon: '📤' },
+  group_message_seen:      { label: 'Đã xem tin nhắn nhóm', icon: '👁️' },
 
   // system
   contact_link_parent:     { label: 'Liên kết KH cha' },
@@ -131,6 +132,7 @@ export function categoryOf(action: string, fallback: ActivityCategory = 'system'
     silent_30d: 'interaction', call_logged: 'interaction', meeting_logged: 'interaction',
     group_message_sent: 'interaction', group_member_join: 'interaction',
     group_member_leave: 'interaction',
+    group_message_seen: 'interaction',
     contact_link_parent: 'system', contact_unlink_parent: 'system',
     parent_candidate_accept: 'system', contact_merge: 'system',
     contact_split: 'system', data_import: 'system', data_export: 'system',

@@ -13,6 +13,7 @@ import { logger } from '../../shared/utils/logger.js';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'socket.io';
 import { applyContactAggregateFromMessage, applyFriendAggregate } from '../contacts/contact-aggregate.js';
+import { logActivity } from '../activity/activity-logger.js';
 
 type QueryParams = Record<string, string>;
 
@@ -1389,10 +1390,40 @@ export async function chatRoutes(app: FastifyInstance) {
     const user = request.user!;
     const { id } = request.params as { id: string };
 
+    const conv = await prisma.conversation.findFirst({
+      where: { id, orgId: user.orgId },
+      select: { unreadCount: true, threadType: true, contactId: true },
+    });
+
     await prisma.conversation.updateMany({
       where: { id, orgId: user.orgId },
       data: { unreadCount: 0 },
     });
+
+    if (conv && conv.threadType === 'group' && conv.unreadCount > 0) {
+      try {
+        const userDetails = await prisma.user.findUnique({
+          where: { id: user.id },
+          select: { fullName: true, email: true },
+        });
+        const userName = userDetails?.fullName || userDetails?.email || 'Nhân sự';
+        
+        if (conv.contactId) {
+          logActivity({
+            orgId: user.orgId,
+            userId: user.id,
+            action: 'group_message_seen',
+            entityType: 'contact',
+            entityId: conv.contactId,
+            details: {
+              userName,
+            },
+          });
+        }
+      } catch (logErr) {
+        logger.error('[chat] Failed to log group_message_seen activity:', logErr);
+      }
+    }
 
     return { success: true };
   });

@@ -211,6 +211,10 @@ const detailsLine = computed(() => {
   if (action === 'friend_alias_change' && (d.old !== undefined || d.new !== undefined)) {
     return `: "${escape(String(d.old || ''))}" → "${escape(String(d.new || ''))}"`;
   }
+  // Group activities details (joins, leaves, message sent, message seen)
+  if ((action === 'group_member_join' || action === 'group_member_leave' || action === 'group_message_sent' || action === 'group_message_seen') && d.userName) {
+    return `: bởi <strong>${escape(String(d.userName))}</strong>`;
+  }
   return '';
 });
 
