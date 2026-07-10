@@ -54,8 +54,15 @@ export const config = {
    * r2    — lưu lên Cloudflare R2 (hoặc bất kỳ S3-compatible) qua AWS SDK v3.
    * Đổi driver = chỉ đổi 1 biến env này, không sửa code. */
   storageDriver: (() => {
-    const v = (envValue('STORAGE_DRIVER') || 'local').toLowerCase();
-    return v === 'r2' ? 'r2' : 'local';
+    const envVal = envValue('STORAGE_DRIVER');
+    if (envVal) return envVal.toLowerCase() === 'r2' ? 'r2' : 'local';
+    
+    // Tự động nhận diện thiết lập R2 cũ từ bản v3.3.4 (khi STORAGE_DRIVER chưa được định nghĩa)
+    const endpoint = envValue('S3_ENDPOINT');
+    if (endpoint && !endpoint.includes('localhost') && !endpoint.includes('minio:9000')) {
+      return 'r2';
+    }
+    return 'local';
   })() as 'local' | 'r2',
 
   /* Public base URL cho driver local — nơi route tĩnh /files phục vụ UPLOAD_DIR.
