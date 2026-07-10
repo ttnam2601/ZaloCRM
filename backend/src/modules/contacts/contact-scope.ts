@@ -119,6 +119,31 @@ export async function assertContactVisible(args: {
   contactId: string;
 }): Promise<boolean> {
   if (args.legacyRole === 'owner' || args.legacyRole === 'admin') return true;
+
+  // Tự động cho phép truy cập nếu Contact là Nhóm Zalo và user có quyền truy cập Zalo Account quản lý nhóm đó
+  const contactRow = await prisma.contact.findFirst({
+    where: { id: args.contactId, orgId: args.orgId },
+    select: { zaloUid: true },
+  });
+  if (contactRow?.zaloUid) {
+    const isGroupConv = await prisma.conversation.findFirst({
+      where: { externalThreadId: contactRow.zaloUid, threadType: 'group', orgId: args.orgId },
+      select: { zaloAccountId: true },
+    });
+    if (isGroupConv) {
+      const access = await prisma.zaloAccountAccess.findFirst({
+        where: { zaloAccountId: isGroupConv.zaloAccountId, userId: args.userId },
+      });
+      const account = await prisma.zaloAccount.findFirst({
+        where: { id: isGroupConv.zaloAccountId, orgId: args.orgId },
+        select: { ownerUserId: true },
+      });
+      if (account?.ownerUserId === args.userId || access) {
+        return true;
+      }
+    }
+  }
+
   // Cheap path: 1 query check ContactAccess. Manager cascade qua getContactScope path.
   const direct = await prisma.contactAccess.findUnique({
     where: { contactId_userId: { contactId: args.contactId, userId: args.userId } },
