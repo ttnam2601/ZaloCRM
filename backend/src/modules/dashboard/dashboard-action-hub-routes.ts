@@ -204,8 +204,20 @@ export async function dashboardActionHubRoutes(app: FastifyInstance): Promise<vo
         ]);
 
       // Prefetch nick của target (dùng cho cả tương tác hôm nay + quota nick bên dưới).
+      const targetUser = await prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: { role: true },
+      });
+      const targetRole = targetUser?.role || 'staff';
+      const { getZaloScope } = await import('../zalo/zalo-scope.js');
+      const targetZaloScope = await getZaloScope(targetUserId, viewer.orgId, targetRole);
+
       const quotaNicksPrefetch = await prisma.zaloAccount.findMany({
-        where: { orgId: viewer.orgId, ownerUserId: targetUserId, archivedAt: null },
+        where: {
+          id: { in: targetZaloScope.accessibleIds },
+          orgId: viewer.orgId,
+          archivedAt: null,
+        },
         select: { id: true, displayName: true, privacyMode: true },
       });
 

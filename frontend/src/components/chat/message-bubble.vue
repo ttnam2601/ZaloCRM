@@ -324,7 +324,7 @@
         class="receipt-chip-row"
         :class="{ 'has-reaction-above': reactions && reactions.length > 0 }"
       >
-        <span class="receipt-chip" :class="receiptState" :title="receiptTooltip">
+        <span class="receipt-chip" :class="receiptState">
           <svg v-if="receiptState === 'sending'" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="9" />
             <polyline points="12 7 12 12 15 14" />
@@ -337,6 +337,22 @@
             <polyline points="8 6 13 11 21 2" />
           </svg>
           <span class="receipt-label">{{ receiptLabel }}</span>
+
+          <!-- Beautiful Custom CSS Tooltip -->
+          <div v-if="message.seenDetails && message.seenDetails.length > 0" class="custom-seen-tooltip">
+            <div class="tooltip-header">Đã xem bởi</div>
+            <div class="tooltip-divider"></div>
+            <div class="tooltip-body">
+              <div v-for="sd in message.seenDetails" :key="sd.uid" class="tooltip-item">
+                <span class="tooltip-name">{{ sd.name || 'Thành viên' }}</span>
+                <span class="tooltip-time">{{ formatTooltipTime(sd.seenAt) }}</span>
+              </div>
+            </div>
+          </div>
+          <!-- Fallback tooltip for non-group single chat -->
+          <div v-else-if="receiptTooltip" class="custom-seen-tooltip single-chat-tooltip">
+            {{ receiptTooltip }}
+          </div>
         </span>
       </div>
 
@@ -920,6 +936,15 @@ function formatTime(d: string): string {
   return formatInOrgTz(d, undefined, { timeOnly: true });
 }
 
+function formatTooltipTime(d: string): string {
+  const formatted = formatInOrgTz(d);
+  const parts = formatted.split(' ');
+  if (parts.length === 2) {
+    return `${parts[1]} ${parts[0]}`;
+  }
+  return formatted;
+}
+
 function onPickerReact(key: string) {
   emit('toggle-reaction', key);
 }
@@ -1140,11 +1165,12 @@ async function openFile(href: string, name?: string) {
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.1px;
-  cursor: help;
+  cursor: pointer;
   user-select: none;
   background: rgba(120, 130, 145, 0.10);
   color: rgba(75, 85, 105, 0.85);
   transition: background 0.18s ease, color 0.18s ease;
+  position: relative; /* Anchor for custom tooltip */
 }
 .receipt-chip.sending {
   background: rgba(120, 130, 145, 0.08);
@@ -1160,6 +1186,102 @@ async function openFile(href: string, name?: string) {
 }
 .receipt-chip svg { display: block; flex-shrink: 0; }
 .receipt-label { line-height: 1.2; }
+
+/* Custom premium seen receipt tooltip styling */
+.custom-seen-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 100;
+  width: max-content;
+  max-width: 290px;
+  background: rgba(28, 25, 23, 0.98);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  border-radius: 8px;
+  padding: 8px 12px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(6px) scale(0.95);
+  transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), 
+              transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), 
+              visibility 0.15s;
+  pointer-events: none;
+  font-family: inherit;
+  text-align: left;
+}
+
+/* Hover trigger */
+.receipt-chip:hover .custom-seen-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+}
+
+/* Tooltip Arrow pointing down */
+.custom-seen-tooltip::after {
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  right: 18px;
+  width: 10px;
+  height: 10px;
+  background: rgba(28, 25, 23, 0.98);
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  transform: rotate(45deg);
+}
+
+.tooltip-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: #C2410C; /* Terracotta primary accent */
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tooltip-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 6px 0;
+}
+
+.tooltip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tooltip-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tooltip-name {
+  color: #E7E5E4; /* Stone 200 */
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.tooltip-time {
+  color: #A8A29E; /* Stone 400 */
+  font-size: 11px;
+}
+
+.single-chat-tooltip {
+  font-size: 12px;
+  color: #E7E5E4;
+  font-weight: 500;
+  white-space: nowrap;
+}
 
 .reminder-card {
   padding: 8px 12px;
