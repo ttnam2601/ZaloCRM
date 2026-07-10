@@ -29,8 +29,8 @@
       <header class="chat-header">
         <div
           class="ch-avatar-wrap"
-          :class="{ clickable: canClickHeader }"
-          :title="canClickHeader ? 'Xem thông tin KH' : ''"
+          :class="{ clickable: canClickHeader || conversation.threadType === 'group' }"
+          :title="conversation.threadType === 'group' ? 'Rời nhóm' : (canClickHeader ? 'Xem thông tin KH' : '')"
           @click="onHeaderAvatarClick"
         >
           <Avatar
@@ -50,7 +50,7 @@
               class="ch-name"
               :class="{ clickable: canClickHeader }"
               :title="canClickHeader ? `Xem thông tin KH: ${headerName}` : headerName"
-              @click="onHeaderAvatarClick"
+              @click="onHeaderNameClick"
             >{{ headerName }}</div>
             <span class="ch-gender-chip" :class="genderChipClass" :title="genderTitle">
               <svg v-if="conversation.threadType === 'group'" class="gender-svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1901,6 +1901,16 @@ function onHeaderAvatarClick() {
     userInfoUid.value = uid;
     userInfoDialog.value = true;
   }
+}
+function onHeaderNameClick() {
+  const conv = props.conversation;
+  if (!conv || conv.threadType === 'group') return;
+  
+  // Per-account UID: ưu tiên externalThreadId (đúng nick đang xem), fallback contact.zaloUid.
+  const uid = conv.externalThreadId || conv.contact?.zaloUid;
+  if (!uid) return;
+  userInfoUid.value = uid;
+  userInfoDialog.value = true;
 }
 
 async function confirmLeaveGroup() {
