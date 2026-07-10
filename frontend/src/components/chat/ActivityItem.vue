@@ -1,5 +1,3 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Copyright (C) 2026 Nguyễn Tiến Lộc -->
 <template>
   <div class="activity-item" :class="`cat-${item.category || 'system'}`">
     <span class="act-icon" :style="`color: ${categoryColor}`">{{ icon }}</span>
@@ -213,11 +211,9 @@ const detailsLine = computed(() => {
   if (action === 'friend_alias_change' && (d.old !== undefined || d.new !== undefined)) {
     return `: "${escape(String(d.old || ''))}" → "${escape(String(d.new || ''))}"`;
   }
-  // Generic fallback 2026-05-29: BE pass details.summary tiếng Việt đẹp
-  // (vd Lead Pool: "Phạm Chí Thành đã nhận lead từ Pool · Nguồn: Tệp khách hàng · Điểm 12 · Hạn note: 30 phút").
-  // Em dùng cho mọi action có summary thay vì raw JSON details.
-  if (typeof d.summary === 'string' && d.summary.trim()) {
-    return ` — ${escape(d.summary)}`;
+  // Group activities details (joins, leaves, message sent, message seen)
+  if ((action === 'group_member_join' || action === 'group_member_leave' || action === 'group_message_sent' || action === 'group_message_seen') && d.userName) {
+    return `: bởi <strong>${escape(String(d.userName))}</strong>`;
   }
   return '';
 });

@@ -1,72 +1,84 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Copyright (C) 2026 Nguyễn Tiến Lộc -->
 <template>
-  <v-dialog :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)" max-width="720">
-    <v-card class="nmd-card">
-      <!-- Header style Lead Pool 2026-05-28 -->
-      <header class="nmd-header">
-        <span class="nmd-source-pill">💬 Tin nhắn</span>
-        <div class="nmd-title">
-          ⚡ Bắt đầu liên lạc
-          <span class="nmd-subtitle">Chọn nick CRM → tìm KH hoặc tra Zalo</span>
+  <v-dialog :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)" max-width="680">
+    <v-card>
+      <v-card-title class="dialog-title">
+        <div class="title-row">
+          <v-icon class="mr-2" color="primary">mdi-message-plus</v-icon>
+          <span>Tin nhắn mới</span>
         </div>
-        <button class="nmd-close" @click="$emit('update:modelValue', false)" aria-label="Đóng">✕</button>
-      </header>
-
-      <!-- Section 1: Nick selector (anchored dropdown, click chip mở bảng nhỏ xổ xuống) -->
-      <div class="nmd-nick-row">
-        <span class="nmd-row-label">📤 Gửi từ nick</span>
         <button
-          v-if="!selectedAccount"
-          type="button"
-          ref="nickTriggerEl"
-          class="nmd-pick-cta"
-          data-nick-picker-trigger
-          :disabled="accounts.length === 0"
-          @click="showNickPicker = !showNickPicker"
-        >
-          <span class="nmd-pick-icon">＋</span>
-          <span class="nmd-pick-text">
-            {{ accounts.length === 0
-              ? 'Chưa có nick CRM nào — vào "Quản lý nick" để kết nối'
-              : `Chọn nick gửi tin nhắn (${accounts.length} nick)`
-            }}
-          </span>
-          <span class="nmd-pick-caret">{{ showNickPicker ? '▴' : '▾' }}</span>
-        </button>
-        <div
-          v-else
-          ref="nickTriggerEl"
-          class="nmd-nick-picked"
-          data-nick-picker-trigger
-          @click="showNickPicker = !showNickPicker"
-        >
-          <span class="nmd-nick-picked-avatar">
-            <img v-if="selectedAccount.avatarUrl" :src="selectedAccount.avatarUrl" :alt="selectedAccount.displayName || ''" referrerpolicy="no-referrer" />
-            <span v-else>{{ (selectedAccount.displayName || '?').charAt(0).toUpperCase() }}</span>
-          </span>
-          <div class="nmd-nick-picked-body">
-            <span class="nmd-nick-picked-name">
-              {{ selectedAccount.displayName || '(nick chưa đặt tên)' }}
-              <span v-if="(selectedAccount as any).privacyMode === 'main'" class="nmd-nick-privacy" title="Nick Riêng tư">🔒</span>
-            </span>
-            <span v-if="(selectedAccount as any).owner?.fullName && !(selectedAccount as any).isOwnedByMe" class="nmd-nick-picked-owner">
-              👤 {{ (selectedAccount as any).owner.fullName }}
-            </span>
-          </div>
-          <span class="nmd-nick-change">
-            🔄 Đổi nick <span class="nmd-pick-caret">{{ showNickPicker ? '▴' : '▾' }}</span>
-          </span>
+          class="close-x"
+          title="Đóng"
+          @click="$emit('update:modelValue', false)"
+        >×</button>
+      </v-card-title>
+
+      <!-- Section 1: Chọn nick CRM — adaptive (chips khi ít, autocomplete khi nhiều) -->
+      <div class="section-nick">
+        <div class="section-label">
+          <v-icon size="14">mdi-account-arrow-right</v-icon>
+          <span>Gửi từ nick</span>
+          <span class="nick-count">({{ accounts.length }} nick)</span>
+          <span v-if="accounts.length === 0" class="hint-warn">— chưa có nick CRM nào</span>
         </div>
 
-        <!-- Anchored dropdown — Teleport tới body + fixed position theo trigger -->
-        <NickPickerPopup
-          v-model="showNickPicker"
-          :accounts="accounts as any"
-          :trigger-el="resolvedTriggerEl"
-          title="📤 Chọn nick gửi tin nhắn"
-          @pick="onPickNickFromPopup"
-        />
+        <!-- Mode 1: ≤ 4 nick → chip group visual -->
+        <div v-if="accounts.length && accounts.length <= 4" class="nick-chip-row">
+          <button
+            v-for="a in accounts"
+            :key="a.id"
+            class="nick-chip"
+            :class="{ active: selectedAccountId === a.id }"
+            :title="a.displayName || 'Nick'"
+            @click="onPickNick(a.id)"
+          >
+            <Avatar
+              :src="a.avatarUrl"
+              :name="a.displayName || 'Nick'"
+              :size="22"
+              :gradient-seed="a.id"
+              platform="zalo"
+            />
+            <span class="nick-name">{{ a.displayName || 'Nick' }}</span>
+            <v-icon v-if="selectedAccountId === a.id" size="14" color="primary">mdi-check-circle</v-icon>
+          </button>
+        </div>
+
+        <!-- Mode 2: > 4 nick → autocomplete để scale 20-30+ nick -->
+        <div v-else-if="accounts.length > 4" class="nick-select-wrap">
+          <!-- Chip đang chọn (visual) -->
+          <div v-if="selectedAccount" class="nick-selected-chip">
+            <Avatar :src="selectedAccount.avatarUrl" :name="selectedAccount.displayName || 'Nick'" :size="22" :gradient-seed="selectedAccount.id" platform="zalo" />
+            <span class="nick-name">{{ selectedAccount.displayName || 'Nick' }}</span>
+            <button class="nick-clear" title="Đổi nick" @click="selectedAccountId = null; clearResults()">×</button>
+          </div>
+          <!-- Searchable picker -->
+          <v-autocomplete
+            v-else
+            :items="accounts"
+            item-title="displayName"
+            item-value="id"
+            :model-value="selectedAccountId"
+            placeholder="🔎 Tìm nick CRM (gõ tên)…"
+            variant="outlined"
+            density="comfortable"
+            hide-details="auto"
+            menu-icon="mdi-chevron-down"
+            no-data-text="Không tìm thấy nick nào"
+            @update:model-value="onPickNick"
+          >
+            <template #item="slotProps">
+              <v-list-item v-bind="slotProps.props" :title="undefined">
+                <div class="nick-option">
+                  <Avatar :src="rawAcc(slotProps).avatarUrl" :name="rawAcc(slotProps).displayName || 'Nick'" :size="28" :gradient-seed="rawAcc(slotProps).id" platform="zalo" />
+                  <div class="nick-option-body">
+                    <div class="nick-option-name">{{ rawAcc(slotProps).displayName || 'Nick chưa đặt tên' }}</div>
+                  </div>
+                </div>
+              </v-list-item>
+            </template>
+          </v-autocomplete>
+        </div>
       </div>
 
       <!-- Section 2: Search -->
@@ -94,6 +106,55 @@
           </div>
           <div v-else-if="!selectedAccountId" class="text-grey text-caption pa-3 text-center">
             Chọn nick CRM để tìm KH
+          </div>
+
+          <!-- Group Link Query Mode -->
+          <div v-else-if="isGroupLinkQuery" class="result-section">
+            <div class="result-section-title">
+              <v-icon size="14" color="primary" class="mr-1">mdi-link-variant</v-icon>
+              Đường dẫn nhóm Zalo phát hiện
+            </div>
+            
+            <div v-if="checkingGroupLink" class="text-center text-grey pa-3">
+              <v-progress-circular indeterminate size="20" class="mr-2" />
+              Đang kiểm tra trạng thái nhóm...
+            </div>
+            
+            <div v-else-if="groupLinkChecked" class="pa-3">
+              <div v-if="groupLinkAlreadyMember" class="d-flex align-center text-success py-2">
+                <v-icon color="success" class="mr-2">mdi-check-circle</v-icon>
+                <span>Bạn đã ở trong nhóm này. Có thể mở chat trực tiếp.</span>
+              </div>
+              <div v-else>
+                <div class="d-flex align-center justify-space-between mb-3">
+                  <div class="d-flex align-center text-warning">
+                    <v-icon color="warning" class="mr-2">mdi-account-plus-outline</v-icon>
+                    <span>Bạn chưa tham gia nhóm này (hoặc đã rời đi trước đó).</span>
+                  </div>
+                  <v-btn
+                    icon
+                    size="small"
+                    variant="text"
+                    color="primary"
+                    title="Nhập kịch bản khai giảng"
+                    @click="openScriptDialog"
+                  >
+                    <FileTextIcon :size="18" :stroke-width="1.5" />
+                  </v-btn>
+                </div>
+                <v-textarea
+                  v-model="groupLinkWelcomeMsg"
+                  label="Tin nhắn gửi kèm khi vào nhóm (tùy chọn)"
+                  variant="outlined"
+                  density="comfortable"
+                  rows="3"
+                  placeholder="Nhập tin nhắn chào mừng gửi vào nhóm sau khi gia nhập..."
+                />
+              </div>
+            </div>
+            <div v-else class="text-center text-grey pa-3">
+              Lỗi kiểm tra trạng thái nhóm.
+            </div>
           </div>
 
           <!-- Tier 1: Friend rows của NICK NÀY (KH nick này đang chăm) -->
@@ -216,24 +277,8 @@
               <v-progress-circular indeterminate size="16" class="mr-2" />
               Đang tra SĐT trên Zalo qua nick {{ accountTitle }}…
             </div>
-            <div v-else-if="lookupNotFound" class="lookup-miss">
-              <!-- M55.3: chấm đỏ nháy + userFriendly label sale-friendly -->
-              <div class="lookup-miss-msg">
-                <span class="lookup-miss-dot" />
-                <span class="lookup-miss-text">{{ lookupUserFriendly || lookupNotFound }}</span>
-              </div>
-              <div v-if="lookupNotFound && lookupUserFriendly" class="lookup-miss-detail">
-                {{ lookupNotFound }}
-              </div>
-              <button
-                v-if="isPhoneQuery"
-                type="button"
-                class="quick-add-trigger"
-                @click="showQuickAddDialog = true"
-              >
-                ＋ Thêm nhanh KH với SĐT "{{ query }}"
-                <div class="trigger-hint">KH không có Zalo — vẫn lưu vào CRM để chăm sóc, đặt lịch hẹn, ghi chú</div>
-              </button>
+            <div v-else-if="lookupNotFound" class="text-grey text-caption text-center">
+              ⚠ {{ lookupNotFound }}
             </div>
             <button
               v-else-if="isPhoneQuery"
@@ -244,6 +289,9 @@
               🔍 Tra Zalo cho SĐT "{{ query }}" từ nick {{ accountTitle }}
               <div class="trigger-hint">UID Zalo per-nick — cùng KH ra UID khác nhau mỗi nick</div>
             </button>
+            <div v-else-if="isInvalidGroupLinkQuery" class="text-warning text-caption text-center font-weight-bold">
+              ⚠ Đường dẫn nhóm Zalo không hợp lệ (Vui lòng không chứa dấu cách, dấu nháy đơn, hoặc ký tự thừa ở cuối).
+            </div>
             <div v-else class="text-grey text-caption text-center">
               Không match KH nào. Nếu là SĐT (≥9 số), gõ đủ để tra Zalo.
             </div>
@@ -280,26 +328,95 @@
       </v-card-actions>
     </v-card>
 
-    <!-- Wedge A 2026-05-28: Thêm KH nhanh khi Zalo lookup miss — SĐT pre-fill từ query -->
-    <!-- M53.3 2026-05-30: NewMessageDialog tự xử lý virtual-conv qua onQuickAddCreated
-         → set autoOpenVirtualChat=false để dialog KHÔNG tự navigate (tránh race 2 POST). -->
-    <AddCustomerQuickDialog
-      v-model="showQuickAddDialog"
-      :default-phone="query"
-      lead-source="chat_compose_lookup_miss"
-      :auto-open-virtual-chat="false"
-      @created="onQuickAddCreated"
-    />
+    <!-- Script Dialog -->
+    <v-dialog v-model="scriptDialogOpen" max-width="600px">
+      <v-card class="pa-4 rounded-lg bg-surface border-thin">
+        <v-card-title class="d-flex align-center justify-space-between py-2 px-0">
+          <span class="text-h6 font-weight-bold text-gradient">Biên dịch kịch bản khai giảng</span>
+          <v-btn icon variant="text" size="small" @click="scriptDialogOpen = false">
+            <XIcon :size="16" />
+          </v-btn>
+        </v-card-title>
+        <v-card-text class="px-0 py-3">
+          <p class="text-caption text-muted mb-4">
+            Dán tin nhắn chứa thông tin học sinh (Tên, CID, UID) và kịch bản mẫu nằm trong ngoặc kép "..." hoặc “...”. Hệ thống sẽ tự động trích xuất thông tin và điền vào mẫu để gửi kèm khi vào nhóm.
+          </p>
+          <v-textarea
+            v-model="rawScriptInput"
+            label="Dán tin nhắn gốc vào đây"
+            placeholder="Ví dụ:&#10;Nguyễn Văn A&#10;CID: VH12345&#10;UID: HS67890&#10;“Em chào Phụ huynh học sinh [TÊN HS], em liên hệ từ RinoEdu để thông báo lịch học thứ 3 lúc 18:00...”"
+            rows="6"
+            variant="outlined"
+            density="comfortable"
+            hide-details
+            class="mb-4"
+          ></v-textarea>
+          
+          <!-- Cảnh báo cấu trúc -->
+          <v-alert
+            v-if="scriptWarnings.length"
+            type="warning"
+            variant="tonal"
+            density="compact"
+            class="mb-4 text-caption"
+            border="start"
+          >
+            <div v-for="(warn, idx) in scriptWarnings" :key="idx" class="d-flex align-center ga-1 py-0.5">
+              <span>• {{ warn }}</span>
+            </div>
+          </v-alert>
+          
+          <v-row v-if="extractedInfo.name || extractedInfo.cid || extractedInfo.uid" class="mt-2">
+            <v-col cols="12" class="pb-1">
+              <span class="text-caption font-weight-bold text-primary">Thông tin trích xuất (có thể điều chỉnh):</span>
+            </v-col>
+            <v-col cols="4" class="py-1">
+              <v-text-field
+                v-model="extractedInfo.name"
+                label="Tên HS"
+                variant="outlined"
+                density="compact"
+                hide-details
+              ></v-text-field>
+            </v-col>
+            <v-col cols="4" class="py-1">
+              <v-text-field
+                v-model="extractedInfo.cid"
+                label="Mã CID"
+                variant="outlined"
+                density="compact"
+                hide-details
+              ></v-text-field>
+            </v-col>
+            <v-col cols="4" class="py-1">
+              <v-text-field
+                v-model="extractedInfo.uid"
+                label="Mã UID/SID"
+                variant="outlined"
+                density="compact"
+                hide-details
+              ></v-text-field>
+            </v-col>
+          </v-row>
+        </v-card-text>
+        <v-card-actions class="px-0 pt-4">
+          <v-spacer></v-spacer>
+          <v-btn variant="text" color="grey" @click="scriptDialogOpen = false">Hủy</v-btn>
+          <v-btn color="primary" variant="flat" :disabled="!rawScriptInput.trim()" @click="compileAndApplyScript">
+            Áp Dụng
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch } from 'vue';
 import Avatar from '@/components/ui/Avatar.vue';
-import AddCustomerQuickDialog from '@/components/contacts/AddCustomerQuickDialog.vue';
-import NickPickerPopup from '@/components/zalo-accounts/NickPickerPopup.vue';
 import { api } from '@/api';
 import { useToast } from '@/composables/use-toast';
+import { FileText as FileTextIcon, X as XIcon } from 'lucide-vue-next';
 
 interface AccountLite { id: string; displayName: string | null; avatarUrl?: string | null }
 interface FriendRow {
@@ -324,8 +441,6 @@ interface ContactRow {
   tags: unknown;
   statusRef?: { id: string; name: string; color: string | null } | null;
   assignedUser?: { id: string; fullName: string | null } | null;
-  /** M53 2026-05-30 — null/false = KH chưa có Zalo → gate sang virtual chat, KHÔNG gọi findUser. */
-  hasZalo?: boolean | null;
 }
 interface LookupResult {
   found: boolean;
@@ -341,9 +456,6 @@ const props = defineProps<{
   modelValue: boolean;
   accounts: AccountLite[];
   defaultAccountId?: string | null;
-  /** Wedge A 2026-05-28: SĐT pre-fill từ ConversationList search box.
-   *  Dialog auto-trigger search + Zalo lookup ngay khi open + isPhoneQuery. */
-  initialQuery?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -364,7 +476,6 @@ function rawAcc(slotProps: { item: { raw?: AccountLite } | AccountLite }): Accou
   const item = slotProps.item as any;
   return (item?.raw ?? item) as AccountLite;
 }
-void rawAcc; // legacy helper kept for ref but unused after refactor
 const accountTitle = computed(() => selectedAccount.value?.displayName || 'nick');
 
 const selectedAccountId = ref<string | null>(props.defaultAccountId ?? null);
@@ -372,39 +483,6 @@ const query = ref('');
 const friendRows = ref<FriendRow[]>([]);
 const contactRows = ref<ContactRow[]>([]);
 const searching = ref(false);
-const showQuickAddDialog = ref(false);
-const showNickPicker = ref(false);
-const nickTriggerEl = ref<HTMLElement | null>(null);
-const resolvedTriggerEl = computed<HTMLElement | null>(() => nickTriggerEl.value);
-
-// M53.3 2026-05-30: KH no-Zalo vừa lưu từ NewMessageDialog → tự mở virtual chat
-// (giống ContactsView FAB). Fix bug "tạo KH 0900444666 mất tích" — KH có trong DB
-// nhưng không có conv để mở. Reuse cùng endpoint POST /contacts/:id/virtual-conversation.
-// M55.3 2026-05-30: LUÔN tự đóng NewMessageDialog (sale vào /chat, không cần thấy dialog lại).
-async function onQuickAddCreated(c: { id: string; fullName: string | null; phone: string | null }) {
-  toast.push(`Đã lưu KH "${c.fullName || c.phone}" — đang mở chat nội bộ...`, 'success', 2400);
-  try {
-    const vcRes = await api.post<{ conversationId: string; created: boolean }>(
-      `/contacts/${c.id}/virtual-conversation`, {},
-    );
-    const convId = vcRes.data?.conversationId;
-    if (convId) {
-      // emit 'opened' để ChatView navigate /chat/:convId (cùng pattern các branch khác)
-      emit('opened', convId);
-    }
-  } catch (err: any) {
-    const msg = err?.response?.data?.message || err?.response?.data?.error;
-    toast.warning(msg || 'KH đã lưu. Mở chat nội bộ ở trang Liên hệ khi cần.', 4000);
-  }
-  // M55.3: LUÔN đóng dialog parent (kể cả success), tránh sale phải tắt thủ công
-  emit('update:modelValue', false);
-}
-
-// Wedge A 2026-05-28: NickPickerPopup → pick nick (đã pass privacy lock filter)
-function onPickNickFromPopup(nick: { id: string }) {
-  onPickNick(nick.id);
-  showNickPicker.value = false;
-}
 const pickedKind = ref<'friend' | 'contact' | 'lookup' | null>(null);
 const pickedId = ref<string | null>(null);
 const opening = ref(false);
@@ -412,9 +490,30 @@ const opening = ref(false);
 const lookupResult = ref<LookupResult | null>(null);
 const lookingUp = ref(false);
 const lookupNotFound = ref<string | null>(null);
-// M55.3 2026-05-30 — userFriendly label sale-friendly (vd "KH chưa bật tìm kiếm Zalo công khai")
-const lookupUserFriendly = ref<string | null>(null);
 const lookupCommitMode = ref<string>('create'); // 'create' | 'attach:<contactId>'
+
+// Group link check state
+const checkingGroupLink = ref(false);
+const groupLinkAlreadyMember = ref(false);
+const groupLinkConvId = ref<string | null>(null);
+const groupLinkChecked = ref(false);
+const groupLinkWelcomeMsg = ref('');
+
+const isGroupLinkQuery = computed(() => {
+  const q = query.value.trim();
+  return /^(?:https?:\/\/)?(?:www\.)?zalo\.me\/g\/[a-zA-Z0-9_-]+\/?$/i.test(q);
+});
+
+const groupLinkQueryId = computed(() => {
+  const q = query.value.trim();
+  const match = q.match(/^(?:https?:\/\/)?(?:www\.)?zalo\.me\/g\/([a-zA-Z0-9_-]+)\/?$/i);
+  return match ? match[1] : null;
+});
+
+const isInvalidGroupLinkQuery = computed(() => {
+  const q = query.value.trim();
+  return q.toLowerCase().includes('zalo.me/g/') && !/^(?:https?:\/\/)?(?:www\.)?zalo\.me\/g\/[a-zA-Z0-9_-]+\/?$/i.test(q);
+});
 
 const isPhoneQuery = computed(() => {
   const digits = query.value.replace(/[^\d]/g, '');
@@ -422,6 +521,7 @@ const isPhoneQuery = computed(() => {
 });
 
 const canOpen = computed(() => {
+  if (isGroupLinkQuery.value) return groupLinkChecked.value;
   if (pickedKind.value === 'friend') return !!pickedId.value;
   if (pickedKind.value === 'contact') return !!pickedId.value;
   if (pickedKind.value === 'lookup') return !!lookupResult.value?.found;
@@ -429,6 +529,9 @@ const canOpen = computed(() => {
 });
 
 const openButtonLabel = computed(() => {
+  if (isGroupLinkQuery.value) {
+    return groupLinkAlreadyMember.value ? 'Mở chat' : 'Gia nhập nhóm';
+  }
   if (pickedKind.value === 'friend') return 'Mở chat';
   if (pickedKind.value === 'contact') return 'Bắt đầu chat & gắn vào nick này';
   if (pickedKind.value === 'lookup') {
@@ -447,31 +550,21 @@ function clearResults() {
   lookupResult.value = null;
   lookupNotFound.value = null;
   lookupCommitMode.value = 'create';
+  
+  // Clear group link state
+  groupLinkAlreadyMember.value = false;
+  groupLinkConvId.value = null;
+  groupLinkChecked.value = false;
+  groupLinkWelcomeMsg.value = '';
 }
 function resetState() {
   selectedAccountId.value = props.defaultAccountId
     ?? (props.accounts.length === 1 ? props.accounts[0].id : null);
-  query.value = (props.initialQuery ?? '').trim();
+  query.value = '';
   clearResults();
 }
 
-watch(() => props.modelValue, async (v) => {
-  if (!v) return;
-  resetState();
-  // Wedge A: auto-search + auto-lookup nếu đã có nick + SĐT pre-fill
-  if (selectedAccountId.value && query.value) {
-    await nextTick();
-    runSearch();
-    if (isPhoneQuery.value) {
-      // Delay nhẹ cho search trả về trước (UX: thấy danh sách trước khi lookup)
-      setTimeout(() => {
-        if (selectedAccountId.value && isPhoneQuery.value && !friendRows.value.length && !contactRows.value.length) {
-          void runZaloLookup();
-        }
-      }, 350);
-    }
-  }
-});
+watch(() => props.modelValue, (v) => { if (v) resetState(); });
 
 function pickFriend(f: FriendRow) {
   pickedKind.value = 'friend';
@@ -488,6 +581,13 @@ function onSearchInput() {
   lookupNotFound.value = null;
   pickedKind.value = null;
   pickedId.value = null;
+
+  // Clear group link state
+  groupLinkAlreadyMember.value = false;
+  groupLinkConvId.value = null;
+  groupLinkChecked.value = false;
+  groupLinkWelcomeMsg.value = '';
+
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => runSearch(), 250);
 }
@@ -504,6 +604,10 @@ async function runSearch() {
   if (!selectedAccountId.value || !query.value.trim()) {
     friendRows.value = [];
     contactRows.value = [];
+    return;
+  }
+  if (isGroupLinkQuery.value) {
+    runGroupLinkCheck();
     return;
   }
   searching.value = true;
@@ -533,11 +637,34 @@ async function runSearch() {
   }
 }
 
+async function runGroupLinkCheck() {
+  const linkId = groupLinkQueryId.value;
+  if (!selectedAccountId.value || !linkId) return;
+  checkingGroupLink.value = true;
+  groupLinkChecked.value = false;
+  groupLinkAlreadyMember.value = false;
+  groupLinkConvId.value = null;
+  
+  try {
+    const res = await api.post(`/zalo-accounts/${selectedAccountId.value}/groups/join-link`, {
+      linkId,
+      checkOnly: true
+    });
+    groupLinkAlreadyMember.value = !!res.data?.alreadyMember;
+    groupLinkConvId.value = res.data?.conversationId || null;
+    groupLinkChecked.value = true;
+  } catch (err: any) {
+    console.error('[NewMessageDialog] Group link check failed:', err);
+    toast.error(err.response?.data?.error || err.message || 'Lỗi kiểm tra link nhóm');
+  } finally {
+    checkingGroupLink.value = false;
+  }
+}
+
 async function runZaloLookup() {
   if (!selectedAccountId.value || !isPhoneQuery.value) return;
   lookingUp.value = true;
   lookupNotFound.value = null;
-  lookupUserFriendly.value = null;
   try {
     const res = await api.post<LookupResult & { reason?: string; detail?: string }>(
       `/zalo-accounts/${selectedAccountId.value}/friends/lookup-by-phone`,
@@ -574,9 +701,9 @@ async function runZaloLookup() {
       lookupCommitMode.value = 'create';
     }
   } catch (err) {
-    const data = (err as { response?: { data?: { detail?: string; userFriendly?: string } } }).response?.data;
-    lookupNotFound.value = data?.detail || 'Lookup thất bại';
-    lookupUserFriendly.value = data?.userFriendly || null;
+    const msg = (err as { response?: { data?: { detail?: string } } })
+      .response?.data?.detail || 'Lookup thất bại';
+    lookupNotFound.value = msg;
   } finally {
     lookingUp.value = false;
   }
@@ -586,6 +713,28 @@ async function onOpenChat() {
   if (!selectedAccountId.value) return;
   opening.value = true;
   try {
+    if (isGroupLinkQuery.value) {
+      const linkId = groupLinkQueryId.value;
+      if (!linkId) return;
+      if (groupLinkAlreadyMember.value && groupLinkConvId.value) {
+        emit('opened', groupLinkConvId.value);
+      } else {
+        toast.push('Đang gia nhập nhóm...');
+        const res = await api.post(`/zalo-accounts/${selectedAccountId.value}/groups/join-link`, {
+          linkId,
+          welcomeMessage: groupLinkWelcomeMsg.value
+        });
+        if (res.data?.conversationId) {
+          toast.success('Gia nhập nhóm thành công');
+          emit('opened', res.data.conversationId);
+        } else {
+          toast.error('Không tìm thấy cuộc trò chuyện sau khi gia nhập');
+        }
+      }
+      emit('update:modelValue', false);
+      return;
+    }
+
     if (pickedKind.value === 'friend' && pickedId.value) {
       // KH đã có Friend với nick này → mở conv (idempotent ensure)
       const res = await api.post<{ conversationId: string; created: boolean }>(
@@ -594,34 +743,15 @@ async function onOpenChat() {
       if (res.data?.created) toast.success('Đã tạo cuộc trò chuyện mới');
       emit('opened', res.data.conversationId);
     } else if (pickedKind.value === 'contact' && pickedId.value) {
+      // Contact đã có trong CRM, nhưng nick này chưa có Friend với KH.
+      // Cần lookup Zalo trước để biết UID per-nick — KHÔNG dùng Contact.zaloUid
+      // vì đó là UID per-viewer của nick KHÁC (sẽ không gửi tin được từ nick này).
       const c = contactRows.value.find(x => x.id === pickedId.value);
       if (!c?.phone) {
         toast.error('KH này chưa có SĐT → không lookup được UID từ nick này');
         return;
       }
-
-      // M53 2026-05-30: KH chưa có Zalo (hasZalo=null/false) → MỞ CHAT NỘI BỘ,
-      // KHÔNG gọi findUser (vi phạm policy M52 + chắc chắn fail "zalo:216 User không hợp lệ").
-      // Anh chốt Approach A — virtual chat làm nhật ký, AI Trợ Lý reply.
-      if (!c.hasZalo) {
-        try {
-          const vcRes = await api.post<{ conversationId: string; created: boolean }>(
-            `/contacts/${c.id}/virtual-conversation`, {},
-          );
-          toast.success('Mở chat nội bộ — KH chưa có Zalo, lưu nhật ký + AI gợi ý');
-          emit('opened', vcRes.data.conversationId);
-          // M55.3: tự đóng dialog sau khi opened (sale vào /chat ngay, không cần thấy lại dialog)
-          emit('update:modelValue', false);
-        } catch (vcErr: any) {
-          const vcMsg = vcErr?.response?.data?.message || vcErr?.response?.data?.error;
-          toast.error(vcMsg || 'Không mở được chat nội bộ');
-        }
-        return;
-      }
-
-      // KH đã có Zalo (hasZalo=true) — gắn vào nick này qua lookup-by-phone.
-      // Cần lookup Zalo trước để biết UID per-nick — KHÔNG dùng Contact.zaloUid
-      // vì đó là UID per-viewer của nick KHÁC (sẽ không gửi tin được từ nick này).
+      // Lookup-by-phone để lấy UID per-nick
       const luRes = await api.post<LookupResult & { reason?: string; detail?: string }>(
         `/zalo-accounts/${selectedAccountId.value}/friends/lookup-by-phone`,
         { phone: c.phone },
@@ -675,155 +805,206 @@ async function onOpenChat() {
     opening.value = false;
   }
 }
+
+// ── Script Compiler Feature 2026-07-08 ───────────────────────────────
+const scriptDialogOpen = ref(false);
+const rawScriptInput = ref('');
+const extractedInfo = ref({ name: '', cid: '', uid: '' });
+const scriptWarnings = ref<string[]>([]);
+
+function parseScriptInput(text: string) {
+  if (!text) return { name: '', cid: '', uid: '', body: '' };
+  
+  let name = '';
+  let cid = '';
+  let uid = '';
+  let body = '';
+  
+  const firstQuoteIdx = text.indexOf('"');
+  const lastQuoteIdx = text.lastIndexOf('"');
+  const firstSmartQuoteIdx = text.indexOf('“');
+  const lastSmartQuoteIdx = text.lastIndexOf('”');
+  
+  let quoteStart = -1;
+  let quoteEnd = -1;
+  
+  if (firstQuoteIdx !== -1 && lastQuoteIdx !== -1 && firstQuoteIdx < lastQuoteIdx) {
+    quoteStart = firstQuoteIdx;
+    quoteEnd = lastQuoteIdx;
+  } else if (firstSmartQuoteIdx !== -1 && lastSmartQuoteIdx !== -1 && firstSmartQuoteIdx < lastSmartQuoteIdx) {
+    quoteStart = firstSmartQuoteIdx;
+    quoteEnd = lastSmartQuoteIdx;
+  }
+  
+  let headerText = '';
+  if (quoteStart !== -1 && quoteEnd !== -1) {
+    body = text.substring(quoteStart + 1, quoteEnd).trim();
+    headerText = text.substring(0, quoteStart).trim();
+  } else {
+    const lines = text.split('\n');
+    let bodyStartIdx = 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].toLowerCase();
+      if (line.includes('em chào') || line.includes('chao phu huynh') || line.includes('lien he tu') || line.includes('hồ sơ học tập')) {
+        bodyStartIdx = i;
+        break;
+      }
+    }
+    
+    if (bodyStartIdx > 0) {
+      headerText = lines.slice(0, bodyStartIdx).join('\n').trim();
+      body = lines.slice(bodyStartIdx).join('\n').trim();
+    } else {
+      let hasMetadata = false;
+      for (let i = 0; i < Math.min(lines.length, 3); i++) {
+        if (lines[i].includes('CID:') || lines[i].includes('UID:') || lines[i].includes('SID:')) {
+          hasMetadata = true;
+          bodyStartIdx = i + 1;
+          break;
+        }
+      }
+      if (hasMetadata) {
+        headerText = lines.slice(0, bodyStartIdx).join('\n').trim();
+        body = lines.slice(bodyStartIdx).join('\n').trim();
+      } else {
+        body = text.trim();
+      }
+    }
+  }
+  
+  if ((body.startsWith('"') && body.endsWith('"')) || (body.startsWith('“') && body.endsWith('”'))) {
+    body = body.substring(1, body.length - 1).trim();
+  }
+  
+  if (headerText) {
+    const headerLines = headerText.split('\n').map(l => l.trim()).filter(Boolean);
+    let idLineIndex = -1;
+    for (let i = 0; i < headerLines.length; i++) {
+      if (headerLines[i].includes('CID:') || headerLines[i].includes('UID:') || headerLines[i].includes('SID:')) {
+        idLineIndex = i;
+        break;
+      }
+    }
+    
+    if (idLineIndex !== -1) {
+      for (let j = idLineIndex - 1; j >= 0; j--) {
+        if (headerLines[j]) {
+          name = headerLines[j];
+          break;
+        }
+      }
+      
+      const idLine = headerLines[idLineIndex];
+      const cidMatch = idLine.match(/CID:\s*([a-z0-9]+)/i);
+      if (cidMatch) cid = cidMatch[1];
+      
+      const uidMatch = idLine.match(/UID:\s*([a-z0-9]+)/i);
+      if (uidMatch) uid = uidMatch[1];
+      
+      const sidMatch = idLine.match(/SID:\s*([a-z0-9]+)/i);
+      let sid = sidMatch ? sidMatch[1] : '';
+      if (uid && sid) {
+        uid = `${uid} (SID: ${sid})`;
+      } else if (sid) {
+        uid = sid;
+      }
+    } else {
+      if (headerLines.length > 0) {
+        name = headerLines[0];
+      }
+    }
+  } else {
+    const cidMatch = text.match(/CID:\s*([a-z0-9]+)/i);
+    if (cidMatch) cid = cidMatch[1];
+    
+    const uidMatch = text.match(/UID:\s*([a-z0-9]+)/i);
+    if (uidMatch) uid = uidMatch[1];
+    
+    const sidMatch = text.match(/SID:\s*([a-z0-9]+)/i);
+    if (sidMatch) {
+      const sid = sidMatch[1];
+      uid = uid ? `${uid} (SID: ${sid})` : sid;
+    }
+  }
+  
+  return { name, cid, uid, body };
+}
+
+function compileScriptText(template: string, name: string, cid: string, uid: string) {
+  let result = template;
+  result = result.replace(/\[TÊN HS\]/g, name || '[TÊN HS]');
+  result = result.replace(/\[Tên HS\]/g, name || '[Tên HS]');
+  result = result.replace(/\[tên hs\]/g, name || '[tên hs]');
+  result = result.replace(/\{name\}/g, name || '{name}');
+  result = result.replace(/\{cid\}/g, cid || '{cid}');
+  result = result.replace(/\{uid\}/g, uid || '{uid}');
+  return result;
+}
+
+watch(rawScriptInput, (newVal) => {
+  const parsed = parseScriptInput(newVal);
+  extractedInfo.value.name = parsed.name;
+  extractedInfo.value.cid = parsed.cid;
+  extractedInfo.value.uid = parsed.uid;
+  
+  const warnings: string[] = [];
+  if (newVal.trim()) {
+    const hasQuotes = (newVal.indexOf('"') !== -1 && newVal.lastIndexOf('"') !== newVal.indexOf('"')) || 
+                      (newVal.indexOf('“') !== -1 && newVal.lastIndexOf('”') !== -1);
+    if (!hasQuotes) {
+      warnings.push('Thiếu cặp dấu ngoặc kép " " hoặc “ ” để bao quanh kịch bản.');
+    }
+    if (!parsed.name) {
+      warnings.push('Chưa nhận diện được Tên học sinh.');
+    }
+    if (!parsed.cid) {
+      warnings.push('Chưa nhận diện được Mã CID.');
+    }
+    if (!parsed.uid) {
+      warnings.push('Chưa nhận diện được Mã UID/SID.');
+    }
+  }
+  scriptWarnings.value = warnings;
+});
+
+function openScriptDialog() {
+  rawScriptInput.value = '';
+  extractedInfo.value = { name: '', cid: '', uid: '' };
+  scriptWarnings.value = [];
+  scriptDialogOpen.value = true;
+}
+
+function compileAndApplyScript() {
+  const parsed = parseScriptInput(rawScriptInput.value);
+  const name = extractedInfo.value.name || parsed.name;
+  const cid = extractedInfo.value.cid || parsed.cid;
+  const uid = extractedInfo.value.uid || parsed.uid;
+  const template = parsed.body || rawScriptInput.value;
+  
+  const compiled = compileScriptText(template, name, cid, uid);
+  groupLinkWelcomeMsg.value = compiled;
+  
+  scriptDialogOpen.value = false;
+  toast.success('Đã biên dịch kịch bản vào tin nhắn chào mừng thành công!');
+}
 </script>
 
 <style scoped>
-/* Wedge A 2026-05-28: Header sáng trắng (anh chốt 2026-05-28 lần 2) */
-.nmd-card { overflow: hidden; border-radius: 12px !important; }
-.nmd-header {
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px 18px 12px;
-  background: #ffffff;
-  color: #181d26;
-  border-bottom: 1px solid #e5e7eb;
-  position: relative;
+.dialog-title {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--smax-grey-200);
 }
-.nmd-source-pill {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 4px 10px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  color: #41454d;
-  border-radius: 9999px;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
+.title-row { display: flex; align-items: center; font-size: 16px; font-weight: 600; }
+.close-x {
+  width: 28px; height: 28px;
+  border: none; background: transparent;
+  font-size: 22px; line-height: 1;
+  color: var(--smax-grey-700);
+  cursor: pointer; border-radius: 50%;
 }
-.nmd-title {
-  flex: 1 1 auto;
-  display: flex; flex-direction: column;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-  color: #181d26;
-}
-.nmd-subtitle {
-  font-size: 11.5px;
-  font-weight: 400;
-  color: #41454d;
-  margin-top: 2px;
-}
-.nmd-close {
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  color: #41454d;
-  width: 30px; height: 30px;
-  border-radius: 50%;
-  font-size: 14px; line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.nmd-close:hover { background: #e5e7eb; color: #181d26; }
-
-/* Nick selector row */
-.nmd-nick-row {
-  padding: 12px 18px 10px;
-  display: flex; flex-direction: column; gap: 6px;
-  border-bottom: 1px solid #e5e7eb;
-  background: #f8fafc;
-  position: relative; /* anchor cho NickPickerPopup dropdown */
-}
-.nmd-pick-caret {
-  margin-left: auto;
-  font-size: 11px;
-  color: #41454d;
-  flex-shrink: 0;
-}
-.nmd-row-label {
-  font-size: 11.5px; font-weight: 600;
-  color: #41454d;
-  text-transform: uppercase; letter-spacing: 0.04em;
-}
-.nmd-pick-cta {
-  display: inline-flex; align-items: center; gap: 10px;
-  padding: 10px 14px;
-  background: #ffffff;
-  border: 1px dashed #181d26;
-  border-radius: 8px;
-  color: #181d26;
-  font-family: inherit;
-  font-size: 13.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-.nmd-pick-cta:hover:not(:disabled) {
-  background: #181d26;
-  color: #ffffff;
-}
-.nmd-pick-cta:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-  border-style: solid;
-  border-color: #e5e7eb;
-  color: #41454d;
-}
-.nmd-pick-icon {
-  font-size: 18px; line-height: 1;
-  font-weight: 400;
-}
-.nmd-nick-picked {
-  display: inline-flex; align-items: center; gap: 10px;
-  padding: 8px 12px 8px 8px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.nmd-nick-picked:hover { border-color: #181d26; }
-.nmd-nick-picked-avatar {
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  background: #e0e2e6;
-  overflow: hidden;
-  display: inline-flex;
-  align-items: center; justify-content: center;
-  font-weight: 600; color: #181d26; font-size: 13px;
-  flex-shrink: 0;
-}
-.nmd-nick-picked-avatar img { width: 100%; height: 100%; object-fit: cover; }
-.nmd-nick-picked-body {
-  display: flex; flex-direction: column;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-.nmd-nick-picked-name {
-  font-size: 13.5px; font-weight: 500; color: #181d26;
-  display: inline-flex; align-items: center; gap: 6px;
-}
-.nmd-nick-privacy {
-  font-size: 12px;
-}
-.nmd-nick-picked-owner {
-  font-size: 11px; color: #41454d;
-  margin-top: 1px;
-}
-.nmd-nick-change {
-  background: transparent;
-  border: 1px solid #e5e7eb;
-  border-radius: 7px;
-  padding: 5px 10px;
-  font-family: inherit;
-  font-size: 12px;
-  color: #181d26;
-  white-space: nowrap;
-  margin-left: auto;
-  pointer-events: none; /* click bubble lên parent div */
-  display: inline-flex; align-items: center; gap: 4px;
-}
-.nmd-nick-picked:hover .nmd-nick-change { background: #f8fafc; border-color: #181d26; }
+.close-x:hover { background: var(--smax-grey-100); }
 
 /* Section 1: nick selector — chip group cho compact + visual */
 .section-nick { padding: 12px 16px 8px; }
@@ -992,65 +1173,6 @@ async function onOpenChat() {
 .trigger-hint {
   font-size: 10px; font-weight: 400;
   opacity: 0.8; margin-top: 3px;
-}
-
-/* Wedge A 2026-05-28: Lookup miss → CTA Thêm nhanh KH */
-.lookup-miss {
-  padding: 12px;
-  display: flex; flex-direction: column; gap: 10px;
-}
-.lookup-miss-msg {
-  font-size: 13px;
-  font-weight: 600;
-  color: #b91c1c;
-  text-align: center;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-/* M55.3 — chấm đỏ nháy cho "KH chưa bật tìm kiếm Zalo công khai" */
-.lookup-miss-dot {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #ef4444;
-  box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
-  animation: lookup-pulse-red 1.5s ease-in-out infinite;
-}
-@keyframes lookup-pulse-red {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
-  50%      { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
-}
-.lookup-miss-text { line-height: 1.3; }
-.lookup-miss-detail {
-  font-size: 11px;
-  color: #64748b;
-  text-align: center;
-  line-height: 1.4;
-  padding: 0 8px;
-}
-.quick-add-trigger {
-  display: block; width: 100%;
-  padding: 12px 14px;
-  background: #fff8e6;
-  color: #181d26;
-  border: 1px dashed #d97706;
-  border-radius: 8px;
-  font-size: 13px; font-weight: 600;
-  cursor: pointer; font-family: inherit;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-  text-align: left;
-}
-.quick-add-trigger:hover {
-  background: #d97706;
-  color: #ffffff;
-  border-color: #d97706;
-}
-.quick-add-trigger .trigger-hint {
-  margin-top: 4px;
-  font-size: 10.5px; font-weight: 400; opacity: 0.85;
 }
 
 .commit-options {

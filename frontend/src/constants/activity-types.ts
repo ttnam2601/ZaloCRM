@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Nguyễn Tiến Lộc
 /**
  * activity-types.ts — UI mapping cho ActivityLog (icon, label tiếng Việt,
  * default visibility trong compact timeline).
@@ -37,7 +35,7 @@ export const CATEGORY_META: Record<ActivityCategory, CategoryMeta> = {
   status_care:   { label: 'Trạng thái',    icon: '🔄', color: '#388E3C', defaultVisible: true },
   score:         { label: 'Điểm số',       icon: '📈', color: '#F57C00', defaultVisible: true },
   appointment:   { label: 'Lịch hẹn',      icon: '📅', color: '#C2185B', defaultVisible: true },
-  interaction:   { label: 'Tương tác',     icon: '💬', color: '#5D4037', defaultVisible: false }, // nhiều event
+  interaction:   { label: 'Tương tác',     icon: '💬', color: '#5D4037', defaultVisible: true }, // nhiều event
   system:        { label: 'Hệ thống',      icon: '⚙️', color: '#546E7A', defaultVisible: false },
   automation:    { label: 'Tự động (Bot)', icon: '🤖', color: '#00897B', defaultVisible: true }, // bao gồm auto_tag_change — sale cần thấy KH state change
 };
@@ -93,10 +91,10 @@ export const ACTION_META: Record<string, ActionMeta> = {
   silent_30d:              { label: 'Im lặng 30 ngày', icon: '🔇' },
   call_logged:             { label: 'Đã gọi', icon: '📞' },
   meeting_logged:          { label: 'Đã gặp', icon: '🤝' },
-  group_message_seen:      { label: 'Xem tin nhắn nhóm', icon: '👁️' },
-  group_message_sent:      { label: 'Gửi tin nhắn nhóm', icon: '📤' },
-  group_member_join:       { label: 'Tham gia nhóm', icon: '➕' },
-  group_member_leave:      { label: 'Rời nhóm', icon: '➖' },
+  group_message_sent:      { label: 'Đã nhắn tin vào nhóm', icon: '💬' },
+  group_member_join:       { label: 'Đã tham gia nhóm', icon: '📥' },
+  group_member_leave:      { label: 'Đã rời nhóm', icon: '📤' },
+  group_message_seen:      { label: 'Đã xem tin nhắn nhóm', icon: '👁️' },
 
   // system
   contact_link_parent:     { label: 'Liên kết KH cha' },
@@ -112,13 +110,6 @@ export const ACTION_META: Record<string, ActionMeta> = {
   bot_score_calc:     { label: 'Bot tính điểm' },
   bot_status_suggest: { label: 'Bot suggest status' },
   auto_tag_change:    { label: 'Cập nhật auto-tag', icon: '🤖' },
-
-  // Lead Pool 2026-05-29 (Phase v2.D timeline logging)
-  lead_pool_assign:        { label: 'Nhận lead từ Pool', icon: '🎁' },
-  lead_pool_manual_return: { label: 'Trả lại lead về Pool', icon: '↩️' },
-  lead_pool_auto_return:   { label: 'Lead tự trả về Pool', icon: '⏱️' },
-  lead_pool_bonus_grant:   { label: 'Cấp thêm Lead bonus', icon: '🎯' },
-  lead_pool_zalo_lookup:   { label: 'Tìm Zalo qua SĐT', icon: '🔍' },
 };
 
 export function categoryOf(action: string, fallback: ActivityCategory = 'system'): ActivityCategory {
@@ -139,19 +130,14 @@ export function categoryOf(action: string, fallback: ActivityCategory = 'system'
     appointment_reschedule: 'appointment', appointment_no_show: 'appointment',
     first_inbound: 'interaction', first_outbound: 'interaction',
     silent_30d: 'interaction', call_logged: 'interaction', meeting_logged: 'interaction',
-    group_message_seen: 'interaction', group_message_sent: 'interaction',
-    group_member_join: 'interaction', group_member_leave: 'interaction',
+    group_message_sent: 'interaction', group_member_join: 'interaction',
+    group_member_leave: 'interaction',
+    group_message_seen: 'interaction',
     contact_link_parent: 'system', contact_unlink_parent: 'system',
     parent_candidate_accept: 'system', contact_merge: 'system',
     contact_split: 'system', data_import: 'system', data_export: 'system',
     bot_tag_auto: 'automation', bot_score_calc: 'automation', bot_status_suggest: 'automation',
     auto_tag_change: 'automation',
-    // Lead Pool 2026-05-29
-    lead_pool_assign: 'customer_info',
-    lead_pool_manual_return: 'customer_info',
-    lead_pool_auto_return: 'system',
-    lead_pool_bonus_grant: 'system',
-    lead_pool_zalo_lookup: 'system',
   };
   return map[action] || fallback;
 }
