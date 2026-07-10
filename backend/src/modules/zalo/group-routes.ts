@@ -8,6 +8,8 @@ import type { FastifyInstance } from 'fastify';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { zaloOps } from '../../shared/zalo-operations.js';
 import { resolveAccount, checkAccess, handleError } from './zalo-route-helpers.js';
+import { prisma } from '../../shared/database/prisma-client.js';
+import { logger } from '../../shared/utils/logger.js';
 
 export async function groupRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authMiddleware);
@@ -68,13 +70,14 @@ export async function groupRoutes(app: FastifyInstance) {
     } catch (err) { return handleError(reply, err, 'getGroupInfo'); }
   });
 
-  app.get<{ Params: { accountId: string; groupId: string } }>(`${BASE}/:groupId/members`, async (request, reply) => {
+  app.get<{ Params: { accountId: string; groupId: string }; Querystring: { refresh?: string } }>(`${BASE}/:groupId/members`, async (request, reply) => {
     const { accountId, groupId } = request.params;
+    const forceRefresh = request.query.refresh === 'true';
     try {
       await resolveAccount(accountId, request.user!.orgId);
       if (!(await checkAccess(request, reply, accountId, 'read'))) return;
-      // 1) getGroupInfo → memVerList ("uid_ver"); 2) getGroupMembersInfo(uids) → profile.
-      const info = await zaloOps.getGroupInfo(accountId, groupId) as any;
+
+      const info = await zaloOps.getGroupInfo(accountId, groupId, forceRefresh) as any;
       const grid = info?.gridInfoMap?.[groupId] ?? Object.values(info?.gridInfoMap ?? {})[0];
       
       const rawVerIds: string[] = Array.isArray(grid?.memVerList) ? grid.memVerList : [];
@@ -91,30 +94,124 @@ export async function groupRoutes(app: FastifyInstance) {
       ])].filter(Boolean);
 
       if (uids.length === 0) return { members: [] };
-      
-      const prof = await zaloOps.getGroupMembersInfo(accountId, uids) as any;
-      const profiles = prof?.profiles ?? {};
 
-      const adminIds = new Set<string>(Array.isArray(grid?.adminIds) ? grid.adminIds.map(String) : []);
-      const creatorId = grid?.creatorId ? String(grid.creatorId) : null;
-
-      const members = Object.values(profiles).map((p: any) => {
-        const uidStr = String(p.id);
-        let role = 'member';
-        if (uidStr === creatorId) {
-          role = 'owner';
-        } else if (adminIds.has(uidStr)) {
-          role = 'admin';
+      // Fetch detailed profiles
+      let detailedMembers: any[] = [];
+      try {
+        const res = await zaloOps.getGroupMembersInfo(accountId, uids, forceRefresh) as any;
+        if (res && res.profiles && typeof res.profiles === 'object') {
+          detailedMembers = Object.values(res.profiles);
+        } else if (Array.isArray(res)) {
+          detailedMembers = res;
+        } else if (res && Array.isArray(res.members)) {
+          detailedMembers = res.members;
+        } else if (res && typeof res === 'object') {
+          detailedMembers = Object.values(res);
         }
-        const name = p.displayName || p.zaloName || p.id;
+      } catch (err) {
+        logger.warn(`[getGroupMembers] getGroupMembersInfo failed: ${(err as Error).message}`);
+      }
+
+      const detailMap = new Map<string, { name: string; avatar: string | null }>();
+      for (const m of detailedMembers) {
+        const rawUid = String(m?.uid || m?.userId || m?.id || m?.zaloId || '');
+        if (rawUid) {
+          const stripped = rawUid.split('_')[0];
+          const info = {
+            name: m?.displayName || m?.name || m?.dName || m?.zaloName || '',
+            avatar: m?.avatar || m?.avatarUrl || m?.avt || m?.fullAvt || null,
+          };
+          detailMap.set(rawUid, info);
+          detailMap.set(stripped, info);
+          detailMap.set(`${stripped}_0`, info);
+        }
+      }
+
+      const ownerId = String(grid?.creatorId || grid?.ownerId || grid?.owner || '');
+      const adminIds = new Set<string>(
+        (grid?.adminIds || grid?.adminList || []).map((x: any) => String(x?.uid || x))
+      );
+
+      const members = uids.map((uid) => {
+        const role = uid === ownerId ? 'owner' : adminIds.has(uid) ? 'admin' : 'member';
+        const strippedUid = uid.split('_')[0];
+        const detail = detailMap.get(uid) || detailMap.get(strippedUid) || detailMap.get(`${strippedUid}_0`);
+        const name = detail?.name || 'Unknown';
+        const avatar = detail?.avatar || null;
+
         return {
-          uid: p.id,
+          uid,
           name,
           displayName: name,
-          avatar: p.avatar ?? null,
+          avatar,
           role,
         };
       });
+
+      // Query database fallback for any remaining 'Unknown' member names
+      const unknownUids = members
+        .filter(m => m.name === 'Unknown' && m.uid)
+        .map(m => m.uid);
+
+      if (unknownUids.length > 0) {
+        const strippedUnknownUids = unknownUids.map(u => u.split('_')[0]);
+        const allQueryUids = [...new Set([...unknownUids, ...strippedUnknownUids])];
+
+        const [friends, contacts, accounts] = await Promise.all([
+          prisma.friend.findMany({
+            where: { zaloUidInNick: { in: allQueryUids } },
+            select: { zaloUidInNick: true, aliasInNick: true, zaloDisplayName: true, zaloAvatarUrl: true },
+          }),
+          prisma.contact.findMany({
+            where: { zaloUid: { in: allQueryUids } },
+            select: { zaloUid: true, crmName: true, fullName: true, avatarUrl: true },
+          }),
+          prisma.zaloAccount.findMany({
+            where: { zaloUid: { in: allQueryUids } },
+            select: { zaloUid: true, displayName: true, avatarUrl: true },
+          }),
+        ]);
+
+        const dbNameMap = new Map<string, { name: string; avatar: string | null }>();
+        const setMap = (key: string, info: { name: string; avatar: string | null }) => {
+          if (!key) return;
+          const stripped = key.split('_')[0];
+          dbNameMap.set(key, info);
+          dbNameMap.set(stripped, info);
+          dbNameMap.set(`${stripped}_0`, info);
+        };
+
+        for (const a of accounts) {
+          if (a.zaloUid && a.displayName) {
+            setMap(a.zaloUid, { name: a.displayName, avatar: a.avatarUrl || null });
+          }
+        }
+        for (const c of contacts) {
+          if (c.zaloUid) {
+            const name = c.crmName || c.fullName;
+            if (name) setMap(c.zaloUid, { name, avatar: c.avatarUrl || null });
+          }
+        }
+        for (const f of friends) {
+          const name = f.aliasInNick || f.zaloDisplayName;
+          const fUid = f.zaloUidInNick;
+          if (name && fUid) {
+            setMap(fUid, { name, avatar: f.zaloAvatarUrl || null });
+          }
+        }
+
+        for (const m of members) {
+          if (m.name === 'Unknown' && m.uid) {
+            const resolved = dbNameMap.get(m.uid) || dbNameMap.get(m.uid.split('_')[0]) || dbNameMap.get(`${m.uid.split('_')[0]}_0`);
+            if (resolved) {
+              m.name = resolved.name;
+              m.displayName = resolved.name;
+              if (!m.avatar) m.avatar = resolved.avatar;
+            }
+          }
+        }
+      }
+
       return { members };
     } catch (err) { return handleError(reply, err, 'getGroupMembersInfo'); }
   });
