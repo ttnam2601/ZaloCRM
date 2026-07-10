@@ -76,16 +76,45 @@ export async function groupRoutes(app: FastifyInstance) {
       // 1) getGroupInfo → memVerList ("uid_ver"); 2) getGroupMembersInfo(uids) → profile.
       const info = await zaloOps.getGroupInfo(accountId, groupId) as any;
       const grid = info?.gridInfoMap?.[groupId] ?? Object.values(info?.gridInfoMap ?? {})[0];
-      const rawIds: string[] = Array.isArray(grid?.memVerList) ? grid.memVerList : [];
-      const uids = [...new Set(rawIds.map((k) => String(k).split('_')[0]).filter(Boolean))];
+      
+      const rawVerIds: string[] = Array.isArray(grid?.memVerList) ? grid.memVerList : [];
+      const memFromVer = rawVerIds.map((e) => String(e).split('_')[0]).filter(Boolean);
+      const memFromCurrent = (Array.isArray(grid?.currentMems) ? grid.currentMems : [])
+        .map((m: any) => m?.id)
+        .filter((id: any): id is string => typeof id === 'string' && id.length > 0);
+      const memFromMemberIds = Array.isArray(grid?.memberIds) ? grid.memberIds.map(String) : [];
+
+      const uids = [...new Set([
+        ...memFromMemberIds,
+        ...memFromVer,
+        ...memFromCurrent,
+      ])].filter(Boolean);
+
       if (uids.length === 0) return { members: [] };
+      
       const prof = await zaloOps.getGroupMembersInfo(accountId, uids) as any;
       const profiles = prof?.profiles ?? {};
-      const members = Object.values(profiles).map((p: any) => ({
-        uid: p.id,
-        displayName: p.displayName || p.zaloName || p.id,
-        avatar: p.avatar ?? null,
-      }));
+
+      const adminIds = new Set<string>(Array.isArray(grid?.adminIds) ? grid.adminIds.map(String) : []);
+      const creatorId = grid?.creatorId ? String(grid.creatorId) : null;
+
+      const members = Object.values(profiles).map((p: any) => {
+        const uidStr = String(p.id);
+        let role = 'member';
+        if (uidStr === creatorId) {
+          role = 'owner';
+        } else if (adminIds.has(uidStr)) {
+          role = 'admin';
+        }
+        const name = p.displayName || p.zaloName || p.id;
+        return {
+          uid: p.id,
+          name,
+          displayName: name,
+          avatar: p.avatar ?? null,
+          role,
+        };
+      });
       return { members };
     } catch (err) { return handleError(reply, err, 'getGroupMembersInfo'); }
   });

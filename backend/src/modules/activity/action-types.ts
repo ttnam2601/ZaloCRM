@@ -77,6 +77,10 @@ export const ACTION_CATEGORY: Record<string, ActivityCategory> = {
   silent_30d: 'interaction',
   call_logged: 'interaction',
   meeting_logged: 'interaction',
+  group_message_seen: 'interaction',
+  group_message_sent: 'interaction',
+  group_member_join: 'interaction',
+  group_member_leave: 'interaction',
 
   // system
   contact_link_parent: 'system',

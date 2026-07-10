@@ -1008,6 +1008,7 @@ import {
   Contact as ContactIcon,
   Type as TypeIcon,
   CalendarClock as CalendarClockIcon,
+  FileText as FileTextIcon,
   Zap as ZapIcon,
   Sparkles as SparklesIcon,
   Package as PackageIcon,

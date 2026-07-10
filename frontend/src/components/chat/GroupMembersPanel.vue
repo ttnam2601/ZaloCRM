@@ -285,7 +285,9 @@ const membersSorted = computed(() => {
   return [...members.value].sort((a, b) => {
     const diff = (order[a.role] ?? 2) - (order[b.role] ?? 2);
     if (diff !== 0) return diff;
-    return a.name.localeCompare(b.name, 'vi');
+    const nameA = a.name || (a as any).displayName || '';
+    const nameB = b.name || (b as any).displayName || '';
+    return nameA.localeCompare(nameB, 'vi');
   });
 });
 

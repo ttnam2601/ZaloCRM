@@ -390,9 +390,8 @@ const composeDefaultAccountId = computed<string | null>(() => {
 function onClickNewMessage() {
   const q = (props.search || '').trim();
   if (!q) {
-    // State A: hint sale nhập SĐT vào search trước
-    searchFlash.value = true;
-    nextTick(() => searchInputEl.value?.focus());
+    // Mở trực tiếp NewMessageDialog khi ô tìm kiếm trống
+    newMsgOpen.value = true;
     return;
   }
   // State B: mở NickPickerPopup xổ từ button "Tin nhắn mới"
