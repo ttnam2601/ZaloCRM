@@ -395,6 +395,7 @@ const emit = defineEmits<{
   'open-sequence': [sequenceId: string];
   'explain-native': [];
   'audit-ai': [];
+  'join-group-link': [linkId: string];
 }>();
 
 // 2026-06-11 — ảnh tin nhắn 404 (link Zalo hết hạn) → hiện placeholder thay ô vỡ.
@@ -609,6 +610,19 @@ function highlightText(raw: string): string {
 function onMentionClick(ev: MouseEvent): void {
   const target = ev.target as HTMLElement | null;
   if (!target) return;
+
+  // Link nhóm Zalo: click link group zalo.me/g/... -> trigger join-group-link
+  const linkEl = target.closest('a') as HTMLAnchorElement | null;
+  if (linkEl) {
+    const href = linkEl.getAttribute('href') || '';
+    const match = href.match(/zalo\.me\/g\/([a-zA-Z0-9_-]+)/i);
+    if (match) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      emit('join-group-link', match[1]);
+      return;
+    }
+  }
   // SĐT (2026-06-22): click .phone-link → tra Zalo qua nick hội thoại (cha xử lý).
   const phoneEl = target.closest('.phone-link') as HTMLElement | null;
   if (phoneEl?.dataset.phone) {

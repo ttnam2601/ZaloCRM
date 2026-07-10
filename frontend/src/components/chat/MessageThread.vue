@@ -206,6 +206,14 @@
               <span class="cnt-in">{{ msgInCount }}</span><ArrowDownLeftIcon class="cnt-arrow" :size="12" :stroke-width="2" />
               <span class="cnt-out">{{ msgOutCount }}</span><ArrowUpRightIcon class="cnt-arrow" :size="12" :stroke-width="2" />
             </span>
+            <!-- Hiển thị ngày tham gia nhóm của local -->
+            <template v-if="conversation.threadType === 'group' && (conversation as any).groupJoinedAt">
+              <span class="ch-sep">|</span>
+              <span class="last-online" :title="`Ngày tham gia nhóm: ${formatInOrgTz((conversation as any).groupJoinedAt, 'HH:mm DD/MM')}` || ''">
+                📅 Vào nhóm: {{ formatInOrgTz((conversation as any).groupJoinedAt, 'HH:mm DD/MM') }}
+              </span>
+            </template>
+
             <!-- M53 2026-05-30: Virtual KH → chấm đỏ nháy + "KH chưa bật tìm kiếm Zalo công khai" -->
             <template v-if="isVirtualConv">
               <span class="ch-sep">|</span>
@@ -371,7 +379,7 @@
             v-else-if="item.kind === 'album'"
             class="msg-album-wrap"
             :class="item.senderType === 'self' ? 'self' : ''"
-            :data-album-msg-ids="item.messages.map(m => m.id).join(',')"
+            :data-album-msg-ids="item.messages.map((m: any) => m.id).join(',')"
           >
             <Avatar
               v-if="item.senderType !== 'self'"
@@ -445,7 +453,7 @@
             <AiAssistantMessage
               :message="item.msg"
               :contact-id="conversation.contact?.id || ''"
-              :existing-contact="(conversation.contact as unknown as Record<string, unknown>) || null"
+              :existing-contact="conversation.contact || null"
               @suggestion-applied="onAiSuggestionApplied($event, item.msg.id)"
             />
           </div>
@@ -500,6 +508,7 @@
               @open-phone="onOpenPhone"
               @open-reaction-detail="onOpenReactionDetail"
               @jump-to-reply="jumpToReply"
+              @join-group-link="onJoinGroupLink"
             />
           </div>
         </template>
@@ -551,7 +560,7 @@
           </button>
           <span class="toolbar-divider"></span>
 
-          <!-- Group 2: Contact / format -->
+                    <!-- Group 2: Contact / format -->
           <button class="icon-tool" title="Gửi danh thiếp" @click="todoToast('Danh thiếp')">
             <ContactIcon :size="18" :stroke-width="1.5" />
           </button>
@@ -574,6 +583,9 @@
             @click="showAppointmentDialog = true"
           >
             <CalendarClockIcon :size="18" :stroke-width="1.5" />
+          </button>
+          <button class="icon-tool" title="Nhập kịch bản khai giảng" @click="editorRef?.openScriptDialog()">
+            <FileTextIcon :size="18" :stroke-width="1.5" />
           </button>
           <button class="icon-tool" title="Template tin nhắn (gõ /)" @click="openTemplatePopup">
             <ZapIcon :size="18" :stroke-width="1.5" />
@@ -684,11 +696,7 @@
         <!-- 2026-06-04 — Khối Phase 1 MVP picker với Preview + Send direct -->
         <BlockPickerPopup
           :visible="showBlockPicker"
-          :contact="conversation.contact ? {
-            fullName: conversation.contact.fullName,
-            gender: (conversation.contact as any).gender ?? null,
-            phone: conversation.contact.phone ?? null,
-          } : null"
+          :contact="blockPickerContact"
           :current-user-name="_authStore.user?.fullName ?? null"
           :owner-nick-id="conversation.zaloAccount?.id ?? null"
           @preview="onBlockPreview"
@@ -710,13 +718,7 @@
         <!-- Modal "Nhắc hẹn" — unified UI giống trang /appointments -->
         <AppointmentEditor
           v-model="showAppointmentDialog"
-          :prefill-contact="conversation.contact ? {
-            id: conversation.contact.id,
-            fullName: conversation.contact.fullName,
-            phone: conversation.contact.phone,
-            zaloUid: conversation.contact.zaloUid ?? null,
-            zaloUsername: (conversation.contact as any).zaloUsername ?? null,
-          } : null"
+          :prefill-contact="appointmentPrefillContact"
           :current-user-id="currentUserId"
           @created="onAppointmentCreated"
         />
@@ -890,68 +892,115 @@
       v-model="privacyViewerOpen"
       :nick="privacyDialogNick"
     />
+        <!-- Dialog rời nhóm Zalo -->
+    <v-dialog v-model="leaveGroupDialogOpen" max-width="440">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2" color="error">mdi-logout</v-icon>
+          Rời nhóm Zalo
+        </v-card-title>
+        
+        <v-card-text class="pt-2">
+          <div class="mb-4">
+            Bạn có chắc chắn muốn rời nhóm <strong>{{ conversation?.groupName || headerName }}</strong>? Lịch sử chat vẫn được giữ lại trên hệ thống.
+          </div>
+          
+          <v-checkbox
+            v-model="leaveSilent"
+            label="Rời nhóm trong im lặng (không thông báo)"
+            color="primary"
+            hide-details
+            density="compact"
+          />
+        </v-card-text>
+        
+        <v-card-actions class="px-4 pb-4">
+          <v-spacer />
+          <v-btn variant="text" @click="leaveGroupDialogOpen = false">Hủy</v-btn>
+          <v-btn
+            color="error"
+            variant="elevated"
+            :loading="leaveGroupLoading"
+            @click="confirmLeaveGroup"
+          >
+            Rời nhóm
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Dialog gia nhập nhóm Zalo -->
+
+    <v-dialog v-model="joinGroupDialogOpen" max-width="440">
+
+      <v-card>
+
+        <v-card-title class="d-flex align-center">
+
+          <v-icon class="mr-2" color="primary">mdi-account-plus</v-icon>
+
+          Gia nhập nhóm Zalo
+
+        </v-card-title>
+
+        
+
+        <v-card-text class="pt-2">
+
+          Bạn có chắc chắn muốn gia nhập nhóm Zalo này không?
+
+        </v-card-text>
+
+        
+
+        <v-card-actions class="px-4 pb-4">
+
+          <v-spacer />
+
+          <v-btn variant="text" @click="joinGroupDialogOpen = false">Hủy</v-btn>
+
+          <v-btn
+
+            color="primary"
+
+            variant="elevated"
+
+            @click="confirmJoinGroup"
+
+          >
+
+            Gia nhập
+
+          </v-btn>
+
+        </v-card-actions>
+
+      </v-card>
+
+    </v-dialog>
+
   </div>
 </template>
 
 <script setup lang="ts">
+// -------------------------------------------------------------
+// 1. ALL IMPORTS GO FIRST
+// -------------------------------------------------------------
 import { ref, watch, nextTick, computed, onMounted, onBeforeUnmount } from 'vue';
 import type { Conversation, Message } from '@/composables/use-chat';
 import { formatInOrgTz, weekdayInOrgTz, getOrgParts } from '@/composables/use-org-timezone';
 import { api } from '@/api/index';
-import { saveFromChat, saveFromChatBatch, toggleFavorite } from '@/api/media';
 import AISuggestBar from '@/components/chat/AISuggestBar.vue';
-// Mission Fix 2 (2026-05-30) — header picker GHI `Contact.statusId` (FK Status table)
-// để Wave 3 evaluateStatusGate đọc đúng cột. Trước đây CareStatusBadge ghi enum legacy
-// `Contact.status` khiến lazy gate KHÔNG kích hoạt. CareStatusBadge giữ ở ChatContactPanel.vue
-// nếu sale vẫn cần thao tác care-status legacy 9 giá trị.
-import ContactDealStageSelector from '@/components/chat/ContactDealStageSelector.vue';
-import ZaloBrandIcon from '@/components/icons/ZaloBrandIcon.vue';
 import Avatar from '@/components/ui/Avatar.vue';
 import EmojiPicker from '@/components/chat/EmojiPicker.vue';
 import QuickTemplatePopup from '@/components/chat/quick-template-popup.vue';
-import BlockPreviewDialog from '@ee/automation/chat-blocks/BlockPreviewDialog.vue';
-// M14 (2026-06-02) — Popup chọn "Khối tin nhắn" từ Automation Blocks
-import BlockPickerPopup from '@ee/automation/chat-blocks/BlockPickerPopup.vue';
 import MessageBubble from '@/components/chat/message-bubble.vue';
-// M53 2026-05-30: Trợ lý AI cho virtual chat
-import AiAssistantMessage from '@/components/chat/AiAssistantMessage.vue';
 import ReactionDetailPopup from '@/components/chat/reaction-detail-popup.vue';
 import { usePrivacyVisibility } from '@/composables/use-privacy-visibility';
+import { saveFromChat, saveFromChatBatch, toggleFavorite } from '@/api/media';
 import NickAvatarLock from '@/components/privacy/NickAvatarLock.vue';
-// Phase Privacy OTP 2026-05-27 — swap PIN dialog → OTP modal
 import PrivacyUnlockOtpModal from '@/components/privacy/PrivacyUnlockOtpModal.vue';
 import PrivacyViewerDialog from '@/components/privacy/PrivacyViewerDialog.vue';
-import { useAuthStore as _useAuthStorePriv } from '@/stores/auth';
-
-// Privacy dialog state — anh chốt 2026-05-22 v3
-const privacyUnlockOpen = ref(false);
-const privacyViewerOpen = ref(false);
-const privacyDialogNick = ref<{ displayName?: string | null; avatarUrl?: string | null; zaloUid?: string | null } | null>(null);
-const _authStorePriv = _useAuthStorePriv();
-
-function openPrivacyDialog(conv: any) {
-  if (!conv?.zaloAccount) return;
-  const nickInfo = {
-    displayName: conv.zaloAccount.displayName,
-    avatarUrl: conv.zaloAccount.avatarUrl,
-    zaloUid: conv.zaloAccount.zaloUid,
-  };
-  privacyDialogNick.value = nickInfo;
-  // Owner → UnlockDialog (PIN keypad). Non-owner → ViewerDialog (read-only).
-  const myId = _authStorePriv.user?.id;
-  const isOwner = !!myId && conv.zaloAccount.ownerUserId === myId;
-  if (isOwner) privacyUnlockOpen.value = true;
-  else privacyViewerOpen.value = true;
-}
-function onPrivacyUnlocked() {
-  // Sau khi unlock — refetch messages để load lại content unlocked
-  if (props.conversation?.id) {
-    // emit a fetch hint or rely on FE socket; for now just close — refresh sẽ tự load
-    privacyUnlockOpen.value = false;
-  }
-}
-
-// Lucide icons (anh chốt 2026-05-22 — bộ icon đồng bộ thay MDI)
 import {
   Images as ImagesIcon,
   Image as ImageIcon,
@@ -962,7 +1011,6 @@ import {
   Zap as ZapIcon,
   Sparkles as SparklesIcon,
   Package as PackageIcon,
-  // Header action + chrome icons (anh chốt 2026-06-08 — bỏ emoji thô, đồng bộ Lucide)
   UserPlus as UserPlusIcon,
   UserCheck as UserCheckIcon,
   UserX as UserXIcon,
@@ -983,35 +1031,6 @@ import {
   Send as SendIcon,
   Download as DownloadIcon,
 } from 'lucide-vue-next';
-
-// Reaction detail popup state — anh chốt 2026-05-22: click reaction box → popup
-const reactionPopupOpen = ref(false);
-const reactionPopupReactions = ref<Array<{ emoji: string; count: number; reacted: boolean }>>([]);
-const reactionPopupDetails = ref<Array<{ userId: string; userName?: string | null; emoji: string; source?: 'crm' | 'zalo'; avatarUrl?: string | null }>>([]);
-function onOpenReactionDetail(payload: { reactions: any[]; message: Message }) {
-  reactionPopupReactions.value = payload.reactions;
-  // 2026-06-20 FIX: build details từ message.reactionDetails (raw per-user rows GIỮ ở
-  // normalizeMessage), KHÔNG phải message.reactions (đã tổng hợp emoji+count, mất reactor →
-  // trước đây luôn ra "Người dùng"). Nay có reactorName thật từ BE.
-  const raw = (payload.message as any).reactionDetails ?? [];
-  reactionPopupDetails.value = raw.map((r: any) => ({
-    userId: r.reactorId || r.userId || '',
-    userName: r.reactorName || r.userName || null,
-    emoji: r.emoji,
-    source: r.reactorSource || r.source,
-    avatarUrl: r.reactorAvatar || null,
-  }));
-  reactionPopupOpen.value = true;
-}
-
-const privacyVisibility = usePrivacyVisibility();
-function onMessageLockClick(_e: MouseEvent) {
-  // Anh chốt 2026-05-22 v3: click bubble blur → mở dialog (Owner unlock / Viewer read-only)
-  openPrivacyDialog(props.conversation);
-}
-function onComposerLockClick() {
-  openPrivacyDialog(props.conversation);
-}
 import StickerPicker from '@/components/chat/StickerPicker.vue';
 import ZaloUserInfoDialog from '@/components/chat/ZaloUserInfoDialog.vue';
 import LinkParentDialog from '@/components/chat/LinkParentDialog.vue';
@@ -1023,9 +1042,6 @@ import RichTextEditor from '@/components/chat/rich-text-editor.vue';
 import TagCrmBar from '@/components/chat/TagCrmBar.vue';
 import AppointmentEditor from '@/components/appointments/AppointmentEditor.vue';
 import { useAuthStore } from '@/stores/auth';
-
-const _authStore = useAuthStore();
-const currentUserId = computed<string | null>(() => _authStore.user?.id ?? null);
 import FriendInviteDialog from '@/components/chat/FriendInviteDialog.vue';
 import { useToast } from '@/composables/use-toast';
 import { useZaloPresence } from '@/composables/use-zalo-presence';
@@ -1034,6 +1050,10 @@ import { useFriendSocket } from '@/composables/use-friend-socket';
 import { groupAvatarStore } from '@/composables/use-group-avatar-cache';
 import { registerPendingTags, clearPendingTags } from '@/composables/use-pending-mutations';
 
+
+// -------------------------------------------------------------
+// 2. INTERFACES, PROPS, AND EMITS
+// -------------------------------------------------------------
 interface TemplateItem {
   id: string; name: string; shortcut?: string | null; content: string; category: string | null; isPersonal: boolean;
   contentRich?: { text: string; styles?: Array<{ st: string; start: number; len: number }> } | null;
@@ -1070,17 +1090,97 @@ const emit = defineEmits<{
   'cancel-reply-edit': [];
   'typing': [];
   'refresh-thread': [];
-  // 2026-06-12 (anh chốt): nút "Chèn từ kho" → mở tab Media ở cột 4 (bỏ popover nổi).
   'open-media-tab': [];
   'care-status-changed': [value: string];
-  // Sprint v3 Tuần 3 Row 6.9 (2026-06-03): sale chọn nick khác → ChatView navigate.
   'switch-conversation': [convId: string];
-  // Fix 2026-06-16: dialog xem info Zalo trả avatar/tên mới từ SDK → báo ChatView patch
-  // conversation state (header + list cập nhật ngay, không chờ F5).
   'profile-synced': [payload: { uid: string; avatarUrl: string | null; displayName: string | null; gender: number | null }];
 }>();
 
+// -------------------------------------------------------------
+// 3. STATE AND STATE FUNCTIONS
+// -------------------------------------------------------------
 const toast = useToast();
+const _authStore = useAuthStore();
+const currentUserId = computed<string | null>(() => _authStore.user?.id ?? null);
+
+// Privacy dialog state
+const privacyUnlockOpen = ref(false);
+const privacyViewerOpen = ref(false);
+const privacyDialogNick = ref<{ displayName?: string | null; avatarUrl?: string | null; zaloUid?: string | null } | null>(null);
+
+// Leave group state
+const leaveGroupDialogOpen = ref(false);
+const leaveSilent = ref(true);
+const leaveGroupLoading = ref(false);
+
+// Join group state
+const joinGroupDialogOpen = ref(false);
+const joinGroupLinkId = ref('');
+
+function openPrivacyDialog(conv: any) {
+  if (!conv?.zaloAccount) return;
+  const nickInfo = {
+    displayName: conv.zaloAccount.displayName,
+    avatarUrl: conv.zaloAccount.avatarUrl,
+    zaloUid: conv.zaloAccount.zaloUid,
+  };
+  privacyDialogNick.value = nickInfo;
+  const myId = _authStore.user?.id;
+  const isOwner = !!myId && conv.zaloAccount.ownerUserId === myId;
+  if (isOwner) privacyUnlockOpen.value = true;
+  else privacyViewerOpen.value = true;
+}
+function onPrivacyUnlocked() {
+  if (props.conversation?.id) {
+    privacyUnlockOpen.value = false;
+  }
+}
+
+// Reaction detail popup state
+const reactionPopupOpen = ref(false);
+const reactionPopupReactions = ref<Array<{ emoji: string; count: number; reacted: boolean }>>([]);
+const reactionPopupDetails = ref<Array<{ userId: string; userName?: string | null; emoji: string; source?: 'crm' | 'zalo'; avatarUrl?: string | null }>>([]);
+function onOpenReactionDetail(payload: { reactions: any[]; message: Message }) {
+  reactionPopupReactions.value = payload.reactions;
+  const raw = (payload.message as any).reactionDetails ?? [];
+  reactionPopupDetails.value = raw.map((r: any) => ({
+    userId: r.reactorId || r.userId || '',
+    userName: r.reactorName || r.userName || null,
+    emoji: r.emoji,
+    source: r.reactorSource || r.source,
+    avatarUrl: r.reactorAvatar || null,
+  }));
+  reactionPopupOpen.value = true;
+}
+
+const privacyVisibility = usePrivacyVisibility();
+function onMessageLockClick(_e: MouseEvent) {
+  openPrivacyDialog(props.conversation);
+}
+function onComposerLockClick() {
+  openPrivacyDialog(props.conversation);
+}
+
+const blockPickerContact = computed(() => {
+  if (!props.conversation?.contact) return null;
+  return {
+    fullName: props.conversation.contact.fullName,
+    gender: (props.conversation.contact as any).gender ?? null,
+    phone: props.conversation.contact.phone ?? null,
+  };
+});
+
+const appointmentPrefillContact = computed(() => {
+  if (!props.conversation?.contact) return null;
+  return {
+    id: props.conversation.contact.id,
+    fullName: props.conversation.contact.fullName,
+    phone: props.conversation.contact.phone,
+    zaloUid: props.conversation.contact.zaloUid ?? null,
+    zaloUsername: (props.conversation.contact as any).zaloUsername ?? null,
+  };
+});
+
 const inputText = ref('');
 const messagesContainer = ref<HTMLElement | null>(null);
 const previewImageUrl = ref('');
@@ -1117,6 +1217,44 @@ function onLightboxKey(e: KeyboardEvent): void {
 const previewVideoUrl = ref('');
 const previewVideoName = ref('');
 const showVideoPreview = computed({ get: () => !!previewVideoUrl.value, set: (v) => { if (!v) { previewVideoUrl.value = ''; previewVideoName.value = ''; } } });
+
+function onJoinGroupLink(linkId: string) {
+  const accountId = props.conversation?.zaloAccount?.id;
+  if (!accountId) {
+    try { toast.error('Không tìm thấy tài khoản Zalo hợp lệ'); } catch { /* */ }
+    return;
+  }
+  joinGroupLinkId.value = linkId;
+  joinGroupDialogOpen.value = true;
+}
+
+async function confirmJoinGroup() {
+  const accountId = props.conversation?.zaloAccount?.id;
+  const linkId = joinGroupLinkId.value;
+  if (!accountId || !linkId) return;
+  joinGroupDialogOpen.value = false;
+
+  try { toast.push('Đang gửi yêu cầu gia nhập nhóm...'); } catch { /* */ }
+  try {
+    const res = await api.post(`/zalo-accounts/${accountId}/groups/join-link`, { linkId });
+    if (res.data?.alreadyMember) {
+      try { toast.success('Bạn đã là thành viên của nhóm này'); } catch { /* */ }
+    } else {
+      try { toast.success('Gia nhập nhóm thành công'); } catch { /* */ }
+    }
+    if (res.data?.conversationId) {
+      if (res.data.conversationId === props.conversation?.id) {
+        emit('refresh-thread');
+      } else {
+        const { router } = await import('@/router/index');
+        router.push({ name: 'Chat', params: { convId: res.data.conversationId } });
+      }
+    }
+  } catch (err) {
+    const msg = (err as any).response?.data?.error || (err as any).message;
+    try { toast.error('Không thể gia nhập nhóm: ' + msg); } catch { /* */ }
+  }
+}
 
 // Mở modal video kèm TÊN tải (zaloMsgId.mp4 — khớp tên Zalo thật, do message-bubble tính).
 function onPreviewVideo(url: string, name?: string) {
@@ -1751,12 +1889,38 @@ const canClickHeader = computed(() => {
 });
 function onHeaderAvatarClick() {
   const conv = props.conversation;
-  if (!conv || conv.threadType === 'group') return;
-  // Per-account UID: ưu tiên externalThreadId (đúng nick đang xem), fallback contact.zaloUid.
-  const uid = conv.externalThreadId || conv.contact?.zaloUid;
-  if (!uid) return;
-  userInfoUid.value = uid;
-  userInfoDialog.value = true;
+  if (!conv) return;
+  if (conv.threadType === 'group') {
+    leaveSilent.value = true;
+    leaveGroupDialogOpen.value = true;
+  } else {
+    // Per-account UID: ưu tiên externalThreadId (đúng nick đang xem), fallback contact.zaloUid.
+    const uid = conv.externalThreadId || conv.contact?.zaloUid;
+    if (!uid) return;
+    userInfoUid.value = uid;
+    userInfoDialog.value = true;
+  }
+}
+
+async function confirmLeaveGroup() {
+  const accountId = props.conversation?.zaloAccount?.id;
+  const groupId = props.conversation?.externalThreadId;
+  if (!accountId || !groupId) {
+    try { toast.error('Thiếu thông tin cuộc trò chuyện hoặc tài khoản Zalo'); } catch { /* */ }
+    return;
+  }
+  leaveGroupLoading.value = true;
+  try {
+    await api.post(`/zalo-accounts/${accountId}/groups/${groupId}/leave`, { silent: leaveSilent.value });
+    try { toast.success('Đã rời nhóm thành công'); } catch { /* */ }
+    leaveGroupDialogOpen.value = false;
+    emit('refresh-thread');
+  } catch (err: any) {
+    const errMsg = err.response?.data?.error || err.message || 'Lỗi kết nối';
+    try { toast.error(`Rời nhóm thất bại: ${errMsg}`); } catch { /* */ }
+  } finally {
+    leaveGroupLoading.value = false;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

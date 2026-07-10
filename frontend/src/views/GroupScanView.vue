@@ -478,11 +478,11 @@ const memberHeaders = [
 const filteredMembers = computed<GroupScanMember[]>(() => {
   if (friendFilter.value === 'all') return scanMembers.value;
   const want = friendFilter.value === 'friend';
-  return scanMembers.value.filter((m) => m.isFriend === want);
+  return scanMembers.value.filter((m: any) => m.isFriend === want);
 });
 const totalMembers = computed(() => scan.value?.memberCount ?? scanMembers.value.length);
 const friendCount = computed(
-  () => scan.value?.friendCount ?? scanMembers.value.filter((m) => m.isFriend).length,
+  () => scan.value?.friendCount ?? scanMembers.value.filter((m: any) => m.isFriend).length,
 );
 const scanProgress = computed(() => {
   const total = scan.value?.totalGroups ?? 0;

@@ -194,6 +194,18 @@ export async function generateAiOutput(input: { orgId: string; conversationId: s
   }
 
   const text = raw.trim();
+  let styles: ZaloRichStyle[] = [];
+  if (input.type === 'reply_draft') {
+    try {
+      const formatted = await aiFormatRichText({ orgId: input.orgId, rawText: text });
+      if (formatted.source === 'ai') {
+        styles = formatted.styles;
+      }
+    } catch (err) {
+      logger.warn('[ai-service] failed to format reply draft:', err);
+    }
+  }
+
   await saveSuggestion({
     orgId: input.orgId,
     conversationId: input.conversationId,
@@ -202,7 +214,7 @@ export async function generateAiOutput(input: { orgId: string; conversationId: s
     content: text,
     confidence: 0.8,
   });
-  return { content: text, confidence: 0.8 };
+  return { content: text, styles, confidence: 0.8 };
 }
 
 /* ──────────────────────────────────────────────────────────────────────────

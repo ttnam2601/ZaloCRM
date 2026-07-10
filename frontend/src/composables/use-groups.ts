@@ -284,7 +284,7 @@ export function useGroups() {
     actionLoading.value = true;
     try {
       const res = await api.post(`/zalo-accounts/${accountId}/groups/join-link`, { linkId });
-      return res.data.result;
+      return res.data;
     } catch (err) {
       console.error('Failed to join group by link:', err);
       return null;

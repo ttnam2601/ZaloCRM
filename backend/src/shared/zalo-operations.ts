@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
-// Copyright (C) 2026 Nguyễn Tiến Lộc
 /**
  * zalo-operations.ts — DRY wrapper for all zca-js API calls.
  * Every Zalo operation goes through this service:
@@ -36,7 +34,6 @@ export type OpCategory =
   | 'group_admin'   // create, rename, avatar, settings, add/remove members, deputy, transfer, block
   | 'group_read'    // list, info, members, polls, invite links, pending
   | 'friend_action' // add, accept, reject, cancel, remove, block, alias
-  // 2026-06-06 (Anh chốt) — TÁCH friend_read cũ thành 3 nhóm để quota không ăn lẫn:
   | 'friend_lookup' // findUser (Tìm SĐT→UID — việc của chiến dịch gửi lời mời)
   | 'contact_sync'  // getAllFriends (đọc/đồng bộ danh bạ — chạy nền khi reconnect)
   | 'friend_read'   // còn lại: online, recommendations, sent requests, alias list
@@ -108,41 +105,11 @@ function isSessionExpiredError(err: any): boolean {
   return SESSION_EXPIRED_PATTERNS.some(p => msg.includes(p));
 }
 
-/**
- * Lỗi mạng tạm thời (chập chờn) — Zalo server đóng socket khi upload nhiều ảnh
- * cùng lúc (album 6-7 tấm), hoặc blip mạng. Retry thường thành công.
- * Bằng chứng: "sendImage failed: TypeError: fetch failed" + "SocketError: other side closed"
- * + Symbol(undici UND_ERR_SOCKET) khi gửi album 7 ảnh (zca-js Promise.all upload song song).
- */
-function isTransientNetworkError(err: any): boolean {
-  // undici socket errors mang Symbol UND_ERR — bắt cả ở err và err.cause.
-  const undiciFlag = (e: any) => e && (e[Symbol.for('undici.error.UND_ERR')] === true
-    || Object.getOwnPropertySymbols(e).some((s) => String(s).includes('UND_ERR')));
-  if (undiciFlag(err) || undiciFlag(err?.cause)) return true;
-  const msg = (String(err?.message || '') + ' ' + String(err?.cause?.message || '')).toLowerCase();
-  return (
-    msg.includes('fetch failed') ||
-    msg.includes('other side closed') ||
-    msg.includes('socket') ||
-    msg.includes('econnreset') ||
-    msg.includes('etimedout') ||
-    msg.includes('und_err')
-  );
-}
-
 function isMalformedJsonResponseError(err: any): boolean {
-  // SyntaxError từ V8 JSON.parse có nhiều variant:
-  //   "Unexpected token X in JSON at position Y"
-  //   "Unexpected end of JSON input"
-  //   "No number after minus sign in JSON at position Y"
-  //   "X is not valid JSON" (Node 20+)
-  // → catch theo class hoặc substring "JSON" + position phrase.
-  if (err?.name === 'SyntaxError') return true;
   const msg = String(err?.message || err || '');
   return (
     msg.includes('Unexpected token') ||
     msg.includes('Unexpected end of JSON input') ||
-    msg.includes('in JSON at position') ||
     msg.includes('is not valid JSON')
   );
 }
@@ -181,16 +148,13 @@ async function exec<T>(opts: ExecOptions, fn: (api: any) => Promise<T>): Promise
     throw new ZaloOpError(limit.reason || 'Rate limited', 'RATE_LIMITED', 429);
   }
 
-  // 3. Execute with retry on session expiry + transient network blip.
-  //    MAX_ATTEMPTS=3 để lỗi socket tạm thời (album nhiều ảnh) có cơ hội thử lại.
-  const MAX_ATTEMPTS = 3;
+  // 3. Execute with retry on session expiry
   let lastError: any;
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const result = await fn(instance.api);
 
-      // Record successful operation. (getAllFriends giờ là category 'contact_sync'
-      // nên đã tự đếm vào rl:daily:nick:contact_sync — không cần recordOperation riêng.)
+      // Record successful operation
       zaloRateLimiter.recordSend(accountId, category);
 
       // 4. Emit Socket.IO event if configured
@@ -232,15 +196,7 @@ async function exec<T>(opts: ExecOptions, fn: (api: any) => Promise<T>): Promise
         }
       }
 
-      // Lỗi mạng tạm thời (socket đứt khi upload album nhiều ảnh) → retry với backoff.
-      if (isTransientNetworkError(err) && attempt < MAX_ATTEMPTS - 1) {
-        const delayMs = 400 * (attempt + 1); // 400ms, 800ms
-        logger.warn(`[zalo-ops:${accountId}] ${operation} lỗi mạng tạm thời (attempt ${attempt + 1}/${MAX_ATTEMPTS}), thử lại sau ${delayMs}ms: ${err?.message ?? err}`);
-        await new Promise((r) => setTimeout(r, delayMs));
-        continue;
-      }
-
-      // Non-session, non-transient error or last attempt — throw
+      // Non-session error or second attempt — throw
       break;
     }
   }
@@ -279,9 +235,6 @@ async function sendMessage(accountId: string, threadId: string, threadType: 0 | 
     (api) => api.sendMessage(msg, threadId, threadType));
 }
 
-// 2026-06-12 FIX: thêm `msg` (kể cả '') vào payload. zca-js sendMessage.cjs:445 đọc
-// `msg.length` → thiếu msg = crash undefined. Có msg + attachments là local path CÓ ĐUÔI
-// ảnh (.jpg/.png/.webp) → Zalo nhận ẢNH INLINE (không phải file). caption tùy chọn.
 async function sendImage(accountId: string, threadId: string, threadType: 0 | 1, attachments: any[], io?: Server | null, caption: string = '') {
   return exec({ accountId, category: 'message', operation: 'sendImage', io },
     (api) => api.sendMessage({ msg: caption, attachments }, threadId, threadType));
@@ -300,30 +253,6 @@ async function sendSticker(
 async function sendLink(accountId: string, threadId: string, threadType: 0 | 1, link: any) {
   return exec({ accountId, category: 'message', operation: 'sendLink' },
     (api) => api.sendLink(link, threadId, threadType));
-}
-
-// ─── Reminders / Nhắc hẹn (2026-06-16) ──────────────────────────────────────
-// zca-js createReminder/editReminder/removeReminder. type 0=user, 1=group (như threadType).
-// startTime = epoch ms; repeat 0=None,1=Daily,2=Weekly,3=Monthly. Trả ReminderUser có reminderId.
-async function createReminder(
-  accountId: string, threadId: string, threadType: 0 | 1,
-  options: { title: string; startTime?: number; repeat?: number; emoji?: string },
-): Promise<any> {
-  return exec({ accountId, category: 'message', operation: 'createReminder' },
-    (api) => api.createReminder(options, threadId, threadType));
-}
-async function editReminder(
-  accountId: string, threadId: string, threadType: 0 | 1,
-  options: { title: string; topicId: string; startTime?: number; repeat?: number; emoji?: string },
-): Promise<any> {
-  return exec({ accountId, category: 'message', operation: 'editReminder' },
-    (api) => api.editReminder(options, threadId, threadType));
-}
-async function removeReminder(
-  accountId: string, reminderId: string, threadId: string, threadType: 0 | 1,
-): Promise<any> {
-  return exec({ accountId, category: 'message', operation: 'removeReminder' },
-    (api) => api.removeReminder(reminderId, threadId, threadType));
 }
 
 async function sendCard(accountId: string, threadId: string, threadType: 0 | 1, cardData: any) {
@@ -390,15 +319,8 @@ async function sendTypingEvent(accountId: string, threadId: string, threadType: 
 }
 
 async function deleteMessage(accountId: string, msgId: string, cliMsgId: string, ownerId: string, threadId: string, threadType: 0 | 1, onlyMe: boolean) {
-  // FIX 2026-06-18: zca-js deleteMessage nhận OBJECT dest, không phải positional.
-  // Trước đây gọi positional → dest = msgId (string) → lib đọc dest.data.uidFrom của
-  // undefined → 500 "Cannot read properties of undefined (reading 'uidFrom')".
-  // ownerId = uidFrom (uid người gửi). threadType (0 user/1 group) → type.
   return exec({ accountId, category: 'chat_action', operation: 'deleteMessage' },
-    (api) => api.deleteMessage(
-      { data: { cliMsgId, msgId, uidFrom: ownerId }, threadId, type: threadType },
-      onlyMe,
-    ));
+    (api) => api.deleteMessage(msgId, cliMsgId, ownerId, threadId, threadType, onlyMe));
 }
 
 // FIX 2026-05-21: zca-js api.undo(payload, threadId, type) — payload object { msgId, cliMsgId }.
@@ -463,6 +385,19 @@ async function getPinConversations(accountId: string) {
     (api) => api.getPinConversations());
 }
 
+// ─── Group Cache ────────────────────────────────────────────────────────────
+const groupInfoCache = new Map<string, { data: any; timestamp: number }>();
+const memberProfileCache = new Map<string, { data: any; timestamp: number }>();
+
+const GROUP_INFO_TTL_MS = 30 * 60 * 1000; // 30 minutes cache for group metadata
+const MEMBER_PROFILE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours cache for member profiles
+
+function invalidateGroupCache(accountId: string, groupId: string) {
+  const cacheKey = `${accountId}:${groupId}`;
+  groupInfoCache.delete(cacheKey);
+  logger.info(`[zalo-ops:${accountId}] Invalidated getGroupInfo cache for group: ${groupId}`);
+}
+
 // ─── Group Management ───────────────────────────────────────────────────────
 async function createGroup(accountId: string, options: { name: string; memberIds: string[] }) {
   return exec({ accountId, category: 'group_admin', operation: 'createGroup' },
@@ -470,70 +405,108 @@ async function createGroup(accountId: string, options: { name: string; memberIds
 }
 
 async function renameGroup(accountId: string, name: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'renameGroup' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'renameGroup' },
     (api) => api.changeGroupName(name, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function changeGroupAvatar(accountId: string, avatarPath: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'changeGroupAvatar' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'changeGroupAvatar' },
     (api) => api.changeGroupAvatar(avatarPath, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function updateGroupSettings(accountId: string, settings: any, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'updateGroupSettings' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'updateGroupSettings' },
     (api) => api.updateGroupSettings(settings, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function addUserToGroup(accountId: string, userIds: string[], groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'addUserToGroup' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'addUserToGroup' },
     (api) => api.addUserToGroup(userIds, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function removeUserFromGroup(accountId: string, userIds: string[], groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'removeUserFromGroup' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'removeUserFromGroup' },
     (api) => api.removeUserFromGroup(userIds, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function addGroupDeputy(accountId: string, userId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'addGroupDeputy' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'addGroupDeputy' },
     (api) => api.addGroupDeputy(userId, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function removeGroupDeputy(accountId: string, userId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'removeGroupDeputy' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'removeGroupDeputy' },
     (api) => api.removeGroupDeputy(userId, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function changeGroupOwner(accountId: string, newOwnerId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'changeGroupOwner' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'changeGroupOwner' },
     (api) => api.changeGroupOwner(newOwnerId, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function blockGroupMember(accountId: string, userId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'blockGroupMember' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'blockGroupMember' },
     (api) => api.addGroupBlockedMember(userId, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function unblockGroupMember(accountId: string, userId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'unblockGroupMember' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'unblockGroupMember' },
     (api) => api.removeGroupBlockedMember(userId, groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
-async function leaveGroup(accountId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'leaveGroup' },
-    (api) => api.leaveGroup(groupId));
+async function leaveGroup(accountId: string, groupId: string, silent: boolean = true) {
+  const result = await exec({ accountId, category: 'group_read', operation: 'leaveGroup' },
+    (api) => api.leaveGroup(groupId, silent));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 async function disperseGroup(accountId: string, groupId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'disperseGroup' },
+  const result = await exec({ accountId, category: 'group_admin', operation: 'disperseGroup' },
     (api) => api.disperseGroup(groupId));
+  invalidateGroupCache(accountId, groupId);
+  return result;
 }
 
 // ─── Group Read ─────────────────────────────────────────────────────────────
-// zca-js getGroupInfo nhận string HOẶC string[] (batch) → gridInfoMap keyed by id.
-async function getGroupInfo(accountId: string, groupId: string | string[]) {
-  return exec({ accountId, category: 'group_read', operation: 'getGroupInfo' },
+async function getGroupInfo(accountId: string, groupId: string | string[], bypassCache: boolean = false) {
+  if (Array.isArray(groupId)) {
+    return exec({ accountId, category: 'group_read', operation: 'getGroupInfo' },
+      (api) => api.getGroupInfo(groupId));
+  }
+  const cacheKey = `${accountId}:${groupId}`;
+  const now = Date.now();
+  if (!bypassCache) {
+    const cached = groupInfoCache.get(cacheKey);
+    if (cached && now - cached.timestamp < GROUP_INFO_TTL_MS) {
+      logger.debug(`[zalo-ops:${accountId}] Cache hit for getGroupInfo (group: ${groupId})`);
+      return cached.data;
+    }
+  }
+  const result = await exec({ accountId, category: 'group_read', operation: 'getGroupInfo' },
     (api) => api.getGroupInfo(groupId));
+  groupInfoCache.set(cacheKey, { data: result, timestamp: now });
+  return result;
 }
 
 async function getAllGroups(accountId: string) {
@@ -541,11 +514,79 @@ async function getAllGroups(accountId: string) {
     (api) => api.getAllGroups());
 }
 
-// LƯU Ý: zca-js getGroupMembersInfo nhận DANH SÁCH UID MEMBER (string|string[]),
-// KHÔNG phải groupId. Lấy uid từ getGroupInfo().memVerList trước khi gọi.
-async function getGroupMembersInfo(accountId: string, memberIds: string | string[]) {
-  return exec({ accountId, category: 'group_read', operation: 'getGroupMembersInfo' },
-    (api) => api.getGroupMembersInfo(memberIds as unknown as string));
+async function getGroupMembersInfo(accountId: string, memberIds: string | string[], bypassCache: boolean = false) {
+  const ids = Array.isArray(memberIds) ? memberIds : [memberIds];
+  if (ids.length === 0) return [];
+
+  const now = Date.now();
+  const resultProfiles: any[] = [];
+  const uncachedIds: string[] = [];
+
+  if (!bypassCache) {
+    for (const id of ids) {
+      const cacheKey = `${accountId}:${id}`;
+      const cached = memberProfileCache.get(cacheKey);
+      if (cached && now - cached.timestamp < MEMBER_PROFILE_TTL_MS) {
+        resultProfiles.push(cached.data);
+      } else {
+        uncachedIds.push(id);
+      }
+    }
+  } else {
+    uncachedIds.push(...ids);
+  }
+
+  if (uncachedIds.length > 0) {
+    logger.info(`[zalo-ops:${accountId}] Cache miss for ${uncachedIds.length}/${ids.length} group members, fetching from SDK...`);
+    try {
+      const res = await exec({ accountId, category: 'group_read', operation: 'getGroupMembersInfo' },
+        (api) => api.getGroupMembersInfo(uncachedIds)) as any;
+
+      let profilesList: any[] = [];
+      if (res && res.profiles && typeof res.profiles === 'object') {
+        profilesList = Object.values(res.profiles);
+      } else if (Array.isArray(res)) {
+        profilesList = res;
+      } else if (res && Array.isArray(res.members)) {
+        profilesList = res.members;
+      } else if (res && typeof res === 'object') {
+        profilesList = Object.values(res);
+      }
+
+      for (const p of profilesList) {
+        const rawUid = String(p?.uid || p?.userId || p?.id || p?.zaloId || '');
+        if (rawUid) {
+          const cacheKey = `${accountId}:${rawUid}`;
+          memberProfileCache.set(cacheKey, { data: p, timestamp: now });
+          resultProfiles.push(p);
+
+          const stripped = rawUid.split('_')[0];
+          if (stripped && stripped !== rawUid) {
+            memberProfileCache.set(`${accountId}:${stripped}`, { data: p, timestamp: now });
+            memberProfileCache.set(`${accountId}:${stripped}_0`, { data: p, timestamp: now });
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn(`[zalo-ops:${accountId}] getGroupMembersInfo failed: ${(err as Error).message}`);
+    }
+  }
+
+  return resultProfiles;
+}
+
+export function getCachedMemberProfile(accountId: string, memberId: string) {
+  const cacheKey = `${accountId}:${memberId}`;
+  const cached = memberProfileCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < MEMBER_PROFILE_TTL_MS) {
+    return cached.data;
+  }
+  const stripped = memberId.split('_')[0];
+  const cachedStripped = memberProfileCache.get(`${accountId}:${stripped}`);
+  if (cachedStripped && Date.now() - cachedStripped.timestamp < MEMBER_PROFILE_TTL_MS) {
+    return cachedStripped.data;
+  }
+  return null;
 }
 
 async function getGroupBlockedMembers(accountId: string, groupId: string) {
@@ -574,9 +615,22 @@ async function disableGroupLink(accountId: string, groupId: string) {
     (api) => api.disableGroupLink(groupId));
 }
 
-async function joinGroupByLink(accountId: string, linkId: string) {
-  return exec({ accountId, category: 'group_admin', operation: 'joinGroupByLink' },
-    (api) => api.joinGroupLink(linkId));
+async function joinGroupByLink(accountId: string, linkIdOrUrl: string) {
+  const fullLink = linkIdOrUrl.startsWith('http') 
+    ? linkIdOrUrl 
+    : `https://zalo.me/g/${linkIdOrUrl}`;
+  return exec({ accountId, category: 'group_read', operation: 'joinGroupByLink' },
+    (api) => api.joinGroupLink(fullLink));
+}
+
+async function parseLink(accountId: string, link: string) {
+  return exec({ accountId, category: 'query', operation: 'parseLink' },
+    (api) => api.parseLink(link));
+}
+
+async function getGroupLinkInfo(accountId: string, payload: { link: string; memberPage?: number }) {
+  return exec({ accountId, category: 'query', operation: 'getGroupLinkInfo' },
+    (api) => api.getGroupLinkInfo(payload));
 }
 
 // ─── Group Polls ────────────────────────────────────────────────────────────
@@ -603,6 +657,39 @@ async function lockPoll(accountId: string, pollId: string) {
 async function sharePoll(accountId: string, pollId: string) {
   return exec({ accountId, category: 'group_admin', operation: 'sharePoll' },
     (api) => api.sharePoll(pollId));
+}
+
+// ─── Reminders / Nhắc hẹn (2026-06-16) ──────────────────────────────────────
+// zca-js createReminder/editReminder/removeReminder. type 0=user, 1=group (như threadType).
+// startTime = epoch ms; repeat 0=None,1=Daily,2=Weekly,3=Monthly. Trả ReminderUser có reminderId.
+async function createReminder(
+  accountId: string,
+  threadId: string,
+  threadType: 0 | 1,
+  options: { title: string; startTime?: number; repeat?: number; emoji?: string },
+): Promise<any> {
+  return exec({ accountId, category: 'message', operation: 'createReminder' },
+    (api) => api.createReminder(options, threadId, threadType));
+}
+
+async function editReminder(
+  accountId: string,
+  threadId: string,
+  threadType: 0 | 1,
+  options: { title: string; topicId: string; startTime?: number; repeat?: number; emoji?: string },
+): Promise<any> {
+  return exec({ accountId, category: 'message', operation: 'editReminder' },
+    (api) => api.editReminder(options, threadId, threadType));
+}
+
+async function removeReminder(
+  accountId: string,
+  reminderId: string,
+  threadId: string,
+  threadType: number,
+) {
+  return exec({ accountId, category: 'message', operation: 'removeReminder' },
+    (api) => api.removeReminder(reminderId, threadId, threadType));
 }
 
 // ─── Friend Operations ──────────────────────────────────────────────────────
@@ -753,15 +840,15 @@ export const zaloOps = {
   sendLink,
   sendCard,
   sendVoice,
+  sendVideo,
+  sendFile,
+  uploadAttachment,
+  forwardMessage,
 
   // Reminders / Nhắc hẹn (2026-06-16)
   createReminder,
   editReminder,
   removeReminder,
-  sendVideo,
-  sendFile,
-  uploadAttachment,
-  forwardMessage,
 
   // Chat actions
   addReaction,
@@ -791,6 +878,7 @@ export const zaloOps = {
   getGroupInfo,
   getAllGroups,
   getGroupMembersInfo,
+  getCachedMemberProfile,
   getGroupBlockedMembers,
   getPendingGroupMembers,
   getGroupLinkDetail,
@@ -799,6 +887,8 @@ export const zaloOps = {
   enableGroupLink,
   disableGroupLink,
   joinGroupByLink,
+  parseLink,
+  getGroupLinkInfo,
 
   // Group polls
   createPoll,

@@ -114,28 +114,36 @@
       @view-applied="onFolderViewApplied"
     />
 
-    <!-- COL 4: contact info panel (chỉ hiện khi có contact) -->
-    <ChatContactPanel
-      v-if="showContactPanel && selectedConv?.contact"
-      ref="contactPanelRef"
-      :contact-id="selectedConv.contact.id"
-      :contact="selectedConv.contact"
-      :friendship="selectedConv.friendship ?? null"
-      :active-zalo-account-id="selectedConv.zaloAccount?.id ?? null"
-      :friend-id="selectedConv.friendship?.id ?? null"
-      :conversation-id="selectedConv.id ?? null"
-      :active-zalo-account-name="selectedConv.zaloAccount?.displayName ?? null"
-      :ai-summary="aiSummary"
-      :ai-summary-loading="aiSummaryLoading"
-      :ai-sentiment="aiSentiment"
-      :ai-sentiment-loading="aiSentimentLoading"
-      class="smax-info-col"
-      @refresh-ai-summary="generateAiSummary"
-      @refresh-ai-sentiment="generateAiSentiment"
-      @close="showContactPanel = false"
-      @saved="fetchConversations()"
-      @status-changed="onPanelStatusChanged"
-    />
+    <!-- COL 4: contact info panel / group members panel (chỉ hiện khi có contact / group) -->
+    <template v-if="showContactPanel && selectedConv">
+      <ChatContactPanel
+        v-if="selectedConv.threadType !== 'group' && selectedConv.contact"
+        ref="contactPanelRef"
+        :contact-id="selectedConv.contact.id"
+        :contact="selectedConv.contact"
+        :friendship="selectedConv.friendship ?? null"
+        :active-zalo-account-id="selectedConv.zaloAccount?.id ?? null"
+        :friend-id="selectedConv.friendship?.id ?? null"
+        :conversation-id="selectedConv.id ?? null"
+        :active-zalo-account-name="selectedConv.zaloAccount?.displayName ?? null"
+        :ai-summary="aiSummary"
+        :ai-summary-loading="aiSummaryLoading"
+        :ai-sentiment="aiSentiment"
+        :ai-sentiment-loading="aiSentimentLoading"
+        class="smax-info-col"
+        @refresh-ai-summary="generateAiSummary"
+        @refresh-ai-sentiment="generateAiSentiment"
+        @close="showContactPanel = false"
+        @saved="fetchConversations()"
+        @status-changed="onPanelStatusChanged"
+      />
+      <GroupMembersPanel
+        v-else-if="selectedConv.threadType === 'group'"
+        :conversation="selectedConv"
+        class="smax-info-col"
+        @close="showContactPanel = false"
+      />
+    </template>
   </div>
 </template>
 
@@ -147,6 +155,7 @@ import { useToast } from '@/composables/use-toast';
 import ConversationList from '@/components/chat/ConversationList.vue';
 import MessageThread from '@/components/chat/MessageThread.vue';
 import ChatContactPanel from '@/components/chat/ChatContactPanel.vue';
+import GroupMembersPanel from '@/components/chat/GroupMembersPanel.vue';
 import ConversationFilterSidebar from '@/components/chat/ConversationFilterSidebar.vue';
 import ConversationFilterBar from '@/components/chat/ConversationFilterBar.vue';
 import FolderManagePopup from '@/components/chat/FolderManagePopup.vue';

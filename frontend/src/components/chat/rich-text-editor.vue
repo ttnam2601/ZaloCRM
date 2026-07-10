@@ -177,6 +177,82 @@
         </button>
       </div>
     </Teleport>
+    <!-- Script Dialog của local -->
+    <v-dialog v-model="scriptDialogOpen" max-width="600px">
+      <v-card class="pa-4 rounded-lg bg-surface border-thin">
+        <v-card-title class="d-flex align-center justify-space-between py-2 px-0">
+          <span class="text-h6 font-weight-bold text-gradient">Biên dịch kịch bản khai giảng</span>
+          <v-btn icon variant="text" size="small" @click="scriptDialogOpen = false">
+            <XIcon :size="16" />
+          </v-btn>
+        </v-card-title>
+        <v-card-text class="px-0 py-3">
+          <p class="text-caption text-muted mb-4">
+            Dán kịch bản khai giảng copy từ CRM/Google Sheet vào đây. Hệ thống sẽ tự động bóc tách các trường thông tin [TÊN HS], [MÃ CID], [MÃ UID] để biên dịch và tự động định dạng.
+          </p>
+          <v-textarea
+            v-model="rawScriptInput"
+            label="Nội dung kịch bản gốc"
+            placeholder='Ví dụ:
+"Chúc mừng [Tên HS] - [Mã CID] đã khai giảng lớp..."
+Tên học sinh: Nguyễn Văn A
+Mã CID: CID1234
+Mã UID: UID5678'
+            rows="6"
+            variant="outlined"
+            hide-details
+            class="mb-3"
+          />
+          
+          <div v-if="scriptWarnings.length" class="mb-4">
+            <div v-for="w in scriptWarnings" :key="w" class="d-flex align-center text-caption text-warning mb-1">
+              <v-icon size="14" class="mr-1">mdi-alert-circle-outline</v-icon>
+              {{ w }}
+            </div>
+          </div>
+          
+          <div class="extracted-fields-box pa-3 rounded bg-grey-lighten-4 border-thin mb-2">
+            <div class="text-subtitle-2 font-weight-bold mb-2 text-primary">Thông tin nhận diện được:</div>
+            <v-row dense>
+              <v-col cols="4">
+                <v-text-field
+                  v-model="extractedInfo.name"
+                  label="Tên Học Sinh"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="4">
+                <v-text-field
+                  v-model="extractedInfo.cid"
+                  label="Mã CID"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                />
+              </v-col>
+              <v-col cols="4">
+                <v-text-field
+                  v-model="extractedInfo.uid"
+                  label="Mã UID/SID"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                />
+              </v-col>
+            </v-row>
+          </div>
+        </v-card-text>
+        <v-card-actions class="px-0 pb-0">
+          <v-spacer />
+          <v-btn variant="text" color="grey" @click="scriptDialogOpen = false">Hủy</v-btn>
+          <v-btn color="primary" variant="flat" :disabled="!rawScriptInput.trim()" @click="compileAndApplyScript">
+            Áp Dụng
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -195,6 +271,7 @@ import { useGroups } from '@/composables/use-groups';
 // Lucide icons (anh chốt 2026-05-22 — bộ icon đồng bộ thay MDI)
 import {
   Bold as BoldIcon,
+  X as XIcon,
   Italic as ItalicIcon,
   Underline as UnderlineIcon,
   Strikethrough as StrikethroughIcon,
@@ -764,7 +841,209 @@ function applyRichPayload(
   if (opts.focus) editor.value.commands.focus('end');
 }
 
-defineExpose({ clear, focus, insertText, getRichPayload, applyRichPayload });
+const scriptDialogOpen = ref(false);
+const rawScriptInput = ref('');
+const extractedInfo = ref({ name: '', cid: '', uid: '' });
+const scriptWarnings = ref<string[]>([]);
+
+interface ZaloStyle {
+  st: string;
+  start: number;
+  len: number;
+}
+
+function parseScriptInput(text: string) {
+  let name = '';
+  let cid = '';
+  let uid = '';
+  let body = '';
+
+  const quoteMatch = text.match(/["“]([\s\S]*?)["”]/);
+  if (quoteMatch) {
+    body = quoteMatch[1];
+    const lines = text.split('\n');
+    const headerLines = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith('"') || trimmed.startsWith('“') || trimmed.includes('học sinh:') || trimmed.includes('Học sinh:') || trimmed.includes('Học Sinh:') || trimmed.includes('CID:') || trimmed.includes('UID:') || trimmed.includes('SID:')) {
+        continue;
+      }
+      headerLines.push(trimmed);
+    }
+
+    const nameLine = lines.find((l) => l.includes('học sinh:') || l.includes('Học sinh:') || l.includes('Học Sinh:'));
+    if (nameLine) {
+      name = nameLine.split(':')[1]?.trim() || '';
+    }
+
+    const cidMatch = text.match(/CID:\s*([a-z0-9]+)/i);
+    if (cidMatch) cid = cidMatch[1];
+
+    const uidMatch = text.match(/UID:\s*([a-z0-9]+)/i);
+    if (uidMatch) {
+      uid = uidMatch[1];
+    } else {
+      const idLine = lines.find((l) => l.includes('UID:') || l.includes('SID:'));
+      if (idLine) {
+        const uidMatch = idLine.match(/UID:\s*([a-z0-9]+)/i);
+        if (uidMatch) uid = uidMatch[1];
+        
+        const sidMatch = idLine.match(/SID:\s*([a-z0-9]+)/i);
+        let sid = sidMatch ? sidMatch[1] : '';
+        if (uid && sid) {
+          uid = `${uid} (SID: ${sid})`;
+        } else if (sid) {
+          uid = sid;
+        }
+      } else {
+        if (headerLines.length > 0) {
+          name = headerLines[0];
+        }
+      }
+    }
+  } else {
+    const cidMatch = text.match(/CID:\s*([a-z0-9]+)/i);
+    if (cidMatch) cid = cidMatch[1];
+
+    const uidMatch = text.match(/UID:\s*([a-z0-9]+)/i);
+    if (uidMatch) uid = uidMatch[1];
+
+    const sidMatch = text.match(/SID:\s*([a-z0-9]+)/i);
+    if (sidMatch) {
+      const sid = sidMatch[1];
+      uid = uid ? `${uid} (SID: ${sid})` : sid;
+    }
+  }
+
+  return { name, cid, uid, body };
+}
+
+function compileScriptText(template: string, name: string, cid: string, uid: string) {
+  let result = template;
+  result = result.replace(/\[TÊN HS\]/g, name || '[TÊN HS]');
+  result = result.replace(/\[Tên HS\]/g, name || '[Tên HS]');
+  result = result.replace(/\[tên hs\]/g, name || '[tên hs]');
+  result = result.replace(/\{name\}/g, name || '{name}');
+  result = result.replace(/\{cid\}/g, cid || '{cid}');
+  result = result.replace(/\{uid\}/g, uid || '{uid}');
+  return result;
+}
+
+function findStyledRanges(text: string, name: string): ZaloStyle[] {
+  const nameRanges: { start: number; end: number }[] = [];
+  const dateTimeRanges: { start: number; end: number }[] = [];
+
+  if (name && name.trim()) {
+    const escapedName = name.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const nameRegex = new RegExp(escapedName, 'gi');
+    let match;
+    while ((match = nameRegex.exec(text)) !== null) {
+      nameRanges.push({ start: match.index, end: match.index + match[0].length });
+    }
+  }
+
+  const dayOfWeekRegex = /\bthứ\s*(?:[2-7]|chủ\s*nhật|hai|ba|tư|năm|sáu|bảy)\b/gi;
+  let matchDay;
+  while ((matchDay = dayOfWeekRegex.exec(text)) !== null) {
+    dateTimeRanges.push({ start: matchDay.index, end: matchDay.index + matchDay[0].length });
+  }
+
+  const timeRegex = /(?:lúc\s*)?\b\d{1,2}(?:h\d{2}|:\d{2}|h)\b/gi;
+  let matchTime;
+  while ((matchTime = timeRegex.exec(text)) !== null) {
+    dateTimeRanges.push({ start: matchTime.index, end: matchTime.index + matchTime[0].length });
+  }
+
+  const styles: ZaloStyle[] = [];
+
+  function mergeRanges(rawRanges: { start: number; end: number }[]) {
+    if (rawRanges.length === 0) return [];
+    rawRanges.sort((a, b) => a.start - b.start);
+    const merged = [rawRanges[0]];
+    for (let i = 1; i < rawRanges.length; i++) {
+      const current = rawRanges[i];
+      const last = merged[merged.length - 1];
+      if (current.start <= last.end) {
+        last.end = Math.max(last.end, current.end);
+      } else {
+        merged.push(current);
+      }
+    }
+    return merged;
+  }
+
+  const mergedNameRanges = mergeRanges(nameRanges);
+  const mergedDateTimeRanges = mergeRanges(dateTimeRanges);
+
+  for (const r of mergedNameRanges) {
+    const len = r.end - r.start;
+    styles.push({ st: 'b', start: r.start, len });
+    styles.push({ st: 'c_db342e', start: r.start, len });
+  }
+
+  for (const r of mergedDateTimeRanges) {
+    const len = r.end - r.start;
+    styles.push({ st: 'b', start: r.start, len });
+    styles.push({ st: 'c_2962ff', start: r.start, len });
+  }
+
+  return styles;
+}
+
+watch(rawScriptInput, (newVal) => {
+  const parsed = parseScriptInput(newVal);
+  extractedInfo.value.name = parsed.name;
+  extractedInfo.value.cid = parsed.cid;
+  extractedInfo.value.uid = parsed.uid;
+
+  const warnings: string[] = [];
+  if (newVal.trim()) {
+    const hasQuotes = (newVal.indexOf('"') !== -1 && newVal.lastIndexOf('"') !== newVal.indexOf('"')) ||
+                      (newVal.indexOf('“') !== -1 && newVal.lastIndexOf('”') !== -1);
+    if (!hasQuotes) {
+      warnings.push('Thiếu cặp dấu ngoặc kép " " hoặc “ ” để bao quanh kịch bản.');
+    }
+    if (!parsed.name) {
+      warnings.push('Chưa nhận diện được Tên học sinh.');
+    }
+    if (!parsed.cid) {
+      warnings.push('Chưa nhận diện được Mã CID.');
+    }
+    if (!parsed.uid) {
+      warnings.push('Chưa nhận diện được Mã UID/SID.');
+    }
+  }
+  scriptWarnings.value = warnings;
+});
+
+function openScriptDialog() {
+  rawScriptInput.value = '';
+  extractedInfo.value = { name: '', cid: '', uid: '' };
+  scriptWarnings.value = [];
+  scriptDialogOpen.value = true;
+}
+
+function compileAndApplyScript() {
+  const parsed = parseScriptInput(rawScriptInput.value);
+  const name = extractedInfo.value.name || parsed.name;
+  const cid = extractedInfo.value.cid || parsed.cid;
+  const uid = extractedInfo.value.uid || parsed.uid;
+  const template = parsed.body || rawScriptInput.value;
+
+  const compiled = compileScriptText(template, name, cid, uid);
+  const styledRanges = findStyledRanges(compiled, name);
+
+  applyRichPayload({
+    text: compiled,
+    styles: styledRanges
+  }, { focus: true });
+
+  scriptDialogOpen.value = false;
+  try { toast.success('Đã biên dịch và áp dụng kịch bản thành công!'); } catch { /* */ }
+}
+
+defineExpose({ clear, focus, insertText, getRichPayload, applyRichPayload, openScriptDialog });
 
 onBeforeUnmount(() => { editor.value?.destroy(); });
 </script>

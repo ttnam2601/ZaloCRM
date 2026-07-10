@@ -1,5 +1,3 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<!-- Copyright (C) 2026 Nguyễn Tiến Lộc -->
 <!--
   reaction-detail-popup.vue — Anh chốt 2026-05-22: học Zalo native popup "Biểu cảm".
   Sidebar tabs: "Tất cả N" / "[emoji] [count]" cho mỗi emoji.
@@ -48,20 +46,15 @@
             :key="u.userId"
             class="user-row"
           >
-            <img
-              v-if="u.avatarUrl && !failedAvatars.has(u.userId)"
-              class="user-avatar user-avatar-img"
-              :src="u.avatarUrl"
-              :alt="u.name"
-              referrerpolicy="no-referrer"
-              @error="onAvatarError(u.userId)"
-            />
-            <span v-else class="user-avatar" :style="{ background: avatarColor(u.name) }">
+            <span class="user-avatar" :style="{ background: avatarColor(u.name) }">
               {{ initials(u.name) }}
             </span>
             <div class="user-info">
               <div class="user-name">{{ u.name }}</div>
-              <div v-if="u.source" class="user-source">{{ u.source === 'zalo' ? 'Từ Zalo App' : 'Từ CRM' }}</div>
+              <div class="user-meta">
+                <span v-if="u.source" class="user-source">{{ u.source === 'zalo' ? 'Từ Zalo App' : 'Từ CRM' }}</span>
+                <span v-if="u.createdAt" class="user-time">· {{ formatReactionTime(u.createdAt) }}</span>
+              </div>
             </div>
             <div class="user-emojis">
               <span v-for="e in u.emojis" :key="e" class="user-emoji">{{ e }}</span>
@@ -83,7 +76,7 @@ interface ReactionDetail {
   userName?: string | null;
   emoji: string;
   source?: 'crm' | 'zalo';
-  avatarUrl?: string | null;
+  createdAt?: string | null;
 }
 
 const props = defineProps<{
@@ -99,15 +92,9 @@ defineEmits<{
 
 const activeTab = ref<string>('all');
 
-// Avatar thật lỗi tải (URL Zalo hết hạn) → fallback về vòng tròn chữ-cái.
-const failedAvatars = ref<Set<string>>(new Set());
-function onAvatarError(userId: string) {
-  failedAvatars.value = new Set(failedAvatars.value).add(userId);
-}
-
 // Reset tab khi popup mở lại
 watch(() => props.modelValue, (open) => {
-  if (open) { activeTab.value = 'all'; failedAvatars.value = new Set(); }
+  if (open) activeTab.value = 'all';
 });
 
 const totalCount = computed(() =>
@@ -121,19 +108,18 @@ const reactionsSorted = computed(() => {
 
 // Group details by userId → user row với list emoji
 const groupedUsers = computed(() => {
-  const map = new Map<string, { userId: string; name: string; source?: 'crm' | 'zalo'; avatarUrl?: string | null; emojis: string[] }>();
+  const map = new Map<string, { userId: string; name: string; source?: 'crm' | 'zalo'; emojis: string[]; createdAt: string | null }>();
   for (const d of props.details ?? []) {
     const existing = map.get(d.userId);
     if (existing) {
       existing.emojis.push(d.emoji);
-      if (!existing.avatarUrl && d.avatarUrl) existing.avatarUrl = d.avatarUrl;
     } else {
       map.set(d.userId, {
         userId: d.userId,
         name: d.userName || 'Người dùng',
         source: d.source,
-        avatarUrl: d.avatarUrl ?? null,
         emojis: [d.emoji],
+        createdAt: d.createdAt || null,
       });
     }
   }
@@ -145,6 +131,21 @@ const filteredUsers = computed(() => {
   if (activeTab.value === 'all') return groupedUsers.value;
   return groupedUsers.value.filter((u) => u.emojis.includes(activeTab.value));
 });
+
+function formatReactionTime(isoStr: string): string {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mMonth = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${hh}:${mm} ${dd}/${mMonth}/${yyyy}`;
+  } catch (e) {
+    return '';
+  }
+}
 
 function initials(name: string): string {
   if (!name) return '?';
@@ -206,7 +207,6 @@ function avatarColor(name: string): string {
   border-right: 1px solid #f0f1f3;
   padding: 8px;
   overflow-y: auto;
-  min-height: 0;
 }
 .tab-item {
   width: 100%;
@@ -246,9 +246,6 @@ function avatarColor(name: string): string {
 .popup-main {
   padding: 8px;
   overflow-y: auto;
-  /* 2026-06-20 (anh báo: list dài không cuộn được): grid item mặc định min-height:auto →
-     phình theo nội dung, tràn thay vì cuộn. min-height:0 cho phép co lại + overflow-y cuộn. */
-  min-height: 0;
 }
 .popup-empty {
   padding: 40px 24px;
@@ -278,11 +275,6 @@ function avatarColor(name: string): string {
   justify-content: center;
   flex-shrink: 0;
 }
-/* Avatar thật (Friend.zaloAvatarUrl) — phủ kín vòng tròn. */
-.user-avatar-img {
-  object-fit: cover;
-  background: #e5e7eb;
-}
 .user-info { flex: 1; min-width: 0; }
 .user-name {
   font-size: 13px;
@@ -292,10 +284,20 @@ function avatarColor(name: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.user-source {
+.user-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 10px;
   color: #9CA3AF;
   margin-top: 2px;
+}
+.user-source {
+  font-size: 10px;
+  color: #9CA3AF;
+}
+.user-time {
+  white-space: nowrap;
 }
 .user-emojis {
   display: flex;

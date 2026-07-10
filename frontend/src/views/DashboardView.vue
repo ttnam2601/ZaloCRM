@@ -449,6 +449,8 @@
                 </div>
               </div>
             </div>
+            
+            <ZaloRateLimiterCard />
           </div>
         </div>
       </div>
@@ -463,6 +465,7 @@ import { useRouter } from 'vue-router';
 import { useDashboardActionHub, type PrivacySplit } from '@/composables/use-dashboard-action-hub';
 import { useAttribution } from '@/composables/use-attribution';
 import Avatar from '@/components/ui/Avatar.vue';
+import ZaloRateLimiterCard from '@/components/dashboard/ZaloRateLimiterCard.vue';
 import {
   Sun, Target, Users, Shield, User, ChevronDown, Lock, Search,
   Inbox, CalendarClock, Eye, Moon, CircleCheck, Flame, Bell,

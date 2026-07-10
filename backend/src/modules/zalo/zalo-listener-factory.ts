@@ -959,27 +959,199 @@ export function attachZaloListener(ctx: ListenerContext): void {
     }
   });
 
-  // Group system events: member join/leave/kick, name change, etc.
-  listener.on('group_event', (event: any) => {
+    // Group system events: member join/leave/kick, name change, etc.
+  listener.on('group_event', async (event: any) => {
     const eventType = event?.type ?? 'unknown';
+    const groupId = event?.groupId || event?.threadId;
     logger.info(`[zalo:${accountId}] Group event: type=${eventType}`, {
-      groupId: event?.groupId,
-      actorId: event?.actorId,
-      members: event?.members,
+      groupId,
+      actorId: event?.actorId || event?.creatorId,
+      members: event?.members || event?.data?.updateMembers,
     });
+
     // PATH TỨC THÌ — avatar/tên/cấu hình nhóm đổi → refresh NGAY nhóm đó (mirror avatar mới
     // + emit live cho client đang mở), bỏ độ trễ ≤6h của cron. update_avatar=đổi ảnh,
     // update/update_setting=đổi tên/cấu hình. Cron 6h vẫn là lưới an toàn cho lúc offline.
-    if ((eventType === 'update_avatar' || eventType === 'update' || eventType === 'update_setting') && event?.groupId) {
+    if ((eventType === 'update_avatar' || eventType === 'update' || eventType === 'update_setting') && groupId) {
       void (async () => {
         const orgId = await resolveOrgId();
         if (!orgId) return;
-        await refreshGroupInfoNow(accountId, orgId, String(event.groupId), io).catch((err) =>
+        await refreshGroupInfoNow(accountId, orgId, String(groupId), io).catch((err) =>
           logger.warn(`[zalo:${accountId}] group_event refresh failed:`, err),
         );
       })();
     }
-    // Future: store as system message in the group conversation
+
+    try {
+      const type = event?.type;
+      if (!type || !groupId) return;
+
+      const conversation = await prisma.conversation.findFirst({
+        where: { zaloAccountId: accountId, externalThreadId: groupId },
+        select: { id: true, orgId: true },
+      });
+      if (!conversation) return;
+
+      let logText = '';
+      const actorId = event?.data?.actorId || event?.data?.sourceId || event?.data?.creatorId || event?.actorId || event?.creatorId;
+
+      const getActorName = async () => {
+        let actorName = 'Một thành viên';
+        if (actorId) {
+          const actorIdStripped = actorId.split('_')[0];
+          const actorIdWithSuffix = `${actorIdStripped}_0`;
+          const [friend, contact, acc] = await Promise.all([
+            prisma.friend.findFirst({
+              where: {
+                OR: [
+                  { zaloUidInNick: actorId },
+                  { zaloUidInNick: actorIdStripped },
+                  { zaloUidInNick: actorIdWithSuffix }
+                ]
+              },
+              select: { aliasInNick: true, zaloDisplayName: true }
+            }),
+            prisma.contact.findFirst({
+              where: {
+                zaloUid: { in: [actorId, actorIdStripped, actorIdWithSuffix] }
+              },
+              select: { crmName: true, fullName: true }
+            }),
+            prisma.zaloAccount.findFirst({
+              where: {
+                zaloUid: { in: [actorId, actorIdStripped, actorIdWithSuffix] }
+              },
+              select: { displayName: true }
+            })
+          ]);
+          const name = friend?.aliasInNick || friend?.zaloDisplayName || contact?.crmName || contact?.fullName || acc?.displayName;
+          if (name) {
+            actorName = name;
+          } else {
+            try {
+              const userInfo = await resolveZaloName(api, actorIdStripped, userInfoCache);
+              if (userInfo && userInfo.zaloName) actorName = userInfo.zaloName;
+            } catch (sdkErr) {
+              logger.warn(`[attachZaloListener] SDK lookup for actor ${actorId} failed: ${(sdkErr as Error).message}`);
+            }
+          }
+        }
+        return actorName;
+      };
+
+      if (type === 'join') {
+        const members = event.data?.updateMembers || [];
+        const memberUids = new Set(members.map((m: any) => String(m.uid || '')));
+        const actorIdStripped = actorId ? String(actorId).split('_')[0] : '';
+        const isSelfJoin = !actorIdStripped || memberUids.has(actorIdStripped);
+
+        if (members.length > 0) {
+          const names = members.map((m: any) => m.dName || 'Thành viên mới').join(', ');
+          if (isSelfJoin) {
+            logText = `${names} đã tham gia nhóm`;
+          } else {
+            const actorName = await getActorName();
+            logText = `${actorName} đã thêm ${names} vào nhóm`;
+          }
+        } else if (event.isSelf) {
+          logText = `Bạn đã tham gia nhóm`;
+        } else {
+          logText = `Một thành viên đã tham gia nhóm`;
+        }
+      } else if (type === 'leave') {
+        const members = event.data?.updateMembers || [];
+        if (members.length > 0) {
+          const names = members.map((m: any) => m.dName || 'Thành viên').join(', ');
+          logText = `${names} đã rời nhóm`;
+        } else if (event.isSelf) {
+          logText = `Bạn đã rời nhóm`;
+        } else {
+          logText = `Một thành viên đã rời nhóm`;
+        }
+      } else if (type === 'remove_member') {
+        const members = event.data?.updateMembers || [];
+        if (members.length > 0) {
+          const names = members.map((m: any) => m.dName || 'Thành viên').join(', ');
+          const actorName = await getActorName();
+          logText = `${names} đã bị xóa khỏi nhóm bởi ${actorName}`;
+        } else {
+          logText = `Một thành viên đã bị xóa khỏi nhóm`;
+        }
+      } else if (type === 'update_avatar' && (event.data?.avt || event.data?.fullAvt)) {
+        const groupAvatarUrl = event.data.avt || event.data.fullAvt;
+        const updated = await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { groupAvatarUrl },
+        });
+        io?.emit('conversation:updated', updated);
+
+        const actorName = await getActorName();
+        logText = `${actorName} đã đổi ảnh đại diện nhóm`;
+      } else if (type === 'update' && event.data?.groupName) {
+        const groupName = event.data.groupName;
+        
+        // Fetch old name first
+        const conversationRecord = await prisma.conversation.findUnique({
+          where: { id: conversation.id },
+          select: { groupName: true },
+        });
+        const oldGroupName = conversationRecord?.groupName || '';
+
+        const updated = await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { groupName },
+        });
+        io?.emit('conversation:updated', updated);
+
+        const actorName = await getActorName();
+
+        if (oldGroupName && oldGroupName !== groupName) {
+          logText = `${actorName} đã đổi tên nhóm từ "${oldGroupName}" thành "${groupName}"`;
+        } else {
+          logText = `${actorName} đã đổi tên nhóm thành "${groupName}"`;
+        }
+      }
+
+      if (logText) {
+        const msgId = `sys-${Date.now()}-${randomUUID().slice(0, 8)}`;
+        const now = new Date();
+        const syntheticMsgIdNum = BigInt(now.getTime()) * 10000n;
+        const message = await prisma.message.create({
+          data: {
+            id: randomUUID(),
+            conversationId: conversation.id,
+            zaloMsgId: msgId,
+            zaloMsgIdNum: syntheticMsgIdNum,
+            senderType: 'system',
+            senderName: 'Hệ thống',
+            content: logText,
+            contentType: 'system_event',
+            attachments: [],
+            sentAt: now,
+          },
+        });
+
+        // PRIVACY 2026-06-11: backfill cũng qua emit-chat (redact + scope org)
+        const accInfo = await prisma.zaloAccount.findUnique({
+          where: { id: accountId },
+          select: { privacyMode: true, ownerUserId: true },
+        });
+        await emitChatMessage({
+          io,
+          orgId: conversation.orgId,
+          accountId,
+          conversationId: conversation.id,
+          message: {
+            ...message,
+            zaloMsgIdNum: syntheticMsgIdNum,
+          } as any,
+          privacyMode: accInfo?.privacyMode ?? 'sub',
+          ownerUserId: accInfo?.ownerUserId ?? null,
+        });
+      }
+    } catch (err) {
+      logger.error(`[zalo:${accountId}] group_event processing failed:`, err);
+    }
   });
 
   // Note: duplicate 'friend_event' listener đã xoá ở chỗ này (legacy stub).

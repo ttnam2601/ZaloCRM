@@ -21,6 +21,7 @@ import { syncReminderFromMessage } from '../contacts/reminder-sync.js';
 import { uploadBuffer } from '../../shared/storage/minio-client.js';
 import { compressImage } from '../media/media-service.js';
 import { config } from '../../config/index.js';
+import { zaloOps } from '../../shared/zalo-operations.js';
 // Open-core: customer-reply care-session reaction moved to extension engine
 // (emitted via the shared automation event bus below).
 
@@ -463,6 +464,28 @@ export async function handleIncomingMessage(
     // 2026-06-18 — Cầu Telegram (Phase 0): phát sự kiện hậu-commit để bridge mirror sang
     // Telegram. Fire-and-forget; subscriber (Phase 1) tự lọc nick bắc cầu + chống lặp theo msgId.
     publishMessagePersisted({ messageId: message.id, conversationId: conversation.id });
+
+    // Auto-join Zalo group if message contains a group link
+    if (!msg.isSelf && msg.content) {
+      const groupLinkRegex = /zalo\.me\/g\/([a-zA-Z0-9_-]+)/gi;
+      let groupLinkMatch;
+      const groupLinkIds: string[] = [];
+      while ((groupLinkMatch = groupLinkRegex.exec(msg.content)) !== null) {
+        groupLinkIds.push(groupLinkMatch[1]);
+      }
+      if (groupLinkIds.length > 0) {
+        for (const linkId of groupLinkIds) {
+          logger.info(`[message-handler] Auto-joining Zalo group by link: ${linkId} on account: ${msg.accountId}`);
+          zaloOps.joinGroupByLink(msg.accountId, linkId)
+            .then((res) => {
+              logger.info(`[message-handler] Auto-joined Zalo group ${linkId} successfully`, res);
+            })
+            .catch((err) => {
+              logger.error(`[message-handler] Failed to auto-join Zalo group ${linkId}:`, err);
+            });
+        }
+      }
+    }
 
     // Update Contact aggregate fields (last*, total*) — fire-and-forget,
     // best-effort. Skipped for group threads inside the helper.
@@ -993,7 +1016,17 @@ async function findOrCreateConversation(
     // Update group metadata if changed (sync mới hơn so với DB)
     if (msg.threadType === 'group') {
       const updates: { groupName?: string; groupAvatarUrl?: string; groupMembersCount?: number } = {};
-      if (msg.groupName && msg.groupName !== existing.groupName) updates.groupName = msg.groupName;
+      if (msg.groupName && msg.groupName !== existing.groupName) {
+        updates.groupName = msg.groupName;
+        if (contactId) {
+          await prisma.contact.update({
+            where: { id: contactId },
+            data: { fullName: msg.groupName },
+          }).catch((err) => {
+            logger.warn('[message-handler] failed to update group contact name', err);
+          });
+        }
+      }
       // Không ghi đè URL nội bộ (đã mirror lên S3 bởi group-info-sync-cron) bằng URL CDN
       // thô từ tin nhắn — cron sở hữu avatar đã cache, tránh flip-flop CDN↔S3 mỗi tin mới.
       if (
