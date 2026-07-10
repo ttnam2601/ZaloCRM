@@ -375,6 +375,7 @@ model ZaloAccount {
   // dữ liệu (hội thoại/tin/bạn bè) trong DB. archivedAt != null = đã ẩn khỏi danh sách.
   // Listener + health-check BỎ QUA nick đã archive (không reconnect).
   archivedAt      DateTime? @map("archived_at")
+  purged          Boolean   @default(false)
   // T13 (2026-06-21): user.id người bấm XÓA nick (null = hệ thống tự dọn thẻ ma / xóa trước khi
   // có field này). Tab "Nick đã xóa" resolve tên qua User. KHÔNG FK (giữ nhẹ, xóa user ko cascade).
   archivedById    String?   @map("archived_by_id")
@@ -844,6 +845,7 @@ model Message {
   //   seenAt      — KH mở conversation đọc tin (2 tick xanh)
   deliveredAt         DateTime? @map("delivered_at")
   seenAt              DateTime? @map("seen_at")
+  seenDetails         Json?     @map("seen_details")
   repliedByUserId     String?   @map("replied_by_user_id")
   // Phase metrics layer 2026-05-22: phân biệt nguồn gửi cho automation rate-limit + dashboard.
   // 'user' = sale gửi qua CRM UI HOẶC sync về từ Zalo native (default — backward compat)
