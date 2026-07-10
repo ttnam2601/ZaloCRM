@@ -95,7 +95,12 @@ export interface QuotaNick {
   displayName: string;
   isPrivate: boolean;
   messagesToday: number | null;
-  friendsToday: number | null;
+  messagesLimit?: number | null;
+  groupAdminToday?: number | null;
+  groupAdminLimit?: number | null;
+  groupReadToday?: number | null;
+  groupReadLimit?: number | null;
+  friendsToday?: number | null;
 }
 
 export interface MeResponse {

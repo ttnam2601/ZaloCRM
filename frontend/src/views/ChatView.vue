@@ -63,6 +63,8 @@
             :total-count="conversations.length"
             :counts="conversationCounts"
             :priority-has-unread="priorityHasUnread"
+            v-model:limit="conversationLimit"
+            @update:limit="fetchConversations({ bypassCache: true })"
             @reselect-tab="onReselectActiveTab"
           />
         </template>
@@ -175,7 +177,7 @@ const route = useRoute();
 const router = useRouter();
 
 const {
-  conversations, selectedConvId, selectedConv, messages,
+  conversations, conversationLimit, selectedConvId, selectedConv, messages,
   loadingConvs, loadingMsgs, sendingMsg, searchQuery, accountFilter, extraFilters,
   aiSuggestion, aiSuggestionLoading, aiSuggestionError,
   aiSummary, aiSummaryLoading, aiSentiment, aiSentimentLoading,

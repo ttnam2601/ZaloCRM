@@ -679,7 +679,7 @@ const receiptState = computed<'sending' | 'delivered' | 'seen' | 'sent'>(() => {
   // 2026-06-24 — tin gửi THẤT BẠI (metadata.sendStatus='failed') → trả 'sent' để ẩn chip
   // receipt (tránh kẹt "Đang gửi"); badge "Gửi thất bại + lý do" đã hiện trong bubble.
   if ((m.metadata as { sendStatus?: string } | null | undefined)?.sendStatus === 'failed') return 'sent';
-  if (m.seenAt) return 'seen';
+  if (m.seenAt || (m.seenDetails && m.seenDetails.length > 0)) return 'seen';
   if (m.deliveredAt) return 'delivered';
   const ageMs = Date.now() - new Date(m.sentAt).getTime();
   return ageMs > 3000 ? 'sending' : 'sent';
@@ -688,7 +688,12 @@ const receiptState = computed<'sending' | 'delivered' | 'seen' | 'sent'>(() => {
 const receiptTooltip = computed<string>(() => {
   const m = props.message;
   switch (receiptState.value) {
-    case 'seen':      return `KH đã xem${m.seenAt ? ' lúc ' + formatTime(m.seenAt) : ''}`;
+    case 'seen': {
+      if (m.seenDetails && m.seenDetails.length > 0) {
+        return `Đã xem bởi ${m.seenDetails.length} người`;
+      }
+      return `KH đã xem${m.seenAt ? ' lúc ' + formatTime(m.seenAt) : ''}`;
+    }
     case 'delivered': return `Đã gửi tới KH${m.deliveredAt ? ' lúc ' + formatTime(m.deliveredAt) : ''}`;
     case 'sending':   return 'Đang gửi...';
     default:          return '';
@@ -698,7 +703,12 @@ const receiptTooltip = computed<string>(() => {
 const receiptLabel = computed<string>(() => {
   const m = props.message;
   switch (receiptState.value) {
-    case 'seen':      return m.seenAt ? `Đã xem ${formatTime(m.seenAt)}` : 'Đã xem';
+    case 'seen': {
+      if (m.seenDetails && m.seenDetails.length > 0) {
+        return `Đã xem (${m.seenDetails.length})`;
+      }
+      return m.seenAt ? `Đã xem ${formatTime(m.seenAt)}` : 'Đã xem';
+    }
     case 'delivered': return 'Đã nhận';
     case 'sending':   return 'Đang gửi';
     default:          return '';

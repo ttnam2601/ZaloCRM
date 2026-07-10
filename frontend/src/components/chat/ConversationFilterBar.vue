@@ -60,8 +60,26 @@
 
     <!-- ③ Mini counter + sort row — half height, muted -->
     <div class="cfb-mini">
-      <span class="mini-count">
-        <strong>{{ totalCount }}</strong> hội thoại
+      <span class="mini-count" style="position: relative;">
+        <!-- Clickable limit trigger -->
+        <span class="limit-trigger" @click="showLimitMenu = !showLimitMenu">
+          <strong>{{ limit }}</strong> hội thoại
+          <svg class="ic" style="width: 8px; height: 8px; margin-left: 3px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+          
+          <!-- Dropdown menu -->
+          <div v-if="showLimitMenu" class="limit-menu">
+            <div 
+              v-for="val in [100, 200, 300, 500]" 
+              :key="val" 
+              class="limit-item" 
+              :class="{ active: limit === val }"
+              @click.stop="selectLimit(val)"
+            >
+              {{ val }} hội thoại
+            </div>
+          </div>
+        </span>
+
         <template v-if="counts.unread">
           <span class="dot">·</span>
           <span class="accent">{{ counts.unread }} chưa đọc</span>
@@ -96,6 +114,16 @@ const props = defineProps<{
 
 // 2026-06-20: phát khi click LẠI tab đang active → ChatView clear ô tìm kiếm.
 const emit = defineEmits<{ 'reselect-tab': [] }>();
+
+import { ref } from 'vue';
+
+const limit = defineModel<number>('limit', { default: 100 });
+const showLimitMenu = ref(false);
+
+function selectLimit(val: number) {
+  limit.value = val;
+  showLimitMenu.value = false;
+}
 
 type TabKey = 'personal' | 'group' | 'main' | 'other';
 
@@ -326,4 +354,52 @@ function toggleSort() {
 }
 .mini-sort:hover { color: #4338CA; background: white; }
 .mini-sort .ic { width: 10px; height: 10px; opacity: 0.7; }
+
+/* ⑤ Custom Conversation Limit Dropdown Styles */
+.limit-trigger {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  user-select: none;
+  position: relative;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  transition: all 0.15s ease;
+}
+.limit-trigger:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+.limit-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  z-index: 1000;
+  background: white;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+  min-width: 100px;
+  padding: 4px 0;
+}
+.limit-item {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: #4b5563;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+.limit-item:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+.limit-item.active {
+  font-weight: 600;
+  color: #2563eb;
+  background: #eff6ff;
+}
 </style>

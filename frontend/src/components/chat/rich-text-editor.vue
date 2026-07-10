@@ -853,69 +853,121 @@ interface ZaloStyle {
 }
 
 function parseScriptInput(text: string) {
+  if (!text) return { name: '', cid: '', uid: '', body: '' };
+  
   let name = '';
   let cid = '';
   let uid = '';
   let body = '';
-
-  const quoteMatch = text.match(/["“]([\s\S]*?)["”]/);
-  if (quoteMatch) {
-    body = quoteMatch[1];
+  
+  const firstQuoteIdx = text.indexOf('"');
+  const lastQuoteIdx = text.lastIndexOf('"');
+  const firstSmartQuoteIdx = text.indexOf('“');
+  const lastSmartQuoteIdx = text.lastIndexOf('”');
+  
+  let quoteStart = -1;
+  let quoteEnd = -1;
+  
+  if (firstQuoteIdx !== -1 && lastQuoteIdx !== -1 && firstQuoteIdx < lastQuoteIdx) {
+    quoteStart = firstQuoteIdx;
+    quoteEnd = lastQuoteIdx;
+  } else if (firstSmartQuoteIdx !== -1 && lastSmartQuoteIdx !== -1 && firstSmartQuoteIdx < lastSmartQuoteIdx) {
+    quoteStart = firstSmartQuoteIdx;
+    quoteEnd = lastSmartQuoteIdx;
+  }
+  
+  let headerText = '';
+  if (quoteStart !== -1 && quoteEnd !== -1) {
+    body = text.substring(quoteStart + 1, quoteEnd).trim();
+    headerText = text.substring(0, quoteStart).trim();
+  } else {
     const lines = text.split('\n');
-    const headerLines = [];
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      if (trimmed.startsWith('"') || trimmed.startsWith('“') || trimmed.includes('học sinh:') || trimmed.includes('Học sinh:') || trimmed.includes('Học Sinh:') || trimmed.includes('CID:') || trimmed.includes('UID:') || trimmed.includes('SID:')) {
-        continue;
+    let bodyStartIdx = 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].toLowerCase();
+      if (line.includes('em chào') || line.includes('chao phu huynh') || line.includes('lien he tu') || line.includes('hồ sơ học tập')) {
+        bodyStartIdx = i;
+        break;
       }
-      headerLines.push(trimmed);
     }
-
-    const nameLine = lines.find((l) => l.includes('học sinh:') || l.includes('Học sinh:') || l.includes('Học Sinh:'));
-    if (nameLine) {
-      name = nameLine.split(':')[1]?.trim() || '';
-    }
-
-    const cidMatch = text.match(/CID:\s*([a-z0-9]+)/i);
-    if (cidMatch) cid = cidMatch[1];
-
-    const uidMatch = text.match(/UID:\s*([a-z0-9]+)/i);
-    if (uidMatch) {
-      uid = uidMatch[1];
+    
+    if (bodyStartIdx > 0) {
+      headerText = lines.slice(0, bodyStartIdx).join('\n').trim();
+      body = lines.slice(bodyStartIdx).join('\n').trim();
     } else {
-      const idLine = lines.find((l) => l.includes('UID:') || l.includes('SID:'));
-      if (idLine) {
-        const uidMatch = idLine.match(/UID:\s*([a-z0-9]+)/i);
-        if (uidMatch) uid = uidMatch[1];
-        
-        const sidMatch = idLine.match(/SID:\s*([a-z0-9]+)/i);
-        let sid = sidMatch ? sidMatch[1] : '';
-        if (uid && sid) {
-          uid = `${uid} (SID: ${sid})`;
-        } else if (sid) {
-          uid = sid;
+      let hasMetadata = false;
+      for (let i = 0; i < Math.min(lines.length, 3); i++) {
+        if (lines[i].includes('CID:') || lines[i].includes('UID:') || lines[i].includes('SID:')) {
+          hasMetadata = true;
+          bodyStartIdx = i + 1;
+          break;
         }
+      }
+      if (hasMetadata) {
+        headerText = lines.slice(0, bodyStartIdx).join('\n').trim();
+        body = lines.slice(bodyStartIdx).join('\n').trim();
       } else {
-        if (headerLines.length > 0) {
-          name = headerLines[0];
+        body = text.trim();
+      }
+    }
+  }
+  
+  if ((body.startsWith('"') && body.endsWith('"')) || (body.startsWith('“') && body.endsWith('”'))) {
+    body = body.substring(1, body.length - 1).trim();
+  }
+  
+  if (headerText) {
+    const headerLines = headerText.split('\n').map(l => l.trim()).filter(Boolean);
+    let idLineIndex = -1;
+    for (let i = 0; i < headerLines.length; i++) {
+      if (headerLines[i].includes('CID:') || headerLines[i].includes('UID:') || headerLines[i].includes('SID:')) {
+        idLineIndex = i;
+        break;
+      }
+    }
+    
+    if (idLineIndex !== -1) {
+      for (let j = idLineIndex - 1; j >= 0; j--) {
+        if (headerLines[j]) {
+          name = headerLines[j];
+          break;
         }
+      }
+      
+      const idLine = headerLines[idLineIndex];
+      const cidMatch = idLine.match(/CID:\s*([a-z0-9]+)/i);
+      if (cidMatch) cid = cidMatch[1];
+      
+      const uidMatch = idLine.match(/UID:\s*([a-z0-9]+)/i);
+      if (uidMatch) uid = uidMatch[1];
+      
+      const sidMatch = idLine.match(/SID:\s*([a-z0-9]+)/i);
+      let sid = sidMatch ? sidMatch[1] : '';
+      if (uid && sid) {
+        uid = `${uid} (SID: ${sid})`;
+      } else if (sid) {
+        uid = sid;
+      }
+    } else {
+      if (headerLines.length > 0) {
+        name = headerLines[0];
       }
     }
   } else {
     const cidMatch = text.match(/CID:\s*([a-z0-9]+)/i);
     if (cidMatch) cid = cidMatch[1];
-
+    
     const uidMatch = text.match(/UID:\s*([a-z0-9]+)/i);
     if (uidMatch) uid = uidMatch[1];
-
+    
     const sidMatch = text.match(/SID:\s*([a-z0-9]+)/i);
     if (sidMatch) {
       const sid = sidMatch[1];
       uid = uid ? `${uid} (SID: ${sid})` : sid;
     }
   }
-
+  
   return { name, cid, uid, body };
 }
 

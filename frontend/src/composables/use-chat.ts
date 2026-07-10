@@ -173,6 +173,7 @@ export interface Message {
   /** Read receipts (Wave 1+2) — chỉ có giá trị cho tin OUTGOING (senderType='self') */
   deliveredAt?: string | null;
   seenAt?: string | null;
+  seenDetails?: Array<{ uid: string; name?: string; seenAt: string }> | null;
   /** M55 2026-05-30 — sender attribution cho multi-sale cùng chăm.
    *  Tin self lưu sale nào gõ qua CRM UI. Khác user hiện viewer → render mini avatar. */
   repliedByUserId?: string | null;
@@ -321,6 +322,7 @@ export function useChat() {
   const typingConvIds = ref<Map<string, number>>(new Map());
   const typingTimers = new Map<string, number>();
   const searchQuery = ref('');
+  const conversationLimit = ref(100);
   // STRANGLER FACADE (work-scope migration 2026-06-15): accountFilter giờ là LỚP VỎ
   // bắc qua workScope (nguồn chân lý mới). Mọi reader/writer cũ (.value get/set) chạy
   // nguyên KHÔNG đổi hành vi. Migrate dần readers sang useWorkScope trực tiếp; khi grep
@@ -389,7 +391,7 @@ export function useChat() {
 
   async function fetchConversations(opts?: { bypassCache?: boolean }) {
     const params = {
-      limit: 100,
+      limit: conversationLimit.value,
       search: searchQuery.value,
       accountId: accountFilter.value || undefined,
       ...extraFilters.value,
@@ -1175,6 +1177,7 @@ export function useChat() {
 
   return {
     conversations,
+    conversationLimit,
     selectedConvId,
     selectedConv,
     messages,

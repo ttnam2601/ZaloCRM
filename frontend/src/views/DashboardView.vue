@@ -234,16 +234,50 @@
             <div class="at-card">
               <div class="at-card__head"><div class="at-card__title"><Zap :size="14" :stroke-width="2" /> Quota nick hôm nay</div></div>
               <div class="at-quota">
-                <div v-for="n in me?.quotaNicks ?? []" :key="n.id" class="at-quota__line">
-                  <div class="at-quota__top">
+                <div v-for="n in me?.quotaNicks ?? []" :key="n.id" class="at-quota__line mb-4" style="border-bottom: 1px solid var(--at-hairline, #eef2f6); padding-bottom: 12px;">
+                  <div class="at-quota__top mb-1">
                     <span class="at-quota__nm" :style="n.isPrivate ? 'color:var(--at-atlas-warning)' : ''">
                       <Lock v-if="n.isPrivate" :size="12" :stroke-width="2" />{{ n.displayName }}
                     </span>
-                    <span class="at-quota__vl">{{ n.isPrivate ? '—' : (n.messagesToday + '/300') }}</span>
                   </div>
-                  <div class="at-bar">
-                    <div v-if="!n.isPrivate" class="at-bar__seg" :style="quotaSeg(n.messagesToday)"></div>
-                    <div v-else class="at-bar__seg" style="width:100%;background:repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#f1f5f9 4px,#f1f5f9 8px)"></div>
+
+                  <div v-if="!n.isPrivate" class="pl-2">
+                    <!-- 1. Quota Tin nhắn -->
+                    <div class="mb-2">
+                      <div class="at-quota__top" style="font-size: 11px; margin-bottom: 2px;">
+                        <span style="color: var(--at-body)">💬 Tin nhắn đã gửi</span>
+                        <span class="at-quota__vl">{{ n.messagesToday ?? 0 }}/{{ n.messagesLimit ?? 200 }}</span>
+                      </div>
+                      <div class="at-bar">
+                        <div class="at-bar__seg" :style="calcBarSeg(n.messagesToday, n.messagesLimit || 200)"></div>
+                      </div>
+                    </div>
+
+                    <!-- 2. Gia nhập nhóm -->
+                    <div class="mb-2">
+                      <div class="at-quota__top" style="font-size: 11px; margin-bottom: 2px;">
+                        <span style="color: var(--at-body)">👥 Nhóm đã gia nhập</span>
+                        <span class="at-quota__vl">{{ n.groupAdminToday ?? 0 }}/{{ n.groupAdminLimit ?? 50 }}</span>
+                      </div>
+                      <div class="at-bar">
+                        <div class="at-bar__seg" :style="calcBarSeg(n.groupAdminToday, n.groupAdminLimit || 50)"></div>
+                      </div>
+                    </div>
+
+                    <!-- 3. Quét/Sync nhóm -->
+                    <div>
+                      <div class="at-quota__top" style="font-size: 11px; margin-bottom: 2px;">
+                        <span style="color: var(--at-body)">🔍 Tải thông tin nhóm</span>
+                        <span class="at-quota__vl">{{ n.groupReadToday ?? 0 }}/{{ n.groupReadLimit ?? 1000 }}</span>
+                      </div>
+                      <div class="at-bar">
+                        <div class="at-bar__seg" :style="calcBarSeg(n.groupReadToday, n.groupReadLimit || 1000)"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-else class="at-bar mt-1">
+                    <div class="at-bar__seg" style="width:100%;background:repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#f1f5f9 4px,#f1f5f9 8px)"></div>
                   </div>
                 </div>
                 <div v-if="!me?.quotaNicks.length" class="at-empty"><div class="at-empty__title">Chưa có nick</div></div>
@@ -608,10 +642,11 @@ function apptHM(iso: string, time: string | null): string {
   const d = new Date(iso);
   return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
 }
-function quotaSeg(msgs: number | null): string {
-  const v = msgs ?? 0;
-  const pct = Math.min(100, Math.round((v / 300) * 100));
-  const color = v > 270 ? 'var(--at-atlas-danger)' : v > 210 ? 'var(--at-atlas-warning)' : 'var(--at-atlas-success)';
+function calcBarSeg(used: number | null | undefined, max: number | null | undefined): string {
+  const u = used ?? 0;
+  const m = max && max > 0 ? max : 100;
+  const pct = Math.min(100, Math.round((u / m) * 100));
+  const color = u > m * 0.9 ? 'var(--at-atlas-danger)' : u > m * 0.7 ? 'var(--at-atlas-warning)' : 'var(--at-atlas-success)';
   return `width:${pct}%;background:${color}`;
 }
 function bandSeg(mid: number | undefined, hi: number | undefined, midColor: string, hiColor: string): string {

@@ -388,9 +388,11 @@ async function getPinConversations(accountId: string) {
 // ─── Group Cache ────────────────────────────────────────────────────────────
 const groupInfoCache = new Map<string, { data: any; timestamp: number }>();
 const memberProfileCache = new Map<string, { data: any; timestamp: number }>();
+const userInfoCache = new Map<string, { data: any; timestamp: number }>();
 
 const GROUP_INFO_TTL_MS = 30 * 60 * 1000; // 30 minutes cache for group metadata
 const MEMBER_PROFILE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours cache for member profiles
+const USER_INFO_TTL_MS = 10 * 60 * 1000; // 10 minutes cache for user profiles
 
 function invalidateGroupCache(accountId: string, groupId: string) {
   const cacheKey = `${accountId}:${groupId}`;
@@ -798,9 +800,45 @@ async function blockViewFeed(accountId: string, block: boolean, userId: string) 
 }
 
 // ─── Profile ────────────────────────────────────────────────────────────────
-async function getUserInfo(accountId: string, userId: string) {
-  return exec({ accountId, category: 'query', operation: 'getUserInfo' },
-    (api) => api.getUserInfo(userId));
+async function getUserInfo(accountId: string, userId: string, bypassCache = false) {
+  const cacheKey = `${accountId}:${userId}`;
+  const now = Date.now();
+  if (!bypassCache) {
+    const cached = userInfoCache.get(cacheKey);
+    if (cached && now - cached.timestamp < USER_INFO_TTL_MS) {
+      logger.debug(`[zalo-ops:${accountId}] Cache hit for getUserInfo (user: ${userId})`);
+      return cached.data;
+    }
+    const cachedMember = getCachedMemberProfile(accountId, userId);
+    if (cachedMember) {
+      const mockResult = {
+        changed_profiles: {
+          [userId]: cachedMember
+        }
+      };
+      logger.debug(`[zalo-ops:${accountId}] Cache hit for getUserInfo via memberProfileCache (user: ${userId})`);
+      return mockResult;
+    }
+  }
+
+  const result = (await exec({ accountId, category: 'query', operation: 'getUserInfo' },
+    (api) => api.getUserInfo(userId))) as any;
+
+  if (result) {
+    userInfoCache.set(cacheKey, { data: result, timestamp: now });
+    const profiles = result.changed_profiles || {};
+    const profile = profiles[userId] || profiles[`${userId}_0`];
+    if (profile) {
+      const memberKey = `${accountId}:${userId}`;
+      memberProfileCache.set(memberKey, { data: profile, timestamp: now });
+      const stripped = userId.split('_')[0];
+      if (stripped && stripped !== userId) {
+        memberProfileCache.set(`${accountId}:${stripped}`, { data: profile, timestamp: now });
+        memberProfileCache.set(`${accountId}:${stripped}_0`, { data: profile, timestamp: now });
+      }
+    }
+  }
+  return result;
 }
 
 async function getOwnId(accountId: string) {
