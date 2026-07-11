@@ -7,8 +7,11 @@
       <a :href="attribution.href" target="_blank" rel="noopener">{{ attribution.text }}</a>
     </div>
 
-    <!-- ── Role-tab strip — chỉ hiện khi có quyền >1 tab (sale ẩn) ── -->
-    <div v-if="hub.hasTeamSection.value || hub.hasSystemSection.value" class="at-roletabs">
+    <!-- ── Role-tab strip ── -->
+    <div class="at-roletabs">
+      <button class="at-roletab" :class="{ 'is-active': activeTab === 'overview' }" @click="activeTab = 'overview'">
+        <Activity :size="16" :stroke-width="2" /> Tổng quan
+      </button>
       <button class="at-roletab" :class="{ 'is-active': activeTab === 'me' }" @click="activeTab = 'me'">
         <Target :size="16" :stroke-width="2" /> Việc của tôi
       </button>
@@ -40,6 +43,140 @@
     </div>
 
     <div class="at-dash-body">
+      <!-- ════════════════ TAB TỔNG QUAN ════════════════ -->
+      <div v-show="activeTab === 'overview'" class="dh-tabpanel">
+        <!-- KPI Row -->
+        <div class="at-kpi-grid">
+          <div class="at-kpi-tile at-kpi--danger">
+            <div class="at-kpi-label"><Inbox :size="13" :stroke-width="2" /> Tồn đọng team</div>
+            <div class="at-kpi-value"><PrivVal :split="team?.teamKpi.unreplied" /></div>
+            <div class="at-kpi-sub">Cả PKD chưa rep</div>
+          </div>
+          <div class="at-kpi-tile at-kpi--warn">
+            <div class="at-kpi-label"><CalendarClock :size="13" :stroke-width="2" /> Hẹn team hôm nay</div>
+            <div class="at-kpi-value"><PrivVal :split="team?.teamKpi.todayAppointments" /></div>
+            <div class="at-kpi-sub">Lịch hẹn hôm nay</div>
+          </div>
+          <div class="at-kpi-tile at-kpi--info">
+            <div class="at-kpi-label"><Eye :size="13" :stroke-width="2" /> Phiên theo dõi</div>
+            <div class="at-kpi-value">{{ team?.followSessions?.active ?? 0 }}</div>
+            <div class="at-kpi-sub">{{ team?.followSessions?.replied ?? 0 }} KH vừa rep</div>
+          </div>
+          <div class="at-kpi-tile at-kpi--good">
+            <div class="at-kpi-label"><TrendingUp :size="13" :stroke-width="2" /> Tỷ lệ phản hồi</div>
+            <div class="at-kpi-value">{{ team?.responsePerf?.replyRate ?? 0 }}%</div>
+            <div class="at-kpi-sub">{{ team?.responsePerf?.replied ?? 0 }} / {{ team?.responsePerf?.sent ?? 0 }} tin</div>
+          </div>
+        </div>
+
+        <!-- 2 Column Layout -->
+        <div class="at-dash-grid-2" style="margin-top: 12px">
+          <!-- Left: Đội ngũ -->
+          <div class="at-card">
+            <div class="at-card__head">
+              <div class="at-card__title">
+                <Users :size="14" :stroke-width="2" /> Hiệu suất hoạt động hôm nay ({{ team?.perUser.length ?? 0 }} nhân viên)
+              </div>
+            </div>
+            <table class="at-table">
+              <thead>
+                <tr>
+                  <th>Nhân viên</th>
+                  <th class="num">Chưa rep</th>
+                  <th class="num" style="color: var(--at-action-hover, #2563eb)">Rep hôm nay</th>
+                  <th class="num">Hẹn</th>
+                  <th class="num" style="color: var(--at-purple-hover, #7c3aed)">Hoạt động</th>
+                  <th class="num">KH</th>
+                  <th class="num">Chốt tuần</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="u in team?.perUser ?? []" :key="u.userId">
+                  <td>
+                    <div class="at-tname">
+                      <Avatar :src="u.avatarUrl" :name="u.fullName" :size="26" :gradient-seed="u.userId" />
+                      {{ firstName(u.fullName) }}
+                      <span v-if="u.userId === team?.topUser?.userId" class="at-name-tag"><Star :size="9" :stroke-width="2.5" /> Top</span>
+                      <span v-if="u.hasPrivateNick" class="at-name-lock"><Lock :size="10" :stroke-width="2" />{{ u.privateNickCount }}</span>
+                    </div>
+                  </td>
+                  <td class="num"><PrivVal :split="u.unreplied" /></td>
+                  <td class="num" style="font-weight:600;color:var(--at-action)">{{ u.repliedToday ?? 0 }}</td>
+                  <td class="num"><PrivVal :split="u.todayAppointments" /></td>
+                  <td class="num" style="font-weight:600;color:var(--at-purple)">{{ u.activeHoursToday ?? 0 }}h</td>
+                  <td class="num">{{ u.totalContacts }}</td>
+                  <td class="num" :style="u.closedThisWeek > 0 ? 'color:var(--at-atlas-success)' : ''">{{ u.closedThisWeek }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Right: Quota & Zalo Limits -->
+          <div class="at-dash-col">
+            <!-- Quota nick -->
+            <div class="at-card">
+              <div class="at-card__head">
+                <div class="at-card__title">
+                  <Zap :size="14" :stroke-width="2" /> Quota nick hôm nay (Mọi người cùng theo dõi)
+                </div>
+              </div>
+              <div class="at-quota">
+                <div v-for="n in me?.quotaNicks ?? []" :key="n.id" class="at-quota__line mb-4" style="border-bottom: 1px solid var(--at-hairline, #eef2f6); padding-bottom: 12px;">
+                  <div class="at-quota__top mb-1">
+                    <span class="at-quota__nm" :style="n.isPrivate ? 'color:var(--at-atlas-warning)' : ''">
+                      <Lock v-if="n.isPrivate" :size="12" :stroke-width="2" />{{ n.displayName }}
+                    </span>
+                  </div>
+
+                  <div v-if="!n.isPrivate" class="pl-2">
+                    <!-- 1. Quota Tin nhắn -->
+                    <div class="mb-2">
+                      <div class="at-quota__top" style="font-size: 11px; margin-bottom: 2px;">
+                        <span style="color: var(--at-body)">💬 Tin nhắn đã gửi</span>
+                        <span class="at-quota__vl">{{ n.messagesToday ?? 0 }}/{{ n.messagesLimit ?? 200 }}</span>
+                      </div>
+                      <div class="at-bar">
+                        <div class="at-bar__seg" :style="calcBarSeg(n.messagesToday, n.messagesLimit || 200)"></div>
+                      </div>
+                    </div>
+
+                    <!-- 2. Gia nhập nhóm -->
+                    <div class="mb-2">
+                      <div class="at-quota__top" style="font-size: 11px; margin-bottom: 2px;">
+                        <span style="color: var(--at-body)">👥 Nhóm đã gia nhập</span>
+                        <span class="at-quota__vl">{{ n.groupAdminToday ?? 0 }}/{{ n.groupAdminLimit ?? 50 }}</span>
+                      </div>
+                      <div class="at-bar">
+                        <div class="at-bar__seg" :style="calcBarSeg(n.groupAdminToday, n.groupAdminLimit || 50)"></div>
+                      </div>
+                    </div>
+
+                    <!-- 3. Quét/Sync nhóm -->
+                    <div>
+                      <div class="at-quota__top" style="font-size: 11px; margin-bottom: 2px;">
+                        <span style="color: var(--at-body)">🔍 Tải thông tin nhóm</span>
+                        <span class="at-quota__vl">{{ n.groupReadToday ?? 0 }}/{{ n.groupReadLimit ?? 1000 }}</span>
+                      </div>
+                      <div class="at-bar">
+                        <div class="at-bar__seg" :style="calcBarSeg(n.groupReadToday, n.groupReadLimit || 1000)"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-else class="at-bar mt-1">
+                    <div class="at-bar__seg" style="width:100%;background:repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#f1f5f9 4px,#f1f5f9 8px)"></div>
+                  </div>
+                </div>
+                <div v-if="!me?.quotaNicks.length" class="at-empty"><div class="at-empty__title">Chưa có nick</div></div>
+              </div>
+            </div>
+
+            <!-- Rate Limiter Card -->
+            <ZaloRateLimiterCard />
+          </div>
+        </div>
+      </div>
+
       <!-- ════════════════ TAB 1 — VIỆC CỦA TÔI ════════════════ -->
       <div v-show="activeTab === 'me'" class="dh-tabpanel">
         <!-- Greeting -->
@@ -531,8 +668,8 @@ const me = computed(() => hub.me.value);
 const team = computed(() => hub.team.value);
 const system = computed(() => hub.system.value);
 
-// Tab state — mặc định 'me'. Sale chỉ có me (thanh tab ẩn).
-const activeTab = ref<'me' | 'team' | 'system'>('me');
+// Tab state — mặc định 'overview'.
+const activeTab = ref<'overview' | 'me' | 'team' | 'system'>('overview');
 
 // Picker state
 const userPickerOpen = ref(false);
