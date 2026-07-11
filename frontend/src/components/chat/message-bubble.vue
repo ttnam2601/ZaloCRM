@@ -692,7 +692,10 @@ const receiptTooltip = computed<string>(() => {
   switch (receiptState.value) {
     case 'seen': {
       if (m.seenDetails && m.seenDetails.length > 0) {
-        return `Đã xem bởi ${m.seenDetails.length} người`;
+        const details = m.seenDetails
+          .map(sd => `${sd.name || 'Thành viên'} (lúc ${formatTime(sd.seenAt)})`)
+          .join(', ');
+        return `Đã xem bởi: ${details}`;
       }
       const viewer = props.recipientName || 'KH';
       return `${viewer} đã xem${m.seenAt ? ' lúc ' + formatTime(m.seenAt) : ''}`;
@@ -711,10 +714,24 @@ const receiptLabel = computed<string>(() => {
   switch (receiptState.value) {
     case 'seen': {
       if (m.seenDetails && m.seenDetails.length > 0) {
-        return `Đã xem (${m.seenDetails.length})`;
+        const names = m.seenDetails.map(sd => sd.name || 'Thành viên').filter(Boolean);
+        const latestTime = m.seenDetails.reduce((max, cur) => {
+          if (!cur.seenAt) return max;
+          return !max || new Date(cur.seenAt).getTime() > new Date(max).getTime() ? cur.seenAt : max;
+        }, null as string | null);
+        
+        const timeStr = latestTime ? ` lúc ${formatTime(latestTime)}` : '';
+
+        if (names.length === 1) {
+          return `${names[0]} đã xem${timeStr}`;
+        } else if (names.length === 2) {
+          return `${names[0]}, ${names[1]} đã xem${timeStr}`;
+        } else {
+          return `${names[0]}, ${names[1]} và ${names.length - 2} người khác đã xem${timeStr}`;
+        }
       }
       const viewer = props.recipientName || 'KH';
-      return m.seenAt ? `${viewer} đã xem ${formatTime(m.seenAt)}` : `${viewer} đã xem`;
+      return m.seenAt ? `${viewer} đã xem lúc ${formatTime(m.seenAt)}` : `${viewer} đã xem`;
     }
     case 'delivered': return 'Đã nhận';
     case 'sending':   return 'Đang gửi';
