@@ -15,6 +15,7 @@ import { handleFriendEvent } from './friend-event-handler.js';
 import { refreshGroupInfoNow } from './group-info-refresh.js';
 import { consumeIfExpected as consumeReactionEcho } from '../chat/reaction-echo-cache.js';
 import { emitChatMessage } from '../../shared/realtime/emit-chat.js';
+import { getCachedMemberProfile } from '../../shared/zalo-operations.js';
 import { notifyNewInboundMessage } from '../push/push-service.js';
 
 // Map Zalo Reactions enum code → display emoji (cùng map với chat-operations-routes)
@@ -491,6 +492,60 @@ export function attachZaloListener(ctx: ListenerContext): void {
           logger.info(`[zalo:${accountId}] 🟢 SEEN anchor not found msgId=${anchorMsgId} threadId=${m?.threadId}`);
           continue;
         }
+
+        // --- GROUP SEEN DETAILS REALTIME UPDATE ---
+        const conversation = await prisma.conversation.findUnique({
+          where: { id: anchor.conversationId },
+          select: { threadType: true, zaloAccountId: true, orgId: true }
+        });
+        
+        let activeSeenDetails: any = null;
+        if (conversation && conversation.threadType === 'group') {
+          const readerUid = String(m?.data?.uid || m?.data?.uidFrom || '');
+          if (readerUid && readerUid !== accountId) {
+            const currentMsg = await prisma.message.findUnique({
+              where: { id: anchor.id },
+              select: { seenDetails: true }
+            });
+            let detailsList: Array<{ uid: string; name: string; seenAt: string }> = [];
+            if (currentMsg?.seenDetails && Array.isArray(currentMsg.seenDetails)) {
+              detailsList = currentMsg.seenDetails as any;
+            }
+            const exists = detailsList.some(d => d.uid === readerUid);
+            if (!exists) {
+              let name = 'Thành viên';
+              const cachedProfile = getCachedMemberProfile(conversation.zaloAccountId, readerUid);
+              if (cachedProfile) {
+                name = cachedProfile.displayName || cachedProfile.name || cachedProfile.dName || cachedProfile.zaloName || name;
+              }
+              detailsList.push({
+                uid: readerUid,
+                name,
+                seenAt: now.toISOString()
+              });
+              
+              await prisma.message.update({
+                where: { id: anchor.id },
+                data: { seenDetails: detailsList }
+              });
+              activeSeenDetails = detailsList;
+            }
+          }
+        }
+
+        if (activeSeenDetails) {
+          await emitOrg('zalo:message-status', {
+            accountId,
+            conversationId: anchor.conversationId,
+            messageId: anchor.id,
+            zaloMsgId: anchorMsgId,
+            deliveredAt: now,
+            seenAt: now,
+            seenDetails: activeSeenDetails,
+          });
+        }
+        // ------------------------------------------
+
         const updated = await prisma.message.updateMany({
           where: {
             conversationId: anchor.conversationId,

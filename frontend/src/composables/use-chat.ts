@@ -1108,6 +1108,7 @@ export function useChat() {
       zaloMsgId?: string | null;
       deliveredAt?: string | null;
       seenAt?: string | null;
+      seenDetails?: any[] | null;
     }) => {
       // Update local messages cache nếu đang mở conv đúng
       if (messagesConvId.value === data.conversationId) {
@@ -1117,6 +1118,7 @@ export function useChat() {
         if (msg) {
           msg.deliveredAt = data.deliveredAt ?? msg.deliveredAt;
           msg.seenAt = data.seenAt ?? msg.seenAt;
+          if (data.seenDetails) msg.seenDetails = data.seenDetails;
         }
       }
       // Patch persistent cache (lần sau quay lại conv vẫn thấy status đúng)
@@ -1128,6 +1130,7 @@ export function useChat() {
         if (msg) {
           msg.deliveredAt = data.deliveredAt ?? msg.deliveredAt;
           msg.seenAt = data.seenAt ?? msg.seenAt;
+          if (data.seenDetails) msg.seenDetails = data.seenDetails;
         }
       }
     });
