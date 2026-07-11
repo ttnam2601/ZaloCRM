@@ -697,10 +697,16 @@ const receiptTooltip = computed<string>(() => {
           .join(', ');
         return `Đã xem bởi: ${details}`;
       }
+      if (props.isGroup) {
+        return `Thành viên nhóm đã xem${m.seenAt ? ' lúc ' + formatTime(m.seenAt) : ''}`;
+      }
       const viewer = props.recipientName || 'KH';
       return `${viewer} đã xem${m.seenAt ? ' lúc ' + formatTime(m.seenAt) : ''}`;
     }
     case 'delivered': {
+      if (props.isGroup) {
+        return `Đã gửi tới nhóm${m.deliveredAt ? ' lúc ' + formatTime(m.deliveredAt) : ''}`;
+      }
       const viewer = props.recipientName || 'KH';
       return `Đã gửi tới ${viewer}${m.deliveredAt ? ' lúc ' + formatTime(m.deliveredAt) : ''}`;
     }
@@ -729,6 +735,9 @@ const receiptLabel = computed<string>(() => {
         } else {
           return `${names[0]}, ${names[1]} và ${names.length - 2} người khác đã xem${timeStr}`;
         }
+      }
+      if (props.isGroup) {
+        return m.seenAt ? `Đã xem lúc ${formatTime(m.seenAt)}` : 'Đã xem';
       }
       const viewer = props.recipientName || 'KH';
       return m.seenAt ? `${viewer} đã xem lúc ${formatTime(m.seenAt)}` : `${viewer} đã xem`;
