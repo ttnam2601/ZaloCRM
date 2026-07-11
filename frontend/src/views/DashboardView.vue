@@ -91,7 +91,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="u in team?.perUser ?? []" :key="u.userId">
+                <tr v-for="u in sortedPerUser" :key="u.userId">
                   <td>
                     <div class="at-tname">
                       <Avatar :src="u.avatarUrl" :name="u.fullName" :size="26" :gradient-seed="u.userId" />
@@ -513,7 +513,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="u in team?.perUser ?? []" :key="u.userId">
+              <tr v-for="u in sortedPerUser" :key="u.userId">
                 <td>
                   <div class="at-tname">
                     <Avatar :src="u.avatarUrl" :name="u.fullName" :size="26" :gradient-seed="u.userId" />
@@ -667,6 +667,11 @@ const hub = useDashboardActionHub();
 const me = computed(() => hub.me.value);
 const team = computed(() => hub.team.value);
 const system = computed(() => hub.system.value);
+
+const sortedPerUser = computed(() => {
+  if (!team.value?.perUser) return [];
+  return [...team.value.perUser].sort((a, b) => (b.repliedToday ?? 0) - (a.repliedToday ?? 0));
+});
 
 // Tab state — mặc định 'overview'.
 const activeTab = ref<'overview' | 'me' | 'team' | 'system'>('overview');

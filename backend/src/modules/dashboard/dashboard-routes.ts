@@ -217,4 +217,49 @@ export async function dashboardRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'Failed to fetch appointment stats' });
     }
   });
+
+  // GET /api/v1/dashboard/zalo-rate
+  app.get('/api/v1/dashboard/zalo-rate', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const viewer = request.user!;
+      const userId = (viewer as any).userId ?? viewer.id;
+      
+      const { getZaloScope } = await import('../zalo/zalo-scope.js');
+      const { zaloRateLimiter } = await import('../zalo/zalo-rate-limiter.js');
+      const { ALL_CATEGORIES, getEffectiveLimit } = await import('../zalo/sdk-limit-service.js');
+      
+      const scope = await getZaloScope(userId, viewer.orgId, viewer.role);
+      const accounts = await prisma.zaloAccount.findMany({
+        where: { orgId: viewer.orgId, id: { in: scope.accessibleIds }, archivedAt: null },
+        select: { id: true, displayName: true, phone: true },
+      });
+      
+      const data = await Promise.all(
+        accounts.map(async (acc) => {
+          const counts = await zaloRateLimiter.getAllDailyCounts(acc.id);
+          const rates: Record<string, { current: number; max: number }> = {};
+          
+          for (const cat of ALL_CATEGORIES) {
+            const limit = await getEffectiveLimit(acc.id, cat);
+            rates[cat] = {
+              current: counts[cat] ?? 0,
+              max: limit.daily,
+            };
+          }
+          
+          return {
+            accountId: acc.id,
+            displayName: acc.displayName || 'Tài khoản Zalo',
+            phone: acc.phone || '',
+            rates,
+          };
+        })
+      );
+      
+      return { data };
+    } catch (err) {
+      logger.error('[dashboard] Zalo rate error:', err);
+      return reply.status(500).send({ error: 'Failed to fetch Zalo rate data' });
+    }
+  });
 }
