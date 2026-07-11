@@ -132,6 +132,8 @@ export interface TeamUser {
   todayAppointments: PrivacySplit;
   totalContacts: number;
   closedThisWeek: number;
+  repliedToday?: number;
+  activeHoursToday?: number;
 }
 
 export interface TeamResponse {
@@ -210,13 +212,10 @@ export function useDashboardActionHub() {
   const loadingTeam = ref(false);
   const loadingSystem = ref(false);
 
-  // Role gating — section render quyết định ở component, đây chỉ helper.
-  // 2026-06-11 Dashboard v4: /profile giờ trả deptRole + canViewAll → auth.isManager
-  // (leader/deputy/admin/grant view_all) quyết tab "Quản lý team". /team + /system
-  // VẪN enforce RBAC ở server (requireGrant + getOwnerScope) — đây chỉ ẩn/hiện tab.
+  // Role gating — Now public for all organization members.
   const isAdmin = computed(() => auth.isAdmin);
-  const hasTeamSection = computed(() => auth.isManager);
-  const hasSystemSection = computed(() => isAdmin.value);
+  const hasTeamSection = computed(() => true);
+  const hasSystemSection = computed(() => true);
 
   async function fetchMe(asUserId?: string | null) {
     loadingMe.value = true;

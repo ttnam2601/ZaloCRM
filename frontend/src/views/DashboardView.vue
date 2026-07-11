@@ -363,7 +363,18 @@
         <div class="at-card" style="margin-bottom:12px">
           <div class="at-card__head"><div class="at-card__title"><Users :size="14" :stroke-width="2" /> Đội ngũ ({{ team?.perUser.length ?? 0 }} nhân viên)</div></div>
           <table class="at-table">
-            <thead><tr><th>Nhân viên</th><th class="num">Chưa rep</th><th class="num">Hẹn</th><th class="num">KH</th><th class="num">Chốt tuần</th><th></th></tr></thead>
+            <thead>
+              <tr>
+                <th>Nhân viên</th>
+                <th class="num">Chưa rep</th>
+                <th class="num" style="color: var(--at-action-hover, #2563eb)">Rep hôm nay</th>
+                <th class="num">Hẹn</th>
+                <th class="num" style="color: var(--at-purple-hover, #7c3aed)">Hoạt động</th>
+                <th class="num">KH</th>
+                <th class="num">Chốt tuần</th>
+                <th></th>
+              </tr>
+            </thead>
             <tbody>
               <tr v-for="u in team?.perUser ?? []" :key="u.userId">
                 <td>
@@ -375,7 +386,9 @@
                   </div>
                 </td>
                 <td class="num"><PrivVal :split="u.unreplied" /></td>
+                <td class="num" style="font-weight:600;color:var(--at-action)">{{ u.repliedToday ?? 0 }}</td>
                 <td class="num"><PrivVal :split="u.todayAppointments" /></td>
+                <td class="num" style="font-weight:600;color:var(--at-purple)">{{ u.activeHoursToday ?? 0 }}h</td>
                 <td class="num">{{ u.totalContacts }}</td>
                 <td class="num" :style="u.closedThisWeek > 0 ? 'color:var(--at-atlas-success)' : ''">{{ u.closedThisWeek }}</td>
                 <td><span class="at-miniact" @click="selectUser(u.userId); activeTab = 'me'">Xem <ChevronDown :size="12" :stroke-width="2" style="transform:rotate(-90deg)" /></span></td>

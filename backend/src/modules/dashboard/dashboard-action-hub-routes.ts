@@ -503,48 +503,78 @@ export async function dashboardActionHubRoutes(app: FastifyInstance): Promise<vo
       const viewer = request.user!;
       const query = request.query as { deptIds?: string };
 
-      // Required grant: contact.view_all (CEO/Trưởng phòng/Admin/Marketing có)
-      const canViewTeam = await userHasGrant(viewer.id, 'contact', 'view_all').catch(() => false);
-      const isAdminLike = viewer.role === 'owner' || viewer.role === 'admin';
-      if (!canViewTeam && !isAdminLike) {
-        return reply.status(403).send({
-          error: 'Section "Quản lý team" yêu cầu quyền view_all trên contact',
-          code: 'DASHBOARD_TEAM_FORBIDDEN',
-        });
-      }
-
-      // Resolve scope: visible users = self + dept subtree members
-      const scope = await getOwnerScope({
-        userId: viewer.id,
-        orgId: viewer.orgId,
-        legacyRole: viewer.role,
-        resource: 'contact',
-      });
-
-      // Filter by deptIds nếu admin pass — kiểm tra mỗi dept ∈ allowed scope
+      // Required grant: public for all organization members.
       let visibleUserIds: string[];
-      if (scope.canViewAll) {
-        if (query.deptIds) {
-          const deptIds = query.deptIds.split(',').filter(Boolean);
-          const members = await prisma.departmentMember.findMany({
-            where: { department: { orgId: viewer.orgId, id: { in: deptIds } } },
-            select: { userId: true },
-          });
-          visibleUserIds = members.map((m) => m.userId);
-        } else {
-          // canViewAll + no deptIds → all users in org
-          const allUsers = await prisma.user.findMany({
-            where: { orgId: viewer.orgId },
-            select: { id: true },
-          });
-          visibleUserIds = allUsers.map((u) => u.id);
-        }
+      if (query.deptIds) {
+        const deptIds = query.deptIds.split(',').filter(Boolean);
+        const members = await prisma.departmentMember.findMany({
+          where: { department: { orgId: viewer.orgId, id: { in: deptIds } } },
+          select: { userId: true },
+        });
+        visibleUserIds = members.map((m) => m.userId);
       } else {
-        visibleUserIds = scope.visibleUserIds;
+        const allUsers = await prisma.user.findMany({
+          where: { orgId: viewer.orgId },
+          select: { id: true },
+        });
+        visibleUserIds = allUsers.map((u) => u.id);
       }
 
       const { today, tomorrow } = todayRangeVN();
       const weekAgo = new Date(today.getTime() - 7 * 86400000);
+
+      // --- BATCH QUERY DAILY PERFORMANCE ---
+      const messagesSentToday = await prisma.message.groupBy({
+        by: ['repliedByUserId'],
+        where: {
+          conversation: { orgId: viewer.orgId },
+          senderType: 'self',
+          sentAt: { gte: today, lt: tomorrow },
+          repliedByUserId: { not: null },
+        },
+        _count: true,
+      });
+      const msgCountByUser = new Map<string, number>(
+        messagesSentToday.map((g) => [g.repliedByUserId!, g._count]),
+      );
+
+      const logsToday = await prisma.activityLog.findMany({
+        where: {
+          orgId: viewer.orgId,
+          actorType: 'user',
+          userId: { not: null },
+          createdAt: { gte: today, lt: tomorrow },
+        },
+        select: { userId: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      const logTimestampsByUser = new Map<string, number[]>();
+      for (const l of logsToday) {
+        if (l.userId) {
+          let arr = logTimestampsByUser.get(l.userId);
+          if (!arr) {
+            arr = [];
+            logTimestampsByUser.set(l.userId, arr);
+          }
+          arr.push(l.createdAt.getTime());
+        }
+      }
+
+      const calculateActiveHours = (ts: number[]): number => {
+        if (!ts.length) return 0;
+        const GAP = 30 * 60_000;
+        const FLOOR = 5 * 60_000;
+        let ms = 0, sStart = ts[0], prev = ts[0];
+        for (let i = 1; i < ts.length; i++) {
+          if (ts[i] - prev > GAP) {
+            ms += Math.max(FLOOR, prev - sStart);
+            sStart = ts[i];
+          }
+          prev = ts[i];
+        }
+        return ms + Math.max(FLOOR, prev - sStart);
+      };
+      // -------------------------------------
 
       // Per-user breakdown — bảng team table
       const usersInScope = await prisma.user.findMany({
@@ -613,6 +643,10 @@ export async function dashboardActionHubRoutes(app: FastifyInstance): Promise<vo
             where: { orgId: viewer.orgId, ownerUserId: u.id, privacyMode: 'main', archivedAt: null },
           });
 
+          const repliedToday = msgCountByUser.get(u.id) || 0;
+          const userTimestamps = logTimestampsByUser.get(u.id) || [];
+          const activeHoursToday = Math.round((calculateActiveHours(userTimestamps) / 3600_000) * 10) / 10;
+
           return {
             userId: u.id,
             fullName: u.fullName,
@@ -626,6 +660,8 @@ export async function dashboardActionHubRoutes(app: FastifyInstance): Promise<vo
             todayAppointments: apptSplit,
             totalContacts: contactsCount,
             closedThisWeek: closedWeek,
+            repliedToday,
+            activeHoursToday,
           };
         }),
       );
@@ -678,7 +714,7 @@ export async function dashboardActionHubRoutes(app: FastifyInstance): Promise<vo
 
       return {
         scope: {
-          canViewAll: scope.canViewAll,
+          canViewAll: true,
           deptIds: query.deptIds?.split(',') ?? [],
           userCount: usersInScope.length,
         },
@@ -712,13 +748,7 @@ export async function dashboardActionHubRoutes(app: FastifyInstance): Promise<vo
   ) => {
     try {
       const viewer = request.user!;
-      const isAdminLike = viewer.role === 'owner' || viewer.role === 'admin';
-      if (!isAdminLike) {
-        return reply.status(403).send({
-          error: 'Section "Quản lý hệ thống" chỉ dành cho admin/owner',
-          code: 'DASHBOARD_SYSTEM_FORBIDDEN',
-        });
-      }
+      // Required grant: public for all organization members.
 
       const { today, tomorrow } = todayRangeVN();
       const monthStart = monthStartVN();
