@@ -394,6 +394,8 @@ const props = defineProps<{
   prevMessage?: Message | null;
   /** M55 2026-05-30 — viewer userId để phân biệt "tin mình gửi" vs "tin sale khác cùng chăm gửi" */
   currentUserId?: string | null;
+  /** Tên của khách hàng (recipient) trong chat 1-1 để hiển thị trạng thái đã xem */
+  recipientName?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -692,9 +694,13 @@ const receiptTooltip = computed<string>(() => {
       if (m.seenDetails && m.seenDetails.length > 0) {
         return `Đã xem bởi ${m.seenDetails.length} người`;
       }
-      return `KH đã xem${m.seenAt ? ' lúc ' + formatTime(m.seenAt) : ''}`;
+      const viewer = props.recipientName || 'KH';
+      return `${viewer} đã xem${m.seenAt ? ' lúc ' + formatTime(m.seenAt) : ''}`;
     }
-    case 'delivered': return `Đã gửi tới KH${m.deliveredAt ? ' lúc ' + formatTime(m.deliveredAt) : ''}`;
+    case 'delivered': {
+      const viewer = props.recipientName || 'KH';
+      return `Đã gửi tới ${viewer}${m.deliveredAt ? ' lúc ' + formatTime(m.deliveredAt) : ''}`;
+    }
     case 'sending':   return 'Đang gửi...';
     default:          return '';
   }
@@ -707,7 +713,8 @@ const receiptLabel = computed<string>(() => {
       if (m.seenDetails && m.seenDetails.length > 0) {
         return `Đã xem (${m.seenDetails.length})`;
       }
-      return m.seenAt ? `Đã xem ${formatTime(m.seenAt)}` : 'Đã xem';
+      const viewer = props.recipientName || 'KH';
+      return m.seenAt ? `${viewer} đã xem ${formatTime(m.seenAt)}` : `${viewer} đã xem`;
     }
     case 'delivered': return 'Đã nhận';
     case 'sending':   return 'Đang gửi';

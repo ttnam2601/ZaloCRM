@@ -310,14 +310,15 @@ export async function groupModerationRoutes(app: FastifyInstance) {
         });
       }
 
+      const userDetails = await prisma.user.findUnique({
+        where: { id: request.user!.id },
+        select: { fullName: true, email: true },
+      });
+      const userName = userDetails?.fullName || userDetails?.email || 'Hệ thống';
+
       // 5. Write join system message (same style as leave message)
       if (!alreadyMember) {
         try {
-          const userDetails = await prisma.user.findUnique({
-            where: { id: request.user!.id },
-            select: { fullName: true, email: true },
-          });
-          const userName = userDetails?.fullName || userDetails?.email || 'Hệ thống';
           const formattedTime = formatVNTime(joinedAt);
           const message = await prisma.message.create({
             data: {
@@ -351,9 +352,38 @@ export async function groupModerationRoutes(app: FastifyInstance) {
       // 6. Send welcome message if requested and we weren't already a member
       if (welcomeMessage && welcomeMessage.trim() && !alreadyMember) {
         try {
-          await zaloOps.sendMessage(accountId, finalGrid, 1, { msg: welcomeMessage.trim() });
+          const sendResult = await zaloOps.sendMessage(accountId, finalGrid, 1, { msg: welcomeMessage.trim() });
+          const sr = sendResult as any;
+          const rawId = sr?.message?.msgId ?? sr?.attachment?.[0]?.msgId ?? '';
+          const zaloMsgId = String(rawId || '');
+          const zaloMsgIdNum = zaloMsgId && /^\d+$/.test(zaloMsgId) ? BigInt(zaloMsgId) : null;
+
+          // Save the outgoing message to the database immediately, attributing it to the CRM user who triggered it (repliedByUserId).
+          // This ensures that when Zalo sends the message echo webhook, it is matched and the sender name displays the correct sale.
+          await prisma.message.create({
+            data: {
+              id: randomUUID(),
+              conversationId: existingConv.id,
+              zaloMsgId: zaloMsgId || null,
+              zaloMsgIdNum: zaloMsgIdNum,
+              senderType: 'self',
+              senderUid: accountId,
+              senderName: userName,
+              content: welcomeMessage.trim(),
+              contentType: 'text',
+              sentAt: new Date(),
+              sentVia: 'user',
+              repliedByUserId: request.user!.id,
+              metadata: {
+                sender: {
+                  kind: 'user_crm',
+                  name: userName
+                }
+              }
+            }
+          });
         } catch (msgErr) {
-          logger.error('[groups] Failed to send welcome message after joining:', msgErr);
+          logger.error('[groups] Failed to send welcome message and save to CRM after joining:', msgErr);
         }
       }
 

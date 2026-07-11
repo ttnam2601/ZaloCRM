@@ -498,6 +498,7 @@
               :is-group="conversation.threadType === 'group'"
               :sender-avatar-url="resolveSenderAvatar(item.msg)"
               :current-user-id="currentUserId"
+              :recipient-name="conversation.contact?.fullName || 'KH'"
               @contextmenu="onContextMenu($event, item.msg)"
               @preview-image="openImageLightbox($event, [])"
               @preview-video="onPreviewVideo"
