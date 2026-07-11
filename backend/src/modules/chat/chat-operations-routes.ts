@@ -267,9 +267,15 @@ export async function chatOperationsRoutes(app: FastifyInstance) {
     if (!refs) return reply.status(404).send({ error: 'Message not found' });
 
     const displayEmoji = reactionDisplay(reaction);
-    await prisma.messageReaction.deleteMany({
+    const activeReactions = await prisma.messageReaction.findMany({
       where: { messageId: refs.messageId, reactorId: user.id, emoji: displayEmoji },
     });
+    for (const ar of activeReactions) {
+      await prisma.messageReaction.update({
+        where: { id: ar.id },
+        data: { emoji: `removed:${ar.emoji}` },
+      });
+    }
     // ANTI-DRIFT FIX 2026-05-22: emit totalCount post-delete.
     const newCount = await prisma.messageReaction.count({
       where: { messageId: refs.messageId, emoji: displayEmoji },

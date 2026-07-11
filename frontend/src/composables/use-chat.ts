@@ -68,7 +68,7 @@ export interface ReplyMessageRef {
 
 interface RawMessage extends Omit<Message, 'reactions' | 'reply' | 'reactionDetails'> {
   quote?: ReplyMessageRef | null;
-  reactions?: Array<{ emoji: string; reactorId: string; reactorName?: string | null; reactorSource?: string | null; reactorAvatar?: string | null; count?: number; reacted?: boolean }>;
+  reactions?: Array<{ emoji: string; reactorId: string; reactorName?: string | null; reactorSource?: string | null; reactorAvatar?: string | null; count?: number; reacted?: boolean; createdAt?: string | null }>;
 }
 
 export interface FriendshipInfo {
@@ -450,6 +450,7 @@ export function useChat() {
     const myEmojis = new Set<string>();
     const myId = authStore.user?.id || '';
     for (const reaction of message.reactions || []) {
+      if (reaction.emoji.startsWith('removed:')) continue;
       counts.set(reaction.emoji, (counts.get(reaction.emoji) || 0) + 1);
       if (myId && reaction.reactorId === myId) myEmojis.add(reaction.emoji);
     }
@@ -498,13 +499,19 @@ export function useChat() {
       reply,
       reactions: Array.from(counts.entries()).map(([emoji, count]) => ({ emoji, count, reacted: myEmojis.has(emoji) })),
       // 2026-06-20: GIỮ per-user rows (reactorName từ BE) cho popup chi tiết — không vứt như trước.
-      reactionDetails: (message.reactions || []).map((r) => ({
-        reactorId: r.reactorId,
-        reactorName: r.reactorName ?? null,
-        reactorSource: r.reactorSource ?? null,
-        reactorAvatar: r.reactorAvatar ?? null,
-        emoji: r.emoji,
-      })),
+      reactionDetails: (message.reactions || []).map((r) => {
+        const isRemoved = r.emoji.startsWith('removed:');
+        const displayEmoji = isRemoved ? r.emoji.substring(8) : r.emoji;
+        return {
+          reactorId: r.reactorId,
+          reactorName: r.reactorName ?? null,
+          reactorSource: r.reactorSource ?? null,
+          reactorAvatar: r.reactorAvatar ?? null,
+          emoji: displayEmoji,
+          isRemoved,
+          createdAt: r.createdAt ?? null,
+        };
+      }),
     };
   }
 

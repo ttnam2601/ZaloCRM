@@ -50,14 +50,17 @@
               {{ initials(u.name) }}
             </span>
             <div class="user-info">
-              <div class="user-name">{{ u.name }}</div>
+              <div class="user-name" :style="u.isRemoved ? { textDecoration: 'line-through', opacity: 0.6 } : {}">
+                {{ u.name }}
+                <span v-if="u.isRemoved" style="font-size: 10px; color: #ef4444; margin-left: 4px; font-weight: normal;">(Đã gỡ)</span>
+              </div>
               <div class="user-meta">
                 <span v-if="u.source" class="user-source">{{ u.source === 'zalo' ? 'Từ Zalo App' : 'Từ CRM' }}</span>
                 <span v-if="u.createdAt" class="user-time">· {{ formatReactionTime(u.createdAt) }}</span>
               </div>
             </div>
             <div class="user-emojis">
-              <span v-for="e in u.emojis" :key="e" class="user-emoji">{{ e }}</span>
+              <span v-for="e in u.emojis" :key="e" class="user-emoji" :style="u.isRemoved ? { opacity: 0.5 } : {}">{{ e }}</span>
               <span class="user-emoji-count">{{ u.emojis.length }}</span>
             </div>
           </div>
@@ -77,6 +80,7 @@ interface ReactionDetail {
   emoji: string;
   source?: 'crm' | 'zalo';
   createdAt?: string | null;
+  isRemoved?: boolean;
 }
 
 const props = defineProps<{
@@ -108,7 +112,7 @@ const reactionsSorted = computed(() => {
 
 // Group details by userId → user row với list emoji
 const groupedUsers = computed(() => {
-  const map = new Map<string, { userId: string; name: string; source?: 'crm' | 'zalo'; emojis: string[]; createdAt: string | null }>();
+  const map = new Map<string, { userId: string; name: string; source?: 'crm' | 'zalo'; emojis: string[]; createdAt: string | null; isRemoved?: boolean }>();
   for (const d of props.details ?? []) {
     const existing = map.get(d.userId);
     if (existing) {
@@ -120,6 +124,7 @@ const groupedUsers = computed(() => {
         source: d.source,
         emojis: [d.emoji],
         createdAt: d.createdAt || null,
+        isRemoved: d.isRemoved,
       });
     }
   }

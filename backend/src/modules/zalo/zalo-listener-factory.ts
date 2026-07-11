@@ -89,10 +89,23 @@ async function handleZaloReaction(accountId: string, io: Server | null, reaction
 
     // rIcon rỗng = remove, có icon = add (Zalo gửi cùng 1 event cho cả 2 — phân biệt qua rIcon empty)
     if (!rawIcon || rType < 0) {
-      // Remove tất cả emoji của reactor này trên message (Zalo client chỉ giữ 1 emoji per user)
-      await prisma.messageReaction.deleteMany({
-        where: { messageId: message.id, reactorId: reactorZaloUid, reactorSource: 'zalo' },
+      // Soft-remove all active emojis by prefixing 'removed:' to preserve timestamps & rows in database
+      const activeReactions = await prisma.messageReaction.findMany({
+        where: {
+          messageId: message.id,
+          reactorId: reactorZaloUid,
+          reactorSource: 'zalo',
+          NOT: {
+            emoji: { startsWith: 'removed:' }
+          }
+        }
       });
+      for (const ar of activeReactions) {
+        await prisma.messageReaction.update({
+          where: { id: ar.id },
+          data: { emoji: `removed:${ar.emoji}` }
+        });
+      }
     } else {
       await prisma.messageReaction.upsert({
         where: {

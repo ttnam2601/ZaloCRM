@@ -1141,7 +1141,7 @@ function onPrivacyUnlocked() {
 // Reaction detail popup state
 const reactionPopupOpen = ref(false);
 const reactionPopupReactions = ref<Array<{ emoji: string; count: number; reacted: boolean }>>([]);
-const reactionPopupDetails = ref<Array<{ userId: string; userName?: string | null; emoji: string; source?: 'crm' | 'zalo'; avatarUrl?: string | null }>>([]);
+const reactionPopupDetails = ref<Array<{ userId: string; userName?: string | null; emoji: string; source?: 'crm' | 'zalo'; avatarUrl?: string | null; createdAt?: string | null }>>([]);
 function onOpenReactionDetail(payload: { reactions: any[]; message: Message }) {
   reactionPopupReactions.value = payload.reactions;
   const raw = (payload.message as any).reactionDetails ?? [];
@@ -1151,6 +1151,7 @@ function onOpenReactionDetail(payload: { reactions: any[]; message: Message }) {
     emoji: r.emoji,
     source: r.reactorSource || r.source,
     avatarUrl: r.reactorAvatar || null,
+    createdAt: r.createdAt || null,
   }));
   reactionPopupOpen.value = true;
 }
