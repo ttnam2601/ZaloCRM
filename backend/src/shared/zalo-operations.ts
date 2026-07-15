@@ -223,7 +223,7 @@ async function exec<T>(opts: ExecOptions, fn: (api: any) => Promise<T>): Promise
   throw new ZaloOpError(
     `${operation} failed: ${msg}${zaloCode != null ? ` [zalo:${zaloCode}]` : ''}`,
     'API_ERROR',
-    500,
+    400,
   );
 }
 

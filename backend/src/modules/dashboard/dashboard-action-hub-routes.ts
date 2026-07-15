@@ -31,9 +31,10 @@ import { userHasGrant } from '../rbac/permission-group-service.js';
 function todayRangeVN() {
   const now = new Date();
   const vnOffset = 7 * 60 * 60 * 1000;
-  const vnNow = new Date(now.getTime() + vnOffset);
-  const todayVN = new Date(vnNow.getFullYear(), vnNow.getMonth(), vnNow.getDate());
-  const today = new Date(todayVN.getTime() - vnOffset);
+  const vnTime = now.getTime() + vnOffset;
+  const vnDateObj = new Date(vnTime);
+  const todayVNUTC = Date.UTC(vnDateObj.getUTCFullYear(), vnDateObj.getUTCMonth(), vnDateObj.getUTCDate());
+  const today = new Date(todayVNUTC - vnOffset);
   const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
   return { today, tomorrow };
 }
@@ -41,9 +42,10 @@ function todayRangeVN() {
 function monthStartVN() {
   const now = new Date();
   const vnOffset = 7 * 60 * 60 * 1000;
-  const vnNow = new Date(now.getTime() + vnOffset);
-  const monthVN = new Date(vnNow.getFullYear(), vnNow.getMonth(), 1);
-  return new Date(monthVN.getTime() - vnOffset);
+  const vnTime = now.getTime() + vnOffset;
+  const vnDateObj = new Date(vnTime);
+  const monthVNUTC = Date.UTC(vnDateObj.getUTCFullYear(), vnDateObj.getUTCMonth(), 1);
+  return new Date(monthVNUTC - vnOffset);
 }
 
 /**

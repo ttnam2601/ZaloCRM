@@ -4,7 +4,7 @@
  */
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '../../shared/database/prisma-client.js';
-import { getCachedMemberProfile } from '../../shared/zalo-operations.js';
+import { getCachedMemberProfile, ZaloOpError } from '../../shared/zalo-operations.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { requireZaloAccess } from '../zalo/zalo-access-middleware.js';
 import { zaloPool } from '../zalo/zalo-pool.js';
@@ -1231,9 +1231,12 @@ export async function chatRoutes(app: FastifyInstance) {
       });
 
       return safeMessage;
-    } catch (err) {
+    } catch (err: any) {
       logger.error('[chat] Send message error:', err);
-      return reply.status(500).send({ error: 'Failed to send message' });
+      if (err instanceof ZaloOpError) {
+        return reply.status(err.statusCode).send({ error: err.message });
+      }
+      return reply.status(400).send({ error: err?.message || 'Failed to send message' });
     }
   });
 

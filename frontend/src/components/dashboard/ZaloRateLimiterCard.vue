@@ -55,6 +55,7 @@
                       :color="barColor(row.percent)"
                       height="8"
                       rounded
+                      bg-color="grey-lighten-3"
                       class="flex-grow-1"
                     />
                     <span class="ml-2 font-mono text-caption text-right" style="min-width: 32px">
@@ -152,7 +153,7 @@ async function fetchRates() {
 function barColor(percent: number): string {
   if (percent >= 90) return '#dc2626'; // Red (Danger)
   if (percent >= 70) return '#ea580c'; // Orange (Warning)
-  return '#C2410C'; // Terracotta theme accent (Primary)
+  return 'success'; // Green (Safe)
 }
 
 function usageClass(percent: number): string {
