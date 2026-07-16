@@ -61,7 +61,7 @@ function buildReplyQuote(message: {
     content: quoteContent,
     msgType: mapReplyMsgType(message.contentType),
     propertyExt: {},
-    uidFrom: message.senderUid,
+    uidFrom: message.senderUid.split('_')[0],
     msgId: message.zaloMsgId,
     cliMsgId: message.zaloMsgId,
     ts: String(message.sentAt.getTime()),
